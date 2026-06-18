@@ -2,7 +2,8 @@
   import ChatPanel from "$lib/components/ChatPanel.svelte";
   import WorkflowPanel, { type Step } from "$lib/components/WorkflowPanel.svelte";
   import { createMockClient } from "$lib/client";
-  import type { ServerEvent, Session } from "$lib/protocol";
+  import { createWsClient } from "$lib/wsClient";
+  import type { ServerEvent, Session, VeilensClient } from "$lib/protocol";
 
   interface ChatMessage {
     id: string;
@@ -10,7 +11,14 @@
     text: string;
   }
 
-  const client = createMockClient();
+  // Use the real WebSocket transport when a server is given (?server=ws://host:10000/chat);
+  // otherwise fall back to the in-browser mock so the UI runs with no backend.
+  function pickClient(): VeilensClient {
+    if (typeof location === "undefined") return createMockClient();
+    const url = new URLSearchParams(location.search).get("server");
+    return url ? createWsClient(url) : createMockClient();
+  }
+  const client = pickClient();
 
   let messages = $state<ChatMessage[]>([]);
   let steps = $state<Step[]>([]);
