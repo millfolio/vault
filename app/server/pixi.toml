@@ -35,3 +35,7 @@ flare-ffi = "bash -c 'source ../../flare/flare/tls/ffi/build.sh; source ../../fl
 # extra shims (zlib/lancedb) are NOT needed here: that program is compiled + run
 # as a separate subprocess at request time, not linked into this binary.
 build = { cmd = "mkdir -p build && mojo build src/server.mojo -I ../../headgate/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -o build/veilens-server", depends-on = ["flare-ffi"] }
+
+# The streaming WebSocket endpoint (flare.ws). Same -I set as `build`. See
+# src/ws_server.mojo + STREAMING.md.
+build-ws = { cmd = "mkdir -p build && mojo build src/ws_server.mojo -I ../../headgate/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -o build/veilens-ws", depends-on = ["flare-ffi"] }

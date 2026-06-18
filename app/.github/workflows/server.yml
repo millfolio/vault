@@ -41,6 +41,8 @@ jobs:
         with:
           manifest-path: app/server/pixi.toml
 
-      - name: Build veilens-server
+      - name: Build veilens-server + veilens-ws
         working-directory: app/server
-        run: pixi run build
+        run: |
+          pixi run build
+          pixi run build-ws
