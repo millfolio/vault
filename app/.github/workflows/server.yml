@@ -1,0 +1,46 @@
+name: server
+
+# Compiles the Mojo server against the headgate orchestrator + flare/json/jinja2,
+# checked out as siblings (the layout the -I paths assume). Modeled on headgate's
+# headgate-zip.yml build recipe. Path-filtered to server changes.
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/server.yml"]
+  pull_request:
+    paths: ["server/**", ".github/workflows/server.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14 # Apple Silicon — matches the osx-arm64 toolchain pin
+    steps:
+      # Sibling layout: app/ alongside headgate/ flare/ json/ jinja2.mojo/, so
+      # from app/server the includes resolve to ../../<repo>.
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          repository: veilensapp/headgate
+          path: headgate
+      - uses: actions/checkout@v4
+        with:
+          repository: millrace/flare
+          path: flare
+      - uses: actions/checkout@v4
+        with:
+          repository: millrace/json
+          path: json
+      - uses: actions/checkout@v4
+        with:
+          repository: millrace/jinja2.mojo
+          path: jinja2.mojo
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          manifest-path: app/server/pixi.toml
+
+      - name: Build veilens-server
+        working-directory: app/server
+        run: pixi run build

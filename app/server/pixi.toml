@@ -1,0 +1,37 @@
+[workspace]
+name = "veilens-server"
+version = "0.0.1"
+authors = ["Marius S <marius@seritan.net>"]
+description = "Veilens app backend — HTTP server over the headgate vault orchestrator."
+# Same org nightly as headgate/flare/json/jinja2.mojo, so the cross-repo `-I`
+# includes resolve against one toolchain.
+channels = [
+    "https://conda.modular.com/max-nightly",
+    "conda-forge",
+]
+platforms = ["osx-arm64"]
+
+[dependencies]
+mojo = "==1.0.0b3.dev2026061206"
+# flare's runtime deps — needed to build flare's FFI shims into this env (the
+# `flare-ffi` task) so flare's HTTP/TLS client works when consumed via -I flare.
+openssl          = ">=3.6.1,<4"
+ca-certificates  = ">=2025.1.31"
+zlib             = ">=1.3.1,<2"
+libbrotlicommon  = ">=1,<2"
+libbrotlidec     = ">=1,<2"
+libbrotlienc     = ">=1,<2"
+
+[tasks]
+# Build flare's FFI shims into THIS env's $CONDA_PREFIX/lib so flare's HTTP/TLS
+# client works when linked via -I flare. Repos are laid out as siblings of the
+# `app/` checkout, so flare is two levels up (app/server/../../flare). Mirrors
+# headgate's `flare-ffi` task.
+flare-ffi = "bash -c 'source ../../flare/flare/tls/ffi/build.sh; source ../../flare/flare/http/ffi/build.sh'"
+
+# Compile the server. Imports the headgate orchestrator (wiring/orchestrator/
+# settings/vaultcfg) via -I ../../headgate/src, plus flare/json/jinja2 — the same
+# -I set as headgate's `build-server`, plus headgate/src. The vault gen program's
+# extra shims (zlib/lancedb) are NOT needed here: that program is compiled + run
+# as a separate subprocess at request time, not linked into this binary.
+build = { cmd = "mkdir -p build && mojo build src/server.mojo -I ../../headgate/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -o build/veilens-server", depends-on = ["flare-ffi"] }
