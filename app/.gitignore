@@ -1,0 +1,28 @@
+# node / web
+node_modules/
+.svelte-kit/
+build/
+dist/
+.vite/
+*.tsbuildinfo
+
+# mojo / server
+.pixi/
+server/build/
+
+# ios
+ios/**/build/
+ios/**/DerivedData/
+*.xcuserstate
+ios/**/.swiftpm/
+
+# android
+android/**/build/
+android/.gradle/
+android/local.properties
+
+# env / os
+.env
+.env.*
+!.env.example
+.DS_Store
