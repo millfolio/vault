@@ -25,6 +25,7 @@ and a streaming/duplex transport, so it's intentionally NOT here yet.
 """
 
 from std.memory import alloc
+from std.os import getenv
 
 from flare.prelude import *
 from flare.http import Handler
@@ -81,6 +82,13 @@ def _extract_message(body: String) -> String:
         return j["message"].string_value()
     except:
         return String("")
+
+
+def _web_root() -> String:
+    """The dir holding the built UI. $VEILENS_WEB_DIR (an ABSOLUTE path set by the
+    launcher) so serving never depends on the process's cwd; falls back to the
+    cwd-relative web/dist for `pixi run`/dev."""
+    return getenv("VEILENS_WEB_DIR", "web/dist")
 
 
 def _content_type(path: String) -> String:
@@ -142,12 +150,13 @@ struct Api(Handler, Copyable, Movable):
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
+            var root = _web_root()
             if path == "/" or path == "/index.html":
-                return _serve_file("web/dist/index.html", "text/html; charset=utf-8")
+                return _serve_file(root + "/index.html", "text/html; charset=utf-8")
             # Any other path is a built asset — SvelteKit emits /_app/immutable/…
-            # (JS/CSS), /_app/version.json, /favicon.svg, etc. Serve it from
-            # web/dist (404 only if it genuinely isn't there).
-            return _serve_file("web/dist" + path, _content_type(path))
+            # (JS/CSS), /_app/version.json, /favicon.svg, etc. Serve it from the web
+            # root (404 only if it genuinely isn't there).
+            return _serve_file(root + path, _content_type(path))
         return _cors(not_found(path))
 
     def handle_chat(self, req: Request) raises -> Response:
