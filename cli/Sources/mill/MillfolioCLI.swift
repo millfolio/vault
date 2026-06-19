@@ -1,50 +1,50 @@
 import Foundation
 import Darwin
 import ArgumentParser
-import VeilensCore
+import MillfolioCore
 
-// The `veilens` CLI — the personal-data-vault umbrella. It drives the same engine
+// The `millfolio` CLI — the personal-data-vault umbrella. It drives the same engine
 // lifecycle as the millrace app's Bootstrapper, into the shared install tree
 // (~/Library/Application Support/Millrace) + the me.millrace.server launchd job, so
-// `veilens` and the `millrace` CLI interoperate on one inference server. `install`
-// provisions the server + privacy_box + the veilens vault; `start` brings them all up
+// `millfolio` and the `millrace` CLI interoperate on one inference server. `install`
+// provisions the server + privacy_box + the millfolio vault; `start` brings them all up
 // (the vault site at http://localhost:10000); `stop` tears them down.
 
 @main
-struct Veilens: AsyncParsableCommand {
+struct Millfolio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "veilens",
-        abstract: "The veilens personal data vault — install, start, stop, index, and ask.",
+        commandName: "mill",
+        abstract: "The millfolio personal data vault — install, start, stop, index, and ask.",
         subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self]
     )
 }
 
-// ── veilens install ──────────────────────────────────────────────────────────
+// ── mill install ──────────────────────────────────────────────────────────
 struct Install: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Install the millrace inference server, privacy_box, and the veilens local site.",
+        abstract: "Install the millrace inference server, privacy_box, and the millfolio local site.",
         discussion: """
         Idempotent — reuses anything already installed. Provisions the combined \
         inference server (chat + embeddings, including both models' weights), the \
-        privacy_box privacy harness + its vault web site, and the veilens vault tools.
+        privacy_box privacy harness + its vault web site, and the millfolio vault tools.
         """)
     @MainActor func run() async throws {
         let boot = streaming()
         try await boot.installVault()
-        print("✓ veilens installed (inference server + privacy_box + veilens site)")
+        print("✓ millfolio installed (inference server + privacy_box + millfolio site)")
     }
 }
 
-// ── veilens update ─────────────────────────────────────────────────────────────
+// ── mill update ─────────────────────────────────────────────────────────────
 struct Update: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Update veilens and its components to the latest release.",
+        abstract: "Update millfolio and its components to the latest release.",
         discussion: """
-        Upgrades the `veilens` CLI via Homebrew, then refreshes the downloadable \
-        components (inference-server engine, privacy_box, veilens engine) to their \
+        Upgrades the `millfolio` CLI via Homebrew, then refreshes the downloadable \
+        components (inference-server engine, privacy_box, millfolio engine) to their \
         latest releases. The Mojo toolchains and the model weights are kept, so it \
         only re-fetches + rebuilds the source bundles. Progress is logged to \
-        ~/Library/Logs/Veilens/<date>.log.
+        ~/Library/Logs/Millfolio/<date>.log.
         """)
     @Flag(name: .long, help: "Refresh the components only; don't upgrade the CLI via Homebrew.")
     var skipCli = false
@@ -57,14 +57,14 @@ struct Update: AsyncParsableCommand {
         try await boot.selfUpdate(updateCLI: !skipCli)
         print("\nVersions after update:")
         printVersions(boot.componentVersions())
-        print("✓ veilens up to date")
+        print("✓ millfolio up to date")
     }
 }
 
-// ── veilens version ────────────────────────────────────────────────────────────
+// ── mill version ────────────────────────────────────────────────────────────
 struct Version: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Show the installed versions of veilens and its components.")
+        abstract: "Show the installed versions of millfolio and its components.")
     @MainActor func run() async throws {
         printVersions(Bootstrapper().componentVersions())
     }
@@ -77,28 +77,28 @@ struct Version: AsyncParsableCommand {
     }
 }
 
-// ── veilens start ────────────────────────────────────────────────────────────
+// ── mill start ────────────────────────────────────────────────────────────
 struct Start: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Start everything — the inference server and the veilens app at http://localhost:10000.",
+        abstract: "Start everything — the inference server and the millfolio app at http://localhost:10000.",
         discussion: """
         Ensures the combined inference server is running (launchd), then starts the \
-        veilens app servers (UI on :10000, streaming on :10001) in the background — \
+        millfolio app servers (UI on :10000, streaming on :10001) in the background — \
         no Terminal — and opens http://localhost:10000. Server logs:
-        ~/Library/Logs/Veilens/server.log.
+        ~/Library/Logs/Millfolio/server.log.
         """)
     @MainActor func run() async throws {
         let boot = Bootstrapper()
         try await boot.startVaultChat(vaultDir: boot.ensureVaultDir())
-        print("✓ veilens running in the background — http://localhost:10000")
-        print("  logs: \(boot.veilensLogDir.appendingPathComponent("server.log").path)")
+        print("✓ millfolio running in the background — http://localhost:10000")
+        print("  logs: \(boot.millfolioLogDir.appendingPathComponent("server.log").path)")
     }
 }
 
-// ── veilens stop ─────────────────────────────────────────────────────────────
+// ── mill stop ─────────────────────────────────────────────────────────────
 struct Stop: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Stop the inference server and the veilens local site.")
+        abstract: "Stop the inference server and the millfolio local site.")
     @MainActor func run() async throws {
         let boot = Bootstrapper()
         boot.refreshServerRunning()
@@ -108,11 +108,11 @@ struct Stop: AsyncParsableCommand {
         let stoppedApp = boot.stopAppServer()
         let stoppedWeb = boot.stopPrivacyBoxWeb()
         print(stoppedApp || stoppedWeb
-              ? "✓ veilens app stopped" : "• veilens app was not running")
+              ? "✓ millfolio app stopped" : "• millfolio app was not running")
     }
 }
 
-// ── veilens status ───────────────────────────────────────────────────────────
+// ── mill status ───────────────────────────────────────────────────────────
 struct Status: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Show what's installed.")
     @MainActor func run() async throws {
@@ -121,40 +121,40 @@ struct Status: AsyncParsableCommand {
         print("weights:    \(mark(boot.weightsPresent))")
         print("embeddings: \(mark(boot.embedWeightsPresent))")
         print("privacy_box:   \(mark(boot.isPrivacyBoxInstalled))")
-        print("veilens:    \(mark(boot.isVeilensInstalled))")
+        print("millfolio:    \(mark(boot.isMillfolioInstalled))")
         print("app server: \(mark(boot.isAppServerInstalled))")
     }
 }
 
-// ── veilens index <folder> ───────────────────────────────────────────────────
+// ── mill index <folder> ───────────────────────────────────────────────────
 struct Index: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Build the vault index over a folder (`veilens index <folder>`).",
+        abstract: "Build the vault index over a folder (`mill index <folder>`).",
         discussion: """
-        Forwards to the veilens binary's `index` command, which embeds every file's \
+        Forwards to the millfolio binary's `index` command, which embeds every file's \
         chunks via the combined inference server's /v1/embeddings and stores them in \
-        the on-device LanceDB index. Needs the server running (`veilens start`).
+        the on-device LanceDB index. Needs the server running (`mill start`).
         """)
     @Argument(help: "The folder to index (your vault dir).")
     var folder: String
 
     @MainActor func run() async throws {
         let boot = Bootstrapper()
-        // Run the veilens launcher (`index <folder>`) as a logged child so its
-        // output — and any failure — is captured in the veilens log.
+        // Run the millfolio launcher (`index <folder>`) as a logged child so its
+        // output — and any failure — is captured in the millfolio log.
         let code = try boot.runVaultIndex(folder: folder)
-        try finish(code, boot, "veilens index")
+        try finish(code, boot, "mill index")
     }
 }
 
-// ── veilens ask "<question>" ─────────────────────────────────────────────────
+// ── mill ask "<question>" ─────────────────────────────────────────────────
 struct Ask: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "One-shot vault answer (`veilens ask \"<question>\"`).",
+        abstract: "One-shot vault answer (`mill ask \"<question>\"`).",
         discussion: """
         Runs the privacy_box vault loop over your vault dir: a model writes a Mojo \
-        program that uses the veilens vault tools over your real data locally, and \
-        the answer is printed here. The vault dir is $VEILENS_VAULT, else ~/.config/veilens/vault. \
+        program that uses the millfolio vault tools over your real data locally, and \
+        the answer is printed here. The vault dir is $VEILENS_VAULT, else ~/.config/millfolio/vault. \
         Needs the inference server running.
         """)
     @Argument(parsing: .remaining, help: "The question to ask your vault.")
@@ -162,7 +162,7 @@ struct Ask: AsyncParsableCommand {
 
     @MainActor func run() async throws {
         guard !question.isEmpty else {
-            throw BootstrapError.step("veilens ask", "no question given")
+            throw BootstrapError.step("mill ask", "no question given")
         }
         let boot = streaming()   // stream progress to the console
         let q = question.joined(separator: " ")
@@ -174,7 +174,7 @@ struct Ask: AsyncParsableCommand {
         // Run the privacy_box vault loop (`vault "<q>" <dir>`) as a logged child so its
         // streamed progress + the answer (and any failure) surface here and in the log.
         let code = try boot.runVaultAsk(question: q, vaultDir: dir)
-        try finish(code, boot, "veilens ask")
+        try finish(code, boot, "mill ask")
     }
 }
 
@@ -183,7 +183,7 @@ struct Ask: AsyncParsableCommand {
 @MainActor private func finish(_ code: Int32, _ boot: Bootstrapper, _ what: String) throws {
     if code != 0 {
         FileHandle.standardError.write(Data(
-            "\n\(what) failed (exit \(code)). Diagnostics: \(boot.veilensLogURL.path)\n".utf8))
+            "\n\(what) failed (exit \(code)). Diagnostics: \(boot.millfolioLogURL.path)\n".utf8))
     }
     throw ExitCode(code)
 }

@@ -64,7 +64,7 @@ public final class Bootstrapper: ObservableObject {
     public static let model = "Qwen/Qwen2.5-3B-Instruct"
     public static let modelSlug = "Qwen--Qwen2.5-3B-Instruct"
     /// SECONDARY embedding model. The combined server resolves this from the HF
-    /// cache to serve /v1/embeddings (else that endpoint 503s). veilens's indexer
+    /// cache to serve /v1/embeddings (else that endpoint 503s). millfolio's indexer
     /// + vault search hit it, so the installer fetches its weights too — via the
     /// same native-Mojo downloader, another HF id. Single-file safetensors (small).
     public static let embedModel = "Qwen/Qwen3-Embedding-0.6B"
@@ -89,7 +89,7 @@ public final class Bootstrapper: ObservableObject {
     // opens a ready-to-use Terminal rather than launching a server.
     public static let privacy_boxMojoVersion = "1.0.0b3.dev2026061206"
     private let privacy_boxZipURL =
-        URL(string: "https://github.com/veilensapp/privacy_box/releases/latest/download/privacy_box.zip")!
+        URL(string: "https://github.com/millfolioapp/privacy_box/releases/latest/download/privacy_box.zip")!
     private var privacy_boxMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
@@ -104,34 +104,34 @@ public final class Bootstrapper: ObservableObject {
     /// The built privacy_box binary is present.
     public var isPrivacyBoxInstalled: Bool { FileManager.default.isExecutableFile(atPath: privacy_boxBin.path) }
 
-    // ── veilens (personal data vault) ───────────────────────────────────────────
-    // veilens is a one-shot vault CLI built on the SAME Mojo nightly as privacy_box.
+    // ── millfolio (personal data vault) ───────────────────────────────────────────
+    // millfolio is a one-shot vault CLI built on the SAME Mojo nightly as privacy_box.
     // Its bundle vendors the toolbox (flare/json + the LanceDB binding + pdftotext/
     // zlib readers) + prebuilt FFI shims, so the on-device build is
-    // `mojo build src/veilens.mojo -I ../flare -I … ` then installVeilensShims().
-    private let veilensZipURL =
-        URL(string: "https://github.com/veilensapp/veilens/releases/latest/download/veilens.zip")!
-    private var veilensMojoCompilerURL: URL {
+    // `mojo build src/millfolio.mojo -I ../flare -I … ` then installMillfolioShims().
+    private let millfolioZipURL =
+        URL(string: "https://github.com/millfolioapp/millfolio/releases/latest/download/millfolio.zip")!
+    private var millfolioMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
-    private var veilensMojoPythonURL: URL {
+    private var millfolioMojoPythonURL: URL {
         URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
-    private var veilensMojoPrefix: URL { support.appendingPathComponent("veilens-mojo", isDirectory: true) }
-    private var veilensRoot: URL { support.appendingPathComponent("veilens-engine", isDirectory: true) }
-    /// veilens checkout inside the unpacked bundle.
-    private var veilensDir: URL { veilensRoot.appendingPathComponent("veilens", isDirectory: true) }
-    private var veilensBin: URL { veilensDir.appendingPathComponent("build/veilens") }
-    /// The built veilens binary is present.
-    public var isVeilensInstalled: Bool { FileManager.default.isExecutableFile(atPath: veilensBin.path) }
+    private var millfolioMojoPrefix: URL { support.appendingPathComponent("millfolio-mojo", isDirectory: true) }
+    private var millfolioRoot: URL { support.appendingPathComponent("millfolio-engine", isDirectory: true) }
+    /// millfolio checkout inside the unpacked bundle.
+    private var millfolioDir: URL { millfolioRoot.appendingPathComponent("millfolio", isDirectory: true) }
+    private var millfolioBin: URL { millfolioDir.appendingPathComponent("build/millfolio") }
+    /// The built millfolio binary is present.
+    public var isMillfolioInstalled: Bool { FileManager.default.isExecutableFile(atPath: millfolioBin.path) }
 
-    // ── app server (the streaming WS backend, from veilensapp/app) ──────────────
+    // ── app server (the streaming WS backend, from millfolioapp/app) ──────────────
     // Built ON-DEVICE against the privacy_box engine tree, reusing privacy_box's Mojo
     // toolchain + flare shims — so no new toolchain. See app/server/CUTOVER.md.
     private let appZipURL =
-        URL(string: "https://github.com/veilensapp/app/releases/latest/download/veilens-app.zip")!
+        URL(string: "https://github.com/millfolioapp/app/releases/latest/download/millfolio-app.zip")!
     private var appRoot: URL { support.appendingPathComponent("app", isDirectory: true) }
-    private var appWsBin: URL { appRoot.appendingPathComponent("build/veilens-ws") }
+    private var appWsBin: URL { appRoot.appendingPathComponent("build/millfolio-ws") }
     /// The built streaming WS server is present.
     public var isAppServerInstalled: Bool { FileManager.default.isExecutableFile(atPath: appWsBin.path) }
 
@@ -209,7 +209,7 @@ public final class Bootstrapper: ObservableObject {
     }
     /// The embedding model's weights are fully downloaded (refs/main is the
     /// downloader's last write). When present, the combined server serves
-    /// /v1/embeddings (so veilens index/search work with no manual download).
+    /// /v1/embeddings (so mill index/search work with no manual download).
     public var embedWeightsPresent: Bool {
         FileManager.default.fileExists(
             atPath: hfHome.appendingPathComponent("hub/models--\(Self.embedModelSlug)/refs/main").path)
@@ -253,33 +253,33 @@ public final class Bootstrapper: ObservableObject {
         NSWorkspace.shared.open(ensureLog())
     }
 
-    // ── veilens diagnostic log (~/Library/Logs/Veilens/<date>.log) ──────────────
+    // ── millfolio diagnostic log (~/Library/Logs/Millfolio/<date>.log) ──────────────
     // Separate from Millrace.log: a per-day, user-facing diagnostic log for the
-    // `veilens` CLI itself (the ask/index runs + update), in the conventional
+    // `millfolio` CLI itself (the ask/index runs + update), in the conventional
     // macOS ~/Library/Logs location so it's easy to find and attach to a report.
-    public var veilensLogDir: URL {
+    public var millfolioLogDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Veilens", isDirectory: true)
+            .appendingPathComponent("Library/Logs/Millfolio", isDirectory: true)
     }
-    /// Today's log file, e.g. ~/Library/Logs/Veilens/2026-06-17.log.
-    public var veilensLogURL: URL {
-        veilensLogDir.appendingPathComponent("\(Self.day()).log")
+    /// Today's log file, e.g. ~/Library/Logs/Millfolio/2026-06-17.log.
+    public var millfolioLogURL: URL {
+        millfolioLogDir.appendingPathComponent("\(Self.day()).log")
     }
 
     @discardableResult
-    private func ensureVeilensLog() -> URL {
+    private func ensureMillfolioLog() -> URL {
         let fm = FileManager.default
-        try? fm.createDirectory(at: veilensLogDir, withIntermediateDirectories: true)
-        if !fm.fileExists(atPath: veilensLogURL.path) {
-            fm.createFile(atPath: veilensLogURL.path, contents: nil)
+        try? fm.createDirectory(at: millfolioLogDir, withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: millfolioLogURL.path) {
+            fm.createFile(atPath: millfolioLogURL.path, contents: nil)
         }
-        return veilensLogURL
+        return millfolioLogURL
     }
 
-    /// Append a line to today's veilens log (best-effort; never throws).
+    /// Append a line to today's millfolio log (best-effort; never throws).
     public func vlog(_ text: String) {
-        ensureVeilensLog()
-        guard let fh = try? FileHandle(forWritingTo: veilensLogURL) else { return }
+        ensureMillfolioLog()
+        guard let fh = try? FileHandle(forWritingTo: millfolioLogURL) else { return }
         defer { try? fh.close() }
         fh.seekToEndOfFile()
         if let d = (text + "\n").data(using: .utf8) { fh.write(d) }
@@ -376,7 +376,7 @@ public final class Bootstrapper: ObservableObject {
             try downloadWeights(Self.model)
         }
         // The combined server resolves the embedding model from the HF cache to
-        // serve /v1/embeddings (veilens's indexer + vault search use it). Fetch its
+        // serve /v1/embeddings (millfolio's indexer + vault search use it). Fetch its
         // weights with the same native downloader so the vault works out of the box.
         if !embedWeightsPresent {
             set("Downloading embedding model weights (\(Self.embedModel))…")
@@ -750,7 +750,7 @@ public final class Bootstrapper: ObservableObject {
         //    unlike the always-serving server.
         try installPrivacyBoxShims()
         ensureConfig(at: privacy_boxConfigURL, Self.privacy_boxConfigDefault)
-        await recordLatest("privacy_box", repo: "veilensapp/privacy_box")
+        await recordLatest("privacy_box", repo: "millfolioapp/privacy_box")
     }
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the privacy_box
@@ -808,11 +808,11 @@ public final class Bootstrapper: ObservableObject {
         export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
         export MODULAR_HOME='\(modularHome)'
         export PATH='\(mojoBin)':"$PATH"
-        # The vault path shells `<veilens>/build/veilens manifest`, compiles the
-        # generated program with `-I <veilens>/src` + its vendored siblings, and
-        # reads the ~/.config/veilens index. privacy_box defaults to the dev sibling
-        # layout (../veilens); point it at the installed veilens checkout instead.
-        export PRIVACY_BOX_VEILENS='\(veilensDir.path)'
+        # The vault path shells `<millfolio>/build/mill manifest`, compiles the
+        # generated program with `-I <millfolio>/src` + its vendored siblings, and
+        # reads the ~/.config/mill index. privacy_box defaults to the dev sibling
+        # layout (../millfolio); point it at the installed millfolio checkout instead.
+        export PRIVACY_BOX_VEILENS='\(millfolioDir.path)'
         # flare's bundled OpenSSL has a CI-baked CA path; point it at the system
         # bundle so HTTPS to the Anthropic API verifies (else CertificateUntrusted).
         [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
@@ -888,86 +888,86 @@ public final class Bootstrapper: ObservableObject {
         return hit
     }
 
-    // ── veilens: install ────────────────────────────────────────────────────────
+    // ── millfolio: install ────────────────────────────────────────────────────────
     /// Menu-app entry point: fire-and-forget, drives `phase`.
-    public func installVeilens() {
+    public func installMillfolio() {
         guard !isBusy else { return }
         phase = .running("Starting…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            do { try await self.installVeilensEngine(); await self.set(done: true) }
+            do { try await self.installMillfolioEngine(); await self.set(done: true) }
             catch { await self.set(failed: humanError(error)) }
         }
     }
 
-    /// Download veilens's Mojo toolchain + source bundle and build it. Same nightly
+    /// Download millfolio's Mojo toolchain + source bundle and build it. Same nightly
     /// as privacy_box; the bundle vendors flare/json + the LanceDB binding + pdftotext/
     /// zlib + prebuilt FFI shims, so the build uses `-I` includes + installs shims.
-    public func installVeilensEngine() async throws {
+    public func installMillfolioEngine() async throws {
         // Idempotent: skip the whole download+build if the binary is already there.
-        if isVeilensInstalled
-            && !mojoToolchainStale(veilensMojoPrefix, Self.privacy_boxMojoVersion) {
-            set("veilens already installed — skipping")
+        if isMillfolioInstalled
+            && !mojoToolchainStale(millfolioMojoPrefix, Self.privacy_boxMojoVersion) {
+            set("millfolio already installed — skipping")
             return
         }
         let fm = FileManager.default
-        for d in [support, veilensMojoPrefix, veilensRoot, cacheDir] {
+        for d in [support, millfolioMojoPrefix, millfolioRoot, cacheDir] {
             try fm.createDirectory(at: d, withIntermediateDirectories: true)
         }
-        logHeader("Install veilens")
+        logHeader("Install millfolio")
 
         // 1. Mojo toolchain (same nightly as privacy_box).
-        if mojoToolchainStale(veilensMojoPrefix, Self.privacy_boxMojoVersion) {
-            set("Downloading Mojo compiler for veilens (~70 MB)…")
-            try? fm.removeItem(at: veilensMojoPrefix)   // clear any stale nightly
-            try fm.createDirectory(at: veilensMojoPrefix, withIntermediateDirectories: true)
-            let compiler = try await download(veilensMojoCompilerURL, name: "veilens-mojo-compiler.conda")
+        if mojoToolchainStale(millfolioMojoPrefix, Self.privacy_boxMojoVersion) {
+            set("Downloading Mojo compiler for millfolio (~70 MB)…")
+            try? fm.removeItem(at: millfolioMojoPrefix)   // clear any stale nightly
+            try fm.createDirectory(at: millfolioMojoPrefix, withIntermediateDirectories: true)
+            let compiler = try await download(millfolioMojoCompilerURL, name: "millfolio-mojo-compiler.conda")
             set("Extracting Mojo…")
-            try extractConda(compiler, into: veilensMojoPrefix)
-            let py = try await download(veilensMojoPythonURL, name: "veilens-mojo-python.conda")
-            try extractConda(py, into: veilensMojoPrefix)
-            recordMojoVersion(veilensMojoPrefix, Self.privacy_boxMojoVersion)
+            try extractConda(compiler, into: millfolioMojoPrefix)
+            let py = try await download(millfolioMojoPythonURL, name: "millfolio-mojo-python.conda")
+            try extractConda(py, into: millfolioMojoPrefix)
+            recordMojoVersion(millfolioMojoPrefix, Self.privacy_boxMojoVersion)
         }
-        try relocateMojoPrefix(veilensMojoPrefix)
+        try relocateMojoPrefix(millfolioMojoPrefix)
 
-        // 2. veilens source bundle (just source — no FFI/sibling deps yet).
-        set("Downloading veilens source…")
-        let zip = try await download(veilensZipURL, name: "veilens.zip")
-        set("Unpacking veilens…")
-        try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", veilensRoot.path])
-        guard fm.fileExists(atPath: veilensDir.appendingPathComponent("src/veilens.mojo").path) else {
-            throw BootstrapError.step("unpack", "veilens zip missing veilens/src/veilens.mojo")
+        // 2. millfolio source bundle (just source — no FFI/sibling deps yet).
+        set("Downloading millfolio source…")
+        let zip = try await download(millfolioZipURL, name: "millfolio.zip")
+        set("Unpacking millfolio…")
+        try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", millfolioRoot.path])
+        guard fm.fileExists(atPath: millfolioDir.appendingPathComponent("src/millfolio.mojo").path) else {
+            throw BootstrapError.step("unpack", "millfolio zip missing millfolio/src/millfolio.mojo")
         }
 
-        // 3. Build veilens against its vendored siblings (flare/json + the LanceDB
-        //    binding + pdftotext/zlib readers), all bundled by package_veilens.sh.
+        // 3. Build millfolio against its vendored siblings (flare/json + the LanceDB
+        //    binding + pdftotext/zlib readers), all bundled by package_millfolio.sh.
         set("Locating Python…")
         let python = try findPython()
-        set("Building veilens (first run, ~1 min)…")
-        let mojo = veilensMojoPrefix.appendingPathComponent("bin/mojo").path
-        try run(mojo, ["build", "src/veilens.mojo",
+        set("Building millfolio (first run, ~1 min)…")
+        let mojo = millfolioMojoPrefix.appendingPathComponent("bin/mojo").path
+        try run(mojo, ["build", "src/millfolio.mojo",
                        "-I", "../flare", "-I", "../json", "-I", "../lancedb.mojo/src",
                        "-I", "../pdftotext.mojo/src", "-I", "../zlib.mojo/src",
                        "-I", "../csv.mojo/src",
-                       "-o", "build/veilens"],
-                cwd: veilensDir, env: veilensMojoEnv(python: python))
+                       "-o", "build/millfolio"],
+                cwd: millfolioDir, env: millfolioMojoEnv(python: python))
 
         // 4. Put the bundle's FFI shims (libzlibmojo / liblancedbmojo / libflare_*
         //    + their dylib deps) under the toolchain's lib/, where each binding's
-        //    `$CONDA_PREFIX/lib` lookup finds them at runtime (veilens runs WITH
-        //    CONDA_PREFIX set via run-veilens.sh).
-        try installVeilensShims()
-        await recordLatest("veilens", repo: "veilensapp/veilens")
+        //    `$CONDA_PREFIX/lib` lookup finds them at runtime (millfolio runs WITH
+        //    CONDA_PREFIX set via run-millfolio.sh).
+        try installMillfolioShims()
+        await recordLatest("millfolio", repo: "millfolioapp/millfolio")
     }
 
-    /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the veilens
+    /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the millfolio
     /// Mojo prefix's lib/, where flare/zlib/lancedb's `$CONDA_PREFIX/lib` lookup
     /// finds them. Mirrors installPrivacyBoxShims.
-    private func installVeilensShims() throws {
+    private func installMillfolioShims() throws {
         let fm = FileManager.default
-        let libDir = veilensMojoPrefix.appendingPathComponent("lib", isDirectory: true)
+        let libDir = millfolioMojoPrefix.appendingPathComponent("lib", isDirectory: true)
         try fm.createDirectory(at: libDir, withIntermediateDirectories: true)
-        let buildDir = veilensDir.appendingPathComponent("build", isDirectory: true)
+        let buildDir = millfolioDir.appendingPathComponent("build", isDirectory: true)
         for name in (try? fm.contentsOfDirectory(atPath: buildDir.path)) ?? []
         where name.hasSuffix(".so") || name.hasSuffix(".dylib") {
             let dst = libDir.appendingPathComponent(name)
@@ -977,13 +977,13 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// The vault program privacy_box compiles + runs executes under privacy_box's
-    /// CONDA_PREFIX (privacy_box-mojo), so the veilens vault FFI shims it dlopens
+    /// CONDA_PREFIX (privacy_box-mojo), so the millfolio vault FFI shims it dlopens
     /// (liblancedbmojo / libzlibmojo + their dylib deps) must live in
-    /// privacy_box-mojo/lib too. Copy the ones privacy_box lacks from the veilens
+    /// privacy_box-mojo/lib too. Copy the ones privacy_box lacks from the millfolio
     /// toolchain (same Mojo nightly → ABI-compatible). Best-effort; idempotent.
     public func linkVaultShims() {
         let fm = FileManager.default
-        let src = veilensMojoPrefix.appendingPathComponent("lib")
+        let src = millfolioMojoPrefix.appendingPathComponent("lib")
         let dst = privacy_boxMojoPrefix.appendingPathComponent("lib")
         guard fm.fileExists(atPath: src.path) else { return }
         try? fm.createDirectory(at: dst, withIntermediateDirectories: true)
@@ -996,9 +996,9 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// A fresh per-ask transcript path: /tmp/veilens/sessions/<timestamp>-<slug>.log.
+    /// A fresh per-ask transcript path: /tmp/millfolio/sessions/<timestamp>-<slug>.log.
     public func newSessionLog(for question: String) -> URL {
-        let dir = URL(fileURLWithPath: "/tmp/veilens/sessions", isDirectory: true)
+        let dir = URL(fileURLWithPath: "/tmp/millfolio/sessions", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
         let stamp = f.string(from: Date())
@@ -1013,44 +1013,44 @@ public final class Bootstrapper: ObservableObject {
         return dir.appendingPathComponent("\(stamp)-\(slug).log")
     }
 
-    /// `mojo build` env for the veilens toolchain prefix.
-    private func veilensMojoEnv(python: URL) -> [String: String] {
+    /// `mojo build` env for the millfolio toolchain prefix.
+    private func millfolioMojoEnv(python: URL) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        let extraPath = "\(python.deletingLastPathComponent().path):\(veilensMojoPrefix.appendingPathComponent("bin").path)"
+        let extraPath = "\(python.deletingLastPathComponent().path):\(millfolioMojoPrefix.appendingPathComponent("bin").path)"
         env["PATH"] = extraPath + ":" + (env["PATH"] ?? "/usr/bin:/bin")
-        env["CONDA_PREFIX"] = veilensMojoPrefix.path
-        env["MODULAR_HOME"] = veilensMojoPrefix.appendingPathComponent("share/max").path
+        env["CONDA_PREFIX"] = millfolioMojoPrefix.path
+        env["MODULAR_HOME"] = millfolioMojoPrefix.appendingPathComponent("share/max").path
         return env
     }
 
-    /// Download the veilens app bundle (veilensapp/app) and build the streaming WS
+    /// Download the millfolio app bundle (millfolioapp/app) and build the streaming WS
     /// server (+ the unary HTTP server) ON-DEVICE against the already-installed
     /// privacy_box engine tree — reusing privacy_box's Mojo toolchain + flare shims, so
     /// no new toolchain. Requires the privacy_box engine (installPrivacyBoxEngine).
     public func installAppServer() async throws {
         if isAppServerInstalled {
-            set("veilens app server already installed — skipping")
+            set("millfolio app server already installed — skipping")
             return
         }
         guard isPrivacyBoxInstalled else {
             throw BootstrapError.step("app server",
-                "privacy_box engine not installed — run `veilens install` first")
+                "privacy_box engine not installed — run `mill install` first")
         }
         let fm = FileManager.default
         try fm.createDirectory(at: appRoot, withIntermediateDirectories: true)
-        logHeader("Install veilens app server")
+        logHeader("Install millfolio app server")
 
-        set("Downloading veilens app bundle…")
-        let zip = try await download(appZipURL, name: "veilens-app.zip")
+        set("Downloading millfolio app bundle…")
+        let zip = try await download(appZipURL, name: "millfolio-app.zip")
         set("Unpacking app bundle…")
         try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", appRoot.path])
         guard fm.fileExists(atPath: appRoot.appendingPathComponent("src/ws_server.mojo").path) else {
-            throw BootstrapError.step("unpack", "veilens-app.zip missing src/ws_server.mojo")
+            throw BootstrapError.step("unpack", "millfolio-app.zip missing src/ws_server.mojo")
         }
 
         set("Locating Python…")
         let python = try findPython()
-        set("Building veilens app server (first run, ~1 min)…")
+        set("Building millfolio app server (first run, ~1 min)…")
         let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
         // Build against the installed privacy_box engine tree: the orchestrator
         // (privacy_box/src) + the vendored flare/json/jinja2 siblings under
@@ -1067,74 +1067,74 @@ public final class Bootstrapper: ObservableObject {
         // `mojo build -o build/…` won't create the output dir, and the app bundle
         // ships no build/ — make it (mirrors the pixi tasks' `mkdir -p build`).
         try fm.createDirectory(at: appRoot.appendingPathComponent("build"), withIntermediateDirectories: true)
-        try run(mojo, ["build", "src/ws_server.mojo"] + inc + ["-o", "build/veilens-ws"],
+        try run(mojo, ["build", "src/ws_server.mojo"] + inc + ["-o", "build/millfolio-ws"],
                 cwd: appRoot, env: env)
-        try run(mojo, ["build", "src/server.mojo"] + inc + ["-o", "build/veilens-server"],
+        try run(mojo, ["build", "src/server.mojo"] + inc + ["-o", "build/millfolio-server"],
                 cwd: appRoot, env: env)
-        await recordLatest("app", repo: "veilensapp/app")
+        await recordLatest("app", repo: "millfolioapp/app")
     }
 
-    // ── veilens: start (open a ready-to-use Terminal) ───────────────────────────
-    /// veilens is a one-shot vault CLI, so "start" opens a Terminal in the install
+    // ── millfolio: start (open a ready-to-use Terminal) ───────────────────────────
+    /// millfolio is a one-shot vault CLI, so "start" opens a Terminal in the install
     /// dir with the toolchain env pre-set — the user runs e.g.
-    /// `./build/veilens manifest ~/.config/veilens/vault`.
-    public func startVeilens() {
+    /// `./build/mill manifest ~/.config/millfolio/vault`.
+    public func startMillfolio() {
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            do { try await self.launchVeilensTerminal() }
-            catch { await self.set(failed: "veilens: \(humanError(error))") }
+            do { try await self.launchMillfolioTerminal() }
+            catch { await self.set(failed: "millfolio: \(humanError(error))") }
         }
     }
 
-    /// Write the `run-veilens.sh` launcher — sets the toolchain env, cd's to the
-    /// install dir, and execs the veilens binary forwarding any args (`"$@"`).
+    /// Write the `run-millfolio.sh` launcher — sets the toolchain env, cd's to the
+    /// install dir, and execs the millfolio binary forwarding any args (`"$@"`).
     /// Shared by the menu app (new Terminal) and the CLI (execs in the current
     /// terminal). Returns its path.
     @discardableResult
-    public func writeVeilensScript() throws -> URL {
-        let mojoBin = veilensMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = veilensMojoPrefix.appendingPathComponent("share/max").path
-        let script = support.appendingPathComponent("run-veilens.sh")
+    public func writeMillfolioScript() throws -> URL {
+        let mojoBin = millfolioMojoPrefix.appendingPathComponent("bin").path
+        let modularHome = millfolioMojoPrefix.appendingPathComponent("share/max").path
+        let script = support.appendingPathComponent("run-millfolio.sh")
         let body = """
         #!/bin/bash
-        cd '\(veilensDir.path)'
-        export CONDA_PREFIX='\(veilensMojoPrefix.path)'
+        cd '\(millfolioDir.path)'
+        export CONDA_PREFIX='\(millfolioMojoPrefix.path)'
         export MODULAR_HOME='\(modularHome)'
         export PATH='\(mojoBin)':"$PATH"
-        exec ./build/veilens "$@"
+        exec ./build/millfolio "$@"
         """
         try body.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
         return script
     }
 
-    public func launchVeilensTerminal() async throws {
-        let script = try writeVeilensScript()
+    public func launchMillfolioTerminal() async throws {
+        let script = try writeMillfolioScript()
         let cmd = "'\(script.path)'"
         try run("/usr/bin/osascript",
                 ["-e", "tell application \"Terminal\" to activate",
                  "-e", "tell application \"Terminal\" to do script \"\(cmd)\""])
     }
 
-    // ── veilens: the VAULT umbrella (millrace veilens …) ─────────────────────────
-    // veilens is the umbrella entry point for the personal-data-vault use case. It
+    // ── millfolio: the VAULT umbrella (millrace millfolio …) ─────────────────────────
+    // millfolio is the umbrella entry point for the personal-data-vault use case. It
     // composes the three engines: the combined inference server (chat + embeddings
     // — both models' weights), privacy_box (the harness + its vault web chat), and the
-    // veilens vault tools/indexer.
+    // millfolio vault tools/indexer.
 
     /// Resolve the vault dir: an explicit arg wins, then $VEILENS_VAULT, then
-    /// ~/.config/veilens/vault. The Swift side always passes this through to the
+    /// ~/.config/millfolio/vault. The Swift side always passes this through to the
     /// engines (VEILENS_VAULT env / explicit arg), so it's the canonical location.
     public func vaultDir(_ arg: String? = nil) -> String {
         if let arg, !arg.isEmpty { return arg }
         let env = ProcessInfo.processInfo.environment["VEILENS_VAULT"]
         if let env, !env.isEmpty { return env }
-        return dotConfig.appendingPathComponent("veilens/vault", isDirectory: true).path
+        return dotConfig.appendingPathComponent("millfolio/vault", isDirectory: true).path
     }
 
-    /// Resolve the vault dir AND create it if missing. The veilens binary's
+    /// Resolve the vault dir AND create it if missing. The millfolio binary's
     /// `manifest`/indexer require the vault dir to exist, but on a clean machine
-    /// the default (~/.config/veilens/vault) isn't there yet — so install/start would fail with
+    /// the default (~/.config/millfolio/vault) isn't there yet — so install/start would fail with
     /// "the directory … does not exist". Idempotent; returns the resolved path.
     @discardableResult
     public func ensureVaultDir(_ arg: String? = nil) -> String {
@@ -1144,15 +1144,15 @@ public final class Bootstrapper: ObservableObject {
         return dir
     }
 
-    /// `millrace veilens install` — install the combined inference server (+ both
-    /// models' weights) + privacy_box + veilens, idempotently. Each step skips what's
-    /// already installed (see the guards in installServer/PrivacyBoxEngine/Veilens-
+    /// `millrace mill install` — install the combined inference server (+ both
+    /// models' weights) + privacy_box + millfolio, idempotently. Each step skips what's
+    /// already installed (see the guards in installServer/PrivacyBoxEngine/Millfolio-
     /// Engine), so re-running is cheap and reuses anything present.
     public func installVault() async throws {
         try await installServer()           // engine + chat + embedding weights
         try await installPrivacyBoxEngine()   // the harness + vault web chat server
-        try await installVeilensEngine()    // the vault tools + indexer
-        linkVaultShims()                    // veilens FFI shims → privacy_box-mojo/lib (vault-run dlopen)
+        try await installMillfolioEngine()    // the vault tools + indexer
+        linkVaultShims()                    // millfolio FFI shims → privacy_box-mojo/lib (vault-run dlopen)
         ensureVaultDir()                    // leave the default vault dir ready
     }
 
@@ -1167,17 +1167,17 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// Write `run-veilens-web.sh` — the VAULT web chat launcher. Like
+    /// Write `run-millfolio-web.sh` — the VAULT web chat launcher. Like
     /// writePrivacyBoxWebScript, but exports PRIVACY_BOX_VAULT=1 + PRIVACY_BOX_VAULT_DIR
-    /// (+ VEILENS_VAULT and the loopback veilens URLs) and execs privacy_box's
+    /// (+ VEILENS_VAULT and the loopback millfolio URLs) and execs privacy_box's
     /// serve-web.sh, so the privacy_box web server comes up in VAULT mode pointed at
     /// the vault dir. The vault tools the generated program calls reach the
     /// combined inference server over loopback (:8000). Returns its path.
     @discardableResult
-    public func writeVeilensWebScript(vaultDir dir: String) throws -> URL {
+    public func writeMillfolioWebScript(vaultDir dir: String) throws -> URL {
         let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
         let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
-        let script = support.appendingPathComponent("run-veilens-web.sh")
+        let script = support.appendingPathComponent("run-millfolio-web.sh")
         let body = """
         #!/bin/bash
         cd '\(privacy_boxDir.path)'
@@ -1193,9 +1193,9 @@ public final class Bootstrapper: ObservableObject {
         # loopback — embeddings + chat on one port (:8000).
         export VEILENS_EMBED_URL='http://127.0.0.1:8000/v1'
         export VEILENS_LOCAL_URL='http://127.0.0.1:8000/v1'
-        # privacy_box compiles the generated vault program against the veilens sources —
-        # point its -I resolution at the installed veilens checkout.
-        export PRIVACY_BOX_VEILENS='\(veilensDir.path)'
+        # privacy_box compiles the generated vault program against the millfolio sources —
+        # point its -I resolution at the installed millfolio checkout.
+        export PRIVACY_BOX_VEILENS='\(millfolioDir.path)'
         exec bash scripts/serve-web.sh
         """
         try body.write(to: script, atomically: true, encoding: .utf8)
@@ -1203,19 +1203,19 @@ public final class Bootstrapper: ObservableObject {
         return script
     }
 
-    /// Cutover launcher (two local servers): veilens-server serves the web UI on
-    /// :10000, veilens-ws streams on :10001 — flare can't do both on one port. Both
+    /// Cutover launcher (two local servers): millfolio-server serves the web UI on
+    /// :10000, millfolio-ws streams on :10001 — flare can't do both on one port. Both
     /// run from the app bundle dir (so `./web/dist` resolves) with privacy_box's
     /// toolchain env (CONDA_PREFIX + flare shims) + the vault resolution env. Opens
     /// the browser; kills the background WS server when the foreground static
     /// server exits.
-    public func writeVeilensAppScript(vaultDir dir: String) throws -> URL {
+    public func writeMillfolioAppScript(vaultDir dir: String) throws -> URL {
         let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
         let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
-        let serverLog = veilensLogDir.appendingPathComponent("server.log").path
-        let script = support.appendingPathComponent("run-veilens-app.sh")
-        let serverBin = appRoot.appendingPathComponent("build/veilens-server").path
-        let wsBin = appRoot.appendingPathComponent("build/veilens-ws").path
+        let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
+        let script = support.appendingPathComponent("run-millfolio-app.sh")
+        let serverBin = appRoot.appendingPathComponent("build/millfolio-server").path
+        let wsBin = appRoot.appendingPathComponent("build/millfolio-ws").path
         let body = """
         #!/bin/bash
         # Run from the privacy_box engine dir: the vault orchestrator reads its
@@ -1233,17 +1233,17 @@ public final class Bootstrapper: ObservableObject {
         # loopback — embeddings + chat on one port (:8000).
         export VEILENS_EMBED_URL='http://127.0.0.1:8000/v1'
         export VEILENS_LOCAL_URL='http://127.0.0.1:8000/v1'
-        # veilens-ws compiles the generated vault program against the veilens sources.
-        export PRIVACY_BOX_VEILENS='\(veilensDir.path)'
+        # millfolio-ws compiles the generated vault program against the millfolio sources.
+        export PRIVACY_BOX_VEILENS='\(millfolioDir.path)'
         # Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
         export VEILENS_WEB_DIR='\(appRoot.appendingPathComponent("web/dist").path)'
         # Run both servers detached in the BACKGROUND (no Terminal) — static UI on
-        # :10000, streaming WS on :10001 — logging to the veilens server log. nohup
-        # so they survive this launcher (and the CLI) exiting; `veilens stop` reaps
+        # :10000, streaming WS on :10001 — logging to the millfolio server log. nohup
+        # so they survive this launcher (and the CLI) exiting; `mill stop` reaps
         # them. This launcher spawns them and exits immediately.
         LOG='\(serverLog)'
         mkdir -p "$(dirname "$LOG")"
-        echo "=== veilens app servers starting $(date) ===" >> "$LOG"
+        echo "=== millfolio app servers starting $(date) ===" >> "$LOG"
         nohup '\(serverBin)' >> "$LOG" 2>&1 &
         nohup '\(wsBin)'     >> "$LOG" 2>&1 &
         ( sleep 1.5 && open 'http://localhost:10000' ) >/dev/null 2>&1 &
@@ -1253,11 +1253,11 @@ public final class Bootstrapper: ObservableObject {
         return script
     }
 
-    /// `veilens start`: ensure the combined inference server is running (launchd),
+    /// `mill start`: ensure the combined inference server is running (launchd),
     /// then start the vault app servers in the BACKGROUND (no Terminal) and open
-    /// http://localhost:10000. Server output goes to the veilens server log.
+    /// http://localhost:10000. Server output goes to the millfolio server log.
     public func startVaultChat(vaultDir dir: String) async throws {
-        // 0. The vault dir must exist before privacy_box/veilens's `manifest` runs
+        // 0. The vault dir must exist before privacy_box/millfolio's `manifest` runs
         //    over it (a clean machine has no vault dir yet).
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true)
@@ -1275,10 +1275,10 @@ public final class Bootstrapper: ObservableObject {
         //    no Terminal window (clients are web/mobile). Fall back to the legacy
         //    privacy_box web UI (still a Terminal) only when the app server is absent.
         if isAppServerInstalled {
-            let script = try writeVeilensAppScript(vaultDir: dir)
+            let script = try writeMillfolioAppScript(vaultDir: dir)
             try run("/bin/bash", [script.path])
         } else {
-            let script = try writeVeilensWebScript(vaultDir: dir)
+            let script = try writeMillfolioWebScript(vaultDir: dir)
             let cmd = "'\(script.path)'"
             try run("/usr/bin/osascript",
                     ["-e", "tell application \"Terminal\" to activate",
@@ -1298,11 +1298,11 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// Stop the background app servers (veilens-server + veilens-ws). Returns true
+    /// Stop the background app servers (millfolio-server + millfolio-ws). Returns true
     /// if at least one was running.
     public func stopAppServer() -> Bool {
-        let ws = (try? runStatus("/usr/bin/pkill", ["-f", "build/veilens-ws"])) == 0
-        let srv = (try? runStatus("/usr/bin/pkill", ["-f", "build/veilens-server"])) == 0
+        let ws = (try? runStatus("/usr/bin/pkill", ["-f", "build/millfolio-ws"])) == 0
+        let srv = (try? runStatus("/usr/bin/pkill", ["-f", "build/millfolio-server"])) == 0
         return ws || srv
     }
 
@@ -1361,7 +1361,7 @@ public final class Bootstrapper: ObservableObject {
     // this process — so a failure inside the child (e.g. privacy_box's `posix_spawn`
     // of the mojo compiler failing with ENOENT) left nothing to log. These run the
     // launcher as a child instead, mirroring its combined stdout/stderr to both the
-    // terminal and the veilens log, after dumping the launcher + the paths it
+    // terminal and the millfolio log, after dumping the launcher + the paths it
     // depends on. Returns the child's exit status (caller maps it to the CLI exit).
 
     /// Run the privacy_box vault loop for one question. See runLoggedScript.
@@ -1374,7 +1374,7 @@ public final class Bootstrapper: ObservableObject {
             ("privacy_box dir (cwd)", privacy_boxDir.path),
             ("privacy_box binary", privacy_boxBin.path),
             ("mojo compiler (privacy_box shells it)", privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path),
-            ("veilens vault tools (src)", veilensDir.appendingPathComponent("src/vault.mojo").path),
+            ("millfolio vault tools (src)", millfolioDir.appendingPathComponent("src/vault.mojo").path),
             ("vault dir", vaultDir),
         ])
         // Per-ask transcript: the CLI names it (timestamp + question slug) and the
@@ -1385,16 +1385,16 @@ public final class Bootstrapper: ObservableObject {
                                    env: ["VEILENS_SESSION_LOG": session.path])
     }
 
-    /// Run the veilens engine `index <folder>`. See runLoggedScript.
+    /// Run the millfolio engine `index <folder>`. See runLoggedScript.
     public func runVaultIndex(folder: String) throws -> Int32 {
         refreshServerRunning()
-        let script = try writeVeilensScript()
+        let script = try writeMillfolioScript()
         let args = ["index", folder]
         logRunDiagnostics(label: "index", launcher: script, args: args, probes: [
-            ("veilens launcher", script.path),
-            ("veilens dir (cwd)", veilensDir.path),
-            ("veilens binary", veilensBin.path),
-            ("mojo compiler", veilensMojoPrefix.appendingPathComponent("bin/mojo").path),
+            ("millfolio launcher", script.path),
+            ("millfolio dir (cwd)", millfolioDir.path),
+            ("millfolio binary", millfolioBin.path),
+            ("mojo compiler", millfolioMojoPrefix.appendingPathComponent("bin/mojo").path),
             ("folder", folder),
         ])
         return try runLoggedScript(script.path, args, label: "index")
@@ -1405,7 +1405,7 @@ public final class Bootstrapper: ObservableObject {
     /// contents (which set PATH/CONDA_PREFIX/MODULAR_HOME), and the inherited PATH.
     private func logRunDiagnostics(label: String, launcher: URL, args: [String], probes: [(String, String)]) {
         let fm = FileManager.default
-        vlog("\n===== veilens \(label) — \(Self.stamp()) =====")
+        vlog("\n===== millfolio \(label) — \(Self.stamp()) =====")
         vlog("command: /bin/bash \(launcher.path) \(args.joined(separator: " "))")
         vlog("server running: \(serverRunning)")
         vlog("paths:")
@@ -1425,12 +1425,12 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// Run `/bin/bash <script> <args…>` as a child, teeing its combined stdout and
-    /// stderr to BOTH this terminal and the veilens log. Streams live (so long runs
+    /// stderr to BOTH this terminal and the millfolio log. Streams live (so long runs
     /// show progress) and returns the exit status without throwing on nonzero.
     @discardableResult
     public func runLoggedScript(_ scriptPath: String, _ args: [String], label: String,
                                 env extra: [String: String] = [:]) throws -> Int32 {
-        let logFH = try? FileHandle(forWritingTo: ensureVeilensLog())
+        let logFH = try? FileHandle(forWritingTo: ensureMillfolioLog())
         logFH?.seekToEndOfFile()
         let out = FileHandle.standardOutput
         let p = Process()
@@ -1470,13 +1470,13 @@ public final class Bootstrapper: ObservableObject {
     }
 
     // ── self-update (CLI + components) ──────────────────────────────────────────
-    /// Update the `veilens` CLI via Homebrew (best-effort), then refresh the
+    /// Update the `millfolio` CLI via Homebrew (best-effort), then refresh the
     /// downloadable components — the inference-server engine, privacy_box, and the
-    /// veilens engine — to their latest releases. The pinned Mojo toolchains and the
+    /// millfolio engine — to their latest releases. The pinned Mojo toolchains and the
     /// (multi-GB) model weights are preserved; only the source bundles are re-fetched
     /// and rebuilt. Progress streams through `onProgress`.
     public func selfUpdate(updateCLI: Bool = true) async throws {
-        vlog("\n===== veilens update — \(Self.stamp()) =====")
+        vlog("\n===== mill update — \(Self.stamp()) =====")
         if updateCLI { updateHomebrewCLI() }
 
         // First reference to each component introduces it with a gloss; the
@@ -1489,17 +1489,17 @@ public final class Bootstrapper: ObservableObject {
         try? FileManager.default.removeItem(at: privacy_boxRoot)
         try await installPrivacyBoxEngine()
 
-        set("Refreshing veilens, the vault engine…")
-        try? FileManager.default.removeItem(at: veilensRoot)
-        try await installVeilensEngine()
-        linkVaultShims()   // veilens FFI shims → privacy_box-mojo/lib (vault-run dlopen)
+        set("Refreshing millfolio, the vault engine…")
+        try? FileManager.default.removeItem(at: millfolioRoot)
+        try await installMillfolioEngine()
+        linkVaultShims()   // millfolio FFI shims → privacy_box-mojo/lib (vault-run dlopen)
 
         // The streaming app server (built on-device against privacy_box). Best-effort:
-        // skips cleanly until veilensapp/app publishes a release to download.
-        set("Refreshing veilens app server…")
+        // skips cleanly until millfolioapp/app publishes a release to download.
+        set("Refreshing millfolio app server…")
         try? FileManager.default.removeItem(at: appRoot)
         // Surface failures: a real build error must fail the update, not be
-        // swallowed (otherwise `veilens update` falsely reports success). The
+        // swallowed (otherwise `mill update` falsely reports success). The
         // bundle is published now, so there's no "not yet released" case to skip.
         try await installAppServer()
 
@@ -1516,10 +1516,10 @@ public final class Bootstrapper: ObservableObject {
             vlog("brew not found at /opt/homebrew or /usr/local; skipped CLI self-update")
             return
         }
-        set("Updating the veilens CLI via Homebrew…")
+        set("Updating the millfolio CLI via Homebrew…")
         _ = try? run(brew, ["update"])   // refresh tap metadata (non-fatal if offline)
         do {
-            let out = try run(brew, ["upgrade", "veilensapp/tap/veilens"])
+            let out = try run(brew, ["upgrade", "millfolioapp/tap/millfolio"])
             vlog("brew upgrade:\n\(out)")
             set("✓ CLI updated (takes effect next run)")
         } catch {
@@ -1533,7 +1533,7 @@ public final class Bootstrapper: ObservableObject {
     // ── component versions ──────────────────────────────────────────────────────
     // Each downloadable component records its installed release tag under
     // support/versions/ at install time (resolved from the repo's releases/latest);
-    // `veilens version` and `veilens update` read them back. The CLI's own version
+    // `mill version` and `mill update` read them back. The CLI's own version
     // comes from Homebrew.
     private var versionsDir: URL { support.appendingPathComponent("versions", isDirectory: true) }
 
@@ -1570,19 +1570,19 @@ public final class Bootstrapper: ObservableObject {
     private func brewCliVersion() -> String {
         guard let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { return "" }
-        guard let out = try? run(brew, ["list", "--versions", "veilensapp/tap/veilens"]) else { return "" }
+        guard let out = try? run(brew, ["list", "--versions", "millfolioapp/tap/millfolio"]) else { return "" }
         let toks = out.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
         return toks.count >= 2 ? "v" + toks.last! : ""
     }
 
-    /// Installed versions of veilens + its components (label, version) for display.
+    /// Installed versions of millfolio + its components (label, version) for display.
     public func componentVersions() -> [(String, String)] {
         func shown(_ s: String) -> String { s.isEmpty ? "—" : s }
         return [
-            ("cli (veilens)", shown(brewCliVersion())),
+            ("cli (millfolio)", shown(brewCliVersion())),
             ("inference server", shown(readVersion("inference-server"))),
             ("privacy_box", shown(readVersion("privacy_box"))),
-            ("veilens engine", shown(readVersion("veilens"))),
+            ("millfolio engine", shown(readVersion("millfolio"))),
             ("app server", shown(readVersion("app"))),
         ]
     }

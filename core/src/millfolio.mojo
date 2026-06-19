@@ -1,6 +1,6 @@
-"""veilens — CLI entry point for the personal data vault.
+"""millfolio — CLI entry point for the personal data vault.
 
-For now: `veilens manifest <dir>` prints the aliased, frontier-visible view of a
+For now: `mill manifest <dir>` prints the aliased, frontier-visible view of a
 vault directory — the confidentiality boundary, before any of the heavier
 machinery (indexer, vault tools, the privacy_box-driven ask loop) is wired in.
 """
@@ -87,7 +87,7 @@ def _preview(text: String, limit: Int) -> String:
 
 
 def _default_dir() raises -> String:
-    return getenv("HOME", ".") + "/veilens"
+    return getenv("HOME", ".") + "/millfolio"
 
 
 def _local_url() raises -> String:
@@ -107,7 +107,7 @@ def _embed_url() raises -> String:
 def main() raises:
     var args = argv()
     if len(args) < 2:
-        print("usage: veilens <manifest|read|embed|index|search> ...")
+        print("usage: millfolio <manifest|read|embed|index|search> ...")
         return
     var cmd = String(args[1])
     if cmd == "manifest":
@@ -115,14 +115,14 @@ def main() raises:
         _print_manifest(data_dir)
     elif cmd == "read":
         if len(args) < 3:
-            print("usage: veilens read <alias> [vault-dir]")
+            print("usage: millfolio read <alias> [vault-dir]")
             return
         var file_id = String(args[2])
         var data_dir = String(args[3]) if len(args) >= 4 else _default_dir()
         _read(file_id, data_dir)
     elif cmd == "embed":
         if len(args) < 3:
-            print("usage: veilens embed \"<text>\"")
+            print("usage: millfolio embed \"<text>\"")
             return
         _embed(String(args[2]))
     elif cmd == "index":
@@ -130,13 +130,13 @@ def main() raises:
         build_index(data_dir, _embed_url())
     elif cmd == "search":
         if len(args) < 3:
-            print("usage: veilens search \"<query>\" [k]")
+            print("usage: millfolio search \"<query>\" [k]")
             return
         var k = Int(String(args[3])) if len(args) >= 4 else 8
         _search(String(args[2]), k)
 
     else:
-        print("usage: veilens <manifest|read|embed|index|search> ...")
+        print("usage: millfolio <manifest|read|embed|index|search> ...")
 
 
 def _embed(text: String) raises:

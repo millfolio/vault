@@ -1,5 +1,5 @@
 """privacy_box — CLI entry point. The private-VAULT harness: a frontier model writes
-a Mojo program that uses the veilens vault tools; it runs locally over the real
+a Mojo program that uses the millfolio vault tools; it runs locally over the real
 data and only the printed answer surfaces.
 
 Layering (pi-shaped, PRIOR-ART.md):
@@ -17,12 +17,12 @@ Layering (pi-shaped, PRIOR-ART.md):
 Usage:
     privacy_box vault "<question>" [dir]  answer a question about your private VAULT
                                        (CSV/PDF/Markdown). The frontier model writes
-                                       a Mojo program that uses the veilens vault
+                                       a Mojo program that uses the millfolio vault
                                        tools; it runs locally over the real data and
                                        only the printed answer surfaces.
 
-The vault dir defaults to $VEILENS_VAULT, else $PRIVACY_BOX_DATA, else ~/veilens.
-Index it first with `veilens index <dir>` (needs the embedding server live).
+The vault dir defaults to $VEILENS_VAULT, else $PRIVACY_BOX_DATA, else ~/millfolio.
+Index it first with `mill index <dir>` (needs the embedding server live).
 """
 
 from std.sys import argv
@@ -34,8 +34,8 @@ from wiring import build_vault_orchestrator
 
 def _vault_dir(var arg: String) raises -> String:
     """Resolve the vault dir for the `vault` subcommand: an explicit CLI arg wins,
-    then $VEILENS_VAULT, then $PRIVACY_BOX_DATA, then ~/veilens (veilens's own
-    default). Kept consistent with veilens/src/vault.mojo `_vault_dir()`."""
+    then $VEILENS_VAULT, then $PRIVACY_BOX_DATA, then ~/millfolio (millfolio's own
+    default). Kept consistent with millfolio/src/vault.mojo `_vault_dir()`."""
     if arg != "":
         return arg^
     var d = getenv("VEILENS_VAULT", "")
@@ -44,7 +44,7 @@ def _vault_dir(var arg: String) raises -> String:
     d = getenv("PRIVACY_BOX_DATA", "")
     if d != "":
         return d
-    return getenv("HOME", ".") + "/veilens"
+    return getenv("HOME", ".") + "/millfolio"
 
 
 def _run_vault(question: String, var vault_dir: String) raises:
@@ -70,5 +70,5 @@ def main() raises:
 
     print('usage: privacy_box vault "<question>" [vault_dir]')
     print("  Answer a question about your private VAULT (CSV/PDF/Markdown).")
-    print("  Index it first with `veilens index <dir>` (embedding server live).")
-    print("  The vault dir defaults to $VEILENS_VAULT, else $PRIVACY_BOX_DATA, else ~/veilens.")
+    print("  Index it first with `mill index <dir>` (embedding server live).")
+    print("  The vault dir defaults to $VEILENS_VAULT, else $PRIVACY_BOX_DATA, else ~/millfolio.")

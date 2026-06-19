@@ -158,7 +158,7 @@ def main() raises:
     var cfg = load_config()
 
     # VAULT-ONLY: build the vault orchestrator over the resolved vault dir
-    # (PRIVACY_BOX_VAULT_DIR / $VEILENS_VAULT / $PRIVACY_BOX_DATA / ~/veilens) and route
+    # (PRIVACY_BOX_VAULT_DIR / $VEILENS_VAULT / $PRIVACY_BOX_DATA / ~/millfolio) and route
     # /chat to run_vault_task.
     var vault_dir = resolve_vault_dir()
     print("privacy_box VAULT mode — vault dir: " + vault_dir)

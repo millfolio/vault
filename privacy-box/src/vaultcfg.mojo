@@ -1,22 +1,22 @@
-"""vaultcfg — resolve the veilens vault paths the orchestrator's vault path needs.
+"""vaultcfg — resolve the millfolio vault paths the orchestrator's vault path needs.
 
 The vault path compiles a frontier-written program that does `from vault import *`
 and runs it. To do that privacy_box needs to know, all relative to a configured
-veilens checkout (or the sibling layout):
+millfolio checkout (or the sibling layout):
 
-  - the veilens `build/veilens` binary    (to print the aliased manifest)
-  - the `-I` include set for `mojo build` (veilens/src + flare/json/lancedb/
+  - the millfolio `build/millfolio` binary    (to print the aliased manifest)
+  - the `-I` include set for `mojo build` (millfolio/src + flare/json/lancedb/
     pdftotext/zlib so the generated program + its transitive deps resolve)
-  - the LanceDB index dir                 (~/.config/veilens — read-allowed in
+  - the LanceDB index dir                 (~/.config/millfolio — read-allowed in
     the vault run sandbox)
 
 Resolution (highest precedence first):
   PRIVACY_BOX_VAULT_SRC  — explicit colon-separated -I list (overrides everything)
-  PRIVACY_BOX_VEILENS    — path to the veilens checkout; deps assumed sibling to it
-  default             — the sibling layout: <privacy_box>/../veilens etc.
+  PRIVACY_BOX_VEILENS    — path to the millfolio checkout; deps assumed sibling to it
+  default             — the sibling layout: <privacy_box>/../millfolio etc.
 
-`_veilens_dir()` defaults to ../veilens relative to the privacy_box cwd. Everything
-else (flare/json/…) is a sibling of veilens, matching veilens/pixi.toml's own
+`_millfolio_dir()` defaults to ../millfolio relative to the privacy_box cwd. Everything
+else (flare/json/…) is a sibling of millfolio, matching millfolio/pixi.toml's own
 `-I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src
 -I ../zlib.mojo/src`.
 """
@@ -34,36 +34,36 @@ def _split_colon(s: String) raises -> List[String]:
     return out^
 
 
-def veilens_dir() raises -> String:
-    """The veilens checkout. PRIVACY_BOX_VEILENS overrides; else ../veilens (sibling
+def millfolio_dir() raises -> String:
+    """The millfolio checkout. PRIVACY_BOX_VEILENS overrides; else ../millfolio (sibling
     of the privacy_box cwd — how the repos are laid out)."""
     var d = getenv("PRIVACY_BOX_VEILENS", "")
     if d != "":
         return d
-    return String("../veilens")
+    return String("../millfolio")
 
 
-def veilens_bin() raises -> String:
-    """The compiled veilens CLI (used to print the aliased manifest)."""
-    return veilens_dir() + "/build/veilens"
+def millfolio_bin() raises -> String:
+    """The compiled millfolio CLI (used to print the aliased manifest)."""
+    return millfolio_dir() + "/build/millfolio"
 
 
 def vault_include_paths() raises -> List[String]:
     """The `-I` dirs for compiling a `from vault import *` program. Mirrors
-    veilens/pixi.toml's build line: veilens/src + flare + json + lancedb.mojo/src
+    millfolio/pixi.toml's build line: millfolio/src + flare + json + lancedb.mojo/src
     + pdftotext.mojo/src + zlib.mojo/src.
 
     PRIVACY_BOX_VAULT_SRC (colon-separated) overrides the whole set. Otherwise the
-    deps are resolved as SIBLINGS of the veilens dir (so a moved veilens keeps
+    deps are resolved as SIBLINGS of the millfolio dir (so a moved millfolio keeps
     its deps adjacent)."""
     var override = getenv("PRIVACY_BOX_VAULT_SRC", "")
     if override != "":
         return _split_colon(override)
 
-    var dac = veilens_dir()
-    # The sibling root: veilens's parent dir. If veilens is "../veilens", the
+    var dac = millfolio_dir()
+    # The sibling root: millfolio's parent dir. If millfolio is "../millfolio", the
     # parent is "..". We keep it relative so it resolves from the privacy_box cwd,
-    # matching veilens/pixi.toml's own relative `-I ../flare` style.
+    # matching millfolio/pixi.toml's own relative `-I ../flare` style.
     var sib = dac + "/.."
     var out = List[String]()
     out.append(dac + "/src")
@@ -78,8 +78,8 @@ def vault_include_paths() raises -> List[String]:
 
 def vault_dir() raises -> String:
     """Resolve the vault dir for the SERVER's vault mode: PRIVACY_BOX_VAULT_DIR wins,
-    then $VEILENS_VAULT, then $PRIVACY_BOX_DATA, then ~/veilens (veilens's own
-    default). Mirrors privacy_box.mojo `_vault_dir()` (with no CLI arg) + veilens/src/
+    then $VEILENS_VAULT, then $PRIVACY_BOX_DATA, then ~/millfolio (millfolio's own
+    default). Mirrors privacy_box.mojo `_vault_dir()` (with no CLI arg) + millfolio/src/
     vault.mojo `_vault_dir()`."""
     var d = getenv("PRIVACY_BOX_VAULT_DIR", "")
     if d != "":
@@ -90,11 +90,11 @@ def vault_dir() raises -> String:
     d = getenv("PRIVACY_BOX_DATA", "")
     if d != "":
         return d
-    return getenv("HOME", ".") + "/veilens"
+    return getenv("HOME", ".") + "/millfolio"
 
 
 def vault_index_dir() raises -> String:
-    """The veilens LanceDB index dir — read-allowed in the vault run sandbox so
+    """The millfolio LanceDB index dir — read-allowed in the vault run sandbox so
     search() can reach the vector store + chunks.tsv side-table. Mirrors
-    veilens/src/index.mojo `_config_dir()`."""
-    return getenv("HOME", ".") + "/.config/veilens"
+    millfolio/src/index.mojo `_config_dir()`."""
+    return getenv("HOME", ".") + "/.config/millfolio"

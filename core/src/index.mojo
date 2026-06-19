@@ -10,7 +10,7 @@ side-table persisted as TSV next to the db, so `search()` can resolve a returned
 chunk_id back to its alias + text. Real paths NEVER enter the side-table — only
 aliases — so search results are alias-safe.
 
-Layout (under ~/.config/veilens):
+Layout (under ~/.config/millfolio):
   index.db/      — the LanceDB database (table "chunks", dim 1024)
   chunks.tsv     — chunk_id <TAB> file_alias <TAB> escaped_text
 """
@@ -41,7 +41,7 @@ struct Chunk(Copyable, Movable):
 # ── paths ─────────────────────────────────────────────────────────────────────
 
 def _config_dir() raises -> String:
-    return getenv("HOME", ".") + "/.config/veilens"
+    return getenv("HOME", ".") + "/.config/millfolio"
 
 
 def _db_uri() raises -> String:
@@ -208,7 +208,7 @@ def _load_sidetable() raises -> Tuple[List[String], List[String]]:
     var aliases = List[String]()
     var texts = List[String]()
     if not exists(_sidetable_path()):
-        raise Error("no index side-table at " + _sidetable_path() + " — run `veilens index` first")
+        raise Error("no index side-table at " + _sidetable_path() + " — run `mill index` first")
     var text: String
     with open(_sidetable_path(), "r") as f:
         text = f.read()

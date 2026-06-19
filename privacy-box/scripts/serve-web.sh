@@ -21,8 +21,8 @@ if [ ! -x ./build/privacy_box-server ]; then
 fi
 
 # The privacy_box web server is VAULT-ONLY: /chat answers questions about the vault
-# dir (PRIVACY_BOX_VAULT_DIR, else $VEILENS_VAULT / $PRIVACY_BOX_DATA / ~/veilens). The
-# veilens vault tools that the generated program calls (search/ask_local) reach
+# dir (PRIVACY_BOX_VAULT_DIR, else $VEILENS_VAULT / $PRIVACY_BOX_DATA / ~/millfolio). The
+# millfolio vault tools that the generated program calls (search/ask_local) reach
 # the local inference server over loopback at VEILENS_EMBED_URL (embeddings) and
 # VEILENS_LOCAL_URL (chat) — both default to the combined server on :8000/v1.
 # Export them so the privacy_box-server process env propagates to the sandboxed

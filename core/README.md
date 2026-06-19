@@ -1,6 +1,6 @@
-# veilens
+# millfolio
 
-> Part of [**veilens.app**](https://veilens.app) using
+> Part of [**millfolio.app**](https://millfolio.app) using
 > [**millrace**](https://millrace.app) — local-first AI on Apple Silicon.
 > **Experimental.**
 
@@ -9,7 +9,7 @@ last year?"_, _"when do I renew my insurance?"_, _"what's the license plate of
 my car?"_ — over a private vault of **CSV, PDF, and Markdown** documents,
 **without your data ever leaving the machine**.
 
-veilens is the **vault application**. It builds on the
+millfolio is the **vault application**. It builds on the
 [privacy_box](https://github.com/millrace/privacy_box) privacy harness and the
 millrace toolbox: [lancedb.mojo](https://github.com/millrace/lancedb.mojo) for
 the on-device vector index,
@@ -80,20 +80,20 @@ What's verified vs. pending a live server:
 
 ```sh
 pixi run ffi                              # build the native shims (zlib/flare/lancedb)
-pixi run build                            # compile the veilens CLI (runs ffi first)
+pixi run build                            # compile the millfolio CLI (runs ffi first)
 
-veilens manifest <vault-dir>              # aliased manifest (frontier-visible view)
-veilens read <file_N> <vault-dir>         # smoke-test a reader (csv/pdf/md preview)
-veilens embed "<text>"                    # smoke-test the embedding client*
-veilens index <vault-dir>                 # chunk+embed the vault into LanceDB*
-veilens search "<query>" [k]              # semantic search over the index*
+mill manifest <vault-dir>              # aliased manifest (frontier-visible view)
+millfolio read <file_N> <vault-dir>         # smoke-test a reader (csv/pdf/md preview)
+millfolio embed "<text>"                    # smoke-test the embedding client*
+mill index <vault-dir>                 # chunk+embed the vault into LanceDB*
+millfolio search "<query>" [k]              # semantic search over the index*
 
 #  * needs the local inference-server running (embeddings/chat endpoints)
 ```
 
-The index lives under `~/.config/veilens/` (`index.db` + `chunks.tsv`
+The index lives under `~/.config/millfolio/` (`index.db` + `chunks.tsv`
 side-table). Local model URLs are configurable via `VEILENS_LOCAL_URL` (default
-`http://127.0.0.1:8000/v1`) and `VEILENS_VAULT` (default `~/.config/veilens/vault`).
+`http://127.0.0.1:8000/v1`) and `VEILENS_VAULT` (default `~/.config/millfolio/vault`).
 
 There are also `pixi run smoke-readers` / `smoke-embed` / `smoke-index` /
 `build-vault` tasks that exercise each layer against a throwaway vault.

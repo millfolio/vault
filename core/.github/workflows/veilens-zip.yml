@@ -1,8 +1,8 @@
-name: veilens zip
+name: millfolio zip
 
-# Builds veilens.zip — the veilens source bundle the Millrace app downloads, then
-# `mojo build`s on-device. See scripts/package_veilens.sh. Mirrors privacy_box's
-# privacy_box-zip.yml; veilens now links the full toolbox (flare HTTP, the LanceDB
+# Builds millfolio.zip — the millfolio source bundle the Millrace app downloads, then
+# `mojo build`s on-device. See scripts/package_millfolio.sh. Mirrors privacy_box's
+# privacy_box-zip.yml; millfolio now links the full toolbox (flare HTTP, the LanceDB
 # Rust shim, pdftotext + zlib), so the siblings are checked out and their FFI
 # shims built before the compile-check.
 on:
@@ -10,7 +10,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
-    paths: ["scripts/package_veilens.sh", ".github/workflows/veilens-zip.yml", "pixi.toml"]
+    paths: ["scripts/package_millfolio.sh", ".github/workflows/millfolio-zip.yml", "pixi.toml"]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
       # -I ../zlib.mojo/src` build assume.
       - uses: actions/checkout@v6
         with:
-          path: veilens
+          path: millfolio
       - uses: actions/checkout@v6
         with:
           repository: millrace/flare
@@ -53,7 +53,7 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
-          manifest-path: veilens/pixi.toml
+          manifest-path: millfolio/pixi.toml
 
       # cargo is preinstalled on macos-14 runners; the LanceDB shim (Rust cdylib)
       # build needs it. Print the version so failures are diagnosable.
@@ -73,23 +73,23 @@ jobs:
           workspaces: lancedb.mojo/ffi
 
       # Builds every FFI shim (zlib + flare http/tls + the LanceDB cdylib — the
-      # last pulls lancedb+arrow on first build, so it's slow) then compiles veilens.
-      - name: Build veilens
-        working-directory: veilens
+      # last pulls lancedb+arrow on first build, so it's slow) then compiles millfolio.
+      - name: Build millfolio
+        working-directory: mill
         run: pixi run build
 
-      - name: Package veilens.zip
-        working-directory: veilens
-        run: pixi run bash scripts/package_veilens.sh "$GITHUB_WORKSPACE/veilens.zip"
+      - name: Package millfolio.zip
+        working-directory: mill
+        run: pixi run bash scripts/package_millfolio.sh "$GITHUB_WORKSPACE/millfolio.zip"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: veilens-zip
-          path: veilens.zip
+          name: millfolio-zip
+          path: millfolio.zip
           if-no-files-found: error
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          files: veilens.zip
+          files: millfolio.zip

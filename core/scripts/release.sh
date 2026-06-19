@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# Coordinated release for the veilens stack. Tags each repo so its CI builds and
+# Coordinated release for the millfolio stack. Tags each repo so its CI builds and
 # attaches the release asset, in dependency order:
 #
-#   1. veilens   (this repo)  -> veilens-zip.yml  attaches veilens.zip
+#   1. millfolio   (this repo)  -> millfolio-zip.yml  attaches millfolio.zip
 #   2. privacy_box               -> privacy_box-zip.yml attaches privacy_box.zip
-#   3. cli                    -> release.yml      attaches veilens-macos.tar.gz
+#   3. cli                    -> release.yml      attaches millfolio-macos.tar.gz
 #   4. homebrew-tap           -> formula bumped to the cli asset's url + sha256
 #
 # The engine + privacy_box are the assets the CLI's Bootstrapper fetches at runtime
-# (veilens.zip + privacy_box.zip from releases/latest); they have no build-time tie
+# (millfolio.zip + privacy_box.zip from releases/latest); they have no build-time tie
 # to cli, so they just go first. The tap MUST come after cli: update-formula.sh
 # downloads the cli release asset to compute its sha256, so the asset has to
 # exist first. This script waits for each asset to appear before moving on.
@@ -21,7 +21,7 @@
 # --dry-run to print the resolved version + plan and exit.
 #
 # Layout: the repos are siblings under one umbrella dir (privacy_box/, cli/,
-# homebrew-tap/ next to this veilens/ checkout). Override with PRIVACY_BOX_DIR /
+# homebrew-tap/ next to this millfolio/ checkout). Override with PRIVACY_BOX_DIR /
 # CLI_DIR / TAP_DIR if yours differ.
 #
 #   Usage: scripts/release.sh [vX.Y.Z] [--major|--minor|--patch]
@@ -31,23 +31,23 @@ set -euo pipefail
 
 # -- locations ----------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"          # the veilens repo
+ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"          # the millfolio repo
 UMBRELLA="$(cd "$ENGINE_DIR/.." && pwd)"
 PRIVACY_BOX_DIR="${PRIVACY_BOX_DIR:-$UMBRELLA/privacy_box}"
 APP_DIR="${APP_DIR:-$UMBRELLA/app}"
 CLI_DIR="${CLI_DIR:-$UMBRELLA/cli}"
 TAP_DIR="${TAP_DIR:-$UMBRELLA/homebrew-tap}"
 
-ENGINE_REPO="${ENGINE_REPO:-veilensapp/veilens}"
-PRIVACY_BOX_REPO="${PRIVACY_BOX_REPO:-veilensapp/privacy_box}"
-APP_REPO="${APP_REPO:-veilensapp/app}"
-CLI_REPO="${CLI_REPO:-veilensapp/cli}"
+ENGINE_REPO="${ENGINE_REPO:-millfolioapp/millfolio}"
+PRIVACY_BOX_REPO="${PRIVACY_BOX_REPO:-millfolioapp/privacy_box}"
+APP_REPO="${APP_REPO:-millfolioapp/app}"
+CLI_REPO="${CLI_REPO:-millfolioapp/cli}"
 
-ENGINE_ASSET="veilens.zip"
+ENGINE_ASSET="millfolio.zip"
 PRIVACY_BOX_ASSET="privacy_box.zip"
-APP_ASSET="veilens-app.zip"
-CLI_ASSET="veilens-macos.tar.gz"
-TAP_FORMULA="veilens.rb"
+APP_ASSET="millfolio-app.zip"
+CLI_ASSET="millfolio-macos.tar.gz"
+TAP_FORMULA="millfolio.rb"
 
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-2400}"   # seconds to wait for a CI asset (engine build ~20m+)
 POLL_INTERVAL="${POLL_INTERVAL:-20}"
@@ -192,7 +192,7 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-# -- 1. engine (veilens.zip) --------------------------------------------------
+# -- 1. engine (millfolio.zip) --------------------------------------------------
 if [ "$SKIP_ENGINE" = 0 ]; then
   tag_and_push "$ENGINE_DIR" "$ENGINE_REPO"
   wait_for_asset "$ENGINE_REPO" "$ENGINE_ASSET"
@@ -204,14 +204,14 @@ if [ "$SKIP_PRIVACY_BOX" = 0 ]; then
   wait_for_asset "$PRIVACY_BOX_REPO" "$PRIVACY_BOX_ASSET"
 fi
 
-# -- 3. app (veilens-app.zip: ws_server source + web/dist) --------------------
+# -- 3. app (millfolio-app.zip: ws_server source + web/dist) --------------------
 # Independent of cli (the CLI builds it on-device against privacy_box at install).
 if [ "$SKIP_APP" = 0 ]; then
   tag_and_push "$APP_DIR" "$APP_REPO"
   wait_for_asset "$APP_REPO" "$APP_ASSET"
 fi
 
-# -- 4. cli (veilens-macos.tar.gz) -- must finish before the tap --------------
+# -- 4. cli (millfolio-macos.tar.gz) -- must finish before the tap --------------
 tag_and_push "$CLI_DIR" "$CLI_REPO"
 wait_for_asset "$CLI_REPO" "$CLI_ASSET"
 
@@ -235,11 +235,11 @@ if [ "$SKIP_TAP" = 0 ]; then
       warn "tap: Formula/$TAP_FORMULA unchanged for $VERSION -- nothing to publish"
     else
       git add "Formula/$TAP_FORMULA"
-      git commit -q -m "veilens ${VERSION#v}"
+      git commit -q -m "millfolio ${VERSION#v}"
       git push -q origin HEAD
       log "tap: published Formula/$TAP_FORMULA for $VERSION"
     fi )
 fi
 
 echo
-log "Done ($VERSION). Install with:  brew install veilensapp/tap/veilens"
+log "Done ($VERSION). Install with:  brew install millfolioapp/tap/millfolio"

@@ -228,7 +228,7 @@ struct SandboxPolicy(Movable):
     var data_dir: String      # read-only mount of the task's private data
     var scratch_dir: String   # the only writable location (results land here)
     var network: String       # "deny" (CSV path) | "loopback" (vault path)
-    var index_dir: String     # the vault's LanceDB index dir (~/.config/veilens);
+    var index_dir: String     # the vault's LanceDB index dir (~/.config/millfolio);
                               # read-allowed in the vault run profile so search()
                               # can read the vector store + chunks.tsv side-table
 
@@ -292,12 +292,12 @@ struct Sandbox(Movable):
         rendered = _replace_all(rendered, String("@HOME@"), home_c)
         rendered = _replace_all(rendered, String("@RUNTIME_PREFIX@"), runtime)
         if is_vault:
-            # The index dir (~/.config/veilens) lives under $HOME; canonicalize it
+            # The index dir (~/.config/millfolio) lives under $HOME; canonicalize it
             # so the vault profile can re-allow reads of the vector store + the
             # chunks.tsv side-table that search() resolves hits through.
             var index_c = _canonical(
                 self.policy.index_dir if self.policy.index_dir != ""
-                else (getenv("HOME", "/") + "/.config/veilens"))
+                else (getenv("HOME", "/") + "/.config/millfolio"))
             rendered = _replace_all(rendered, String("@INDEX_DIR@"), index_c)
         var path = scratch_c + ("/privacy_box-vault.sb" if is_vault else "/privacy_box.sb")
         _write(path, rendered)
@@ -349,7 +349,7 @@ struct Sandbox(Movable):
 
     def capture(self, argv: List[String]) raises -> RunResult:
         """Run a TRUSTED local helper `argv` (NOT sandboxed) and capture its
-        stdout+stderr. Used by the vault path to invoke `veilens manifest <dir>`,
+        stdout+stderr. Used by the vault path to invoke `mill manifest <dir>`,
         which produces the aliased, frontier-SAFE manifest view. argv[0] must be
         an absolute path. This is trusted: it computes the alias mapping locally
         and never sends anything anywhere — the *output* is what becomes
@@ -388,7 +388,7 @@ struct Sandbox(Movable):
         remote model carry only aliased names (col_0…), never real data.
 
         `include_paths` are `mojo build`'s `-I` search dirs. For the VAULT path
-        these are the veilens `src` dir + its transitive deps (flare/json/lancedb/
+        these are the millfolio `src` dir + its transitive deps (flare/json/lancedb/
         pdftotext/zlib) so the generated `from vault import *` + everything it
         pulls resolves. Empty for the CSV path (no imports beyond stdlib).
 

@@ -2,11 +2,11 @@
 
 VAULT-ONLY. Wires the layers into the privacy flow (README.md):
 
-  1. `veilens manifest` produces the ALIASED view (the only vault info the remote
+  1. `mill manifest` produces the ALIASED view (the only vault info the remote
      model sees — never a real name, value, or path).
   2. RemoteClient.codegen writes a `from vault import *` program from that (every
      outbound message passes the EgressGuard — confidentiality enforced here).
-  3. compile it (with the veilens include paths), looping the fix on COMPILE
+  3. compile it (with the millfolio include paths), looping the fix on COMPILE
      errors only; the code is in terms of aliases, so there is no dealias step.
   4. run the program in the loopback Sandbox over REAL data; only the printed
      answer surfaces. search()/ask_local() reach 127.0.0.1 only.
@@ -20,7 +20,7 @@ from budget import Budget
 from transport import LocalClient, RemoteClient, ChatMessage, _codegen_system
 from sandbox import Sandbox
 from broker import CapabilityBroker
-from vaultcfg import veilens_bin, vault_include_paths
+from vaultcfg import millfolio_bin, vault_include_paths
 
 
 def _session_append(text: String):
@@ -89,16 +89,16 @@ struct Orchestrator(Movable):
 
     def vault_manifest(mut self, vault_dir: String) raises -> String:
         """Step 1 — the ALIASED, frontier-safe manifest. Shell out to the trusted
-        `veilens manifest <vault_dir>` and capture its stdout. This is the ONLY
+        `mill manifest <vault_dir>` and capture its stdout. This is the ONLY
         vault info that reaches the remote model, aliases-only by construction."""
         print("• aliasing the vault manifest (the frontier-safe view)…")
-        var dac = veilens_bin()
+        var dac = millfolio_bin()
         var manifest_argv: List[String] = [dac, String("manifest"), vault_dir]
         var m = self.sandbox.capture(manifest_argv)
         if m.exit_code != 0:
             raise Error(
-                "vault: `veilens manifest` failed (is veilens built at " + dac
-                + "? try `pixi run build` in veilens). Output:\n" + m.output)
+                "vault: `mill manifest` failed (is millfolio built at " + dac
+                + "? try `pixi run build` in millfolio). Output:\n" + m.output)
         return m.output.copy()
 
     def vault_codegen(mut self, question: String, manifest: String) raises -> String:
@@ -158,7 +158,7 @@ struct Orchestrator(Movable):
     def run_vault_task(mut self, question: String, vault_dir: String) raises -> String:
         """Answer a question about the private vault by writing ONE Mojo program
         that does `from vault import *` and calls the vault tools, compiling it
-        with the veilens include paths, and running it in the loopback sandbox
+        with the millfolio include paths, and running it in the loopback sandbox
         over the REAL data. Only the printed answer surfaces.
 
         This is the existing confidentiality model extended from "read one CSV" to
@@ -166,8 +166,8 @@ struct Orchestrator(Movable):
 
           - The ONLY vault information that reaches the remote (frontier) model is
             the ALIASED manifest (`file_0 [csv] 130 bytes  schema: col_0, col_1`)
-            produced by `veilens manifest` — aliases/kinds/sizes/aliased columns,
-            never a real name, value, or path (see veilens/src/manifest.mojo).
+            produced by `mill manifest` — aliases/kinds/sizes/aliased columns,
+            never a real name, value, or path (see millfolio/src/manifest.mojo).
           - The question is the user's to send; the data is not. Every outbound
             message still passes the EgressGuard inside codegen()/fix_code()
             (fails closed) — a real value leaking into the manifest would trip it.

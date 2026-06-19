@@ -5,8 +5,8 @@ ask open-ended questions, answered **locally**. A frontier model writes the code
 that runs on your data; the data never leaves the machine.
 
 This repo consolidates what used to be three separate repos
-(`veilens` + `privacy_box` + `cli`) into one. History was intentionally not
-preserved.
+(`veilens` + `headgate` + `cli`) into one. History was intentionally not
+preserved. The `mill` command (Swift CLI) is the umbrella; `millfolio` is the brand.
 
 ## Layout
 

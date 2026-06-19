@@ -22,7 +22,7 @@ program needs no configuration. One inference-server process now serves BOTH a
 chat model and the embedding model on a single port (its /v1/embeddings routes
 to a secondary Qwen3-Embedding model), so chat + embeddings default to the same
 base. The URLs are still separate env knobs in case you run two instances:
-  VEILENS_VAULT      (default ~/.config/veilens/vault)
+  VEILENS_VAULT      (default ~/.config/millfolio/vault)
   VEILENS_LOCAL_URL  (default http://127.0.0.1:8000/v1)  — CHAT (ask_local)
   VEILENS_EMBED_URL  (default http://127.0.0.1:8000/v1)  — EMBEDDINGS (search)
   VEILENS_LOCAL_MODEL(default "local")                   — chat model name
@@ -60,7 +60,7 @@ def _vault_dir() raises -> String:
     var d = getenv("VEILENS_VAULT", "")
     if d != "":
         return d
-    return getenv("HOME", ".") + "/.config/veilens/vault"
+    return getenv("HOME", ".") + "/.config/millfolio/vault"
 
 
 def _local_url() raises -> String:
