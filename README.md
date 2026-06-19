@@ -31,14 +31,20 @@ One Mojo source (this repo) + **one zip** that vendors the built engine binary,
 the compiled lib FFI shims (flare TLS/HTTP, zlib, lancedb), and assets. Frontier
 access is just an `ANTHROPIC_API_KEY` the user supplies — nothing to install.
 
-## Build — not yet unified (TODO)
+## Build
 
-Each module still carries its **original** `pixi.toml` and the cross-references
-from when they were sibling repos:
-- `core/` references `../headgate` (now `./sandbox/`) and `-I ../flare` etc.
-- now that the modules are one level deeper, the lib include paths shift
-  (`-I ../flare` → `-I ../../flare`).
+One `pixi.toml` at the repo root builds both Mojo binaries — the "one mojo":
 
-Unifying these into a single `pixi.toml` / build (the "one mojo") is the next
-step. Until then, the modules build individually only after their `-I` paths are
-fixed for this layout.
+```sh
+pixi run build      # -> build/vault (core) + build/sandbox (headgate)
+pixi run vault      # just the vault binary
+pixi run sandbox    # just the privacy harness
+pixi run cli        # the Swift umbrella CLI (separate toolchain)
+```
+
+The libraries are sibling repos under `~/dev/millfolio/` (flare, json,
+lancedb.mojo, pdftotext.mojo, zlib.mojo, csv.mojo, jinja2.mojo), consumed via
+`-I ../lib`. The `ffi` task (a `build` dependency) compiles the FFI shims
+(flare TLS/HTTP, zlib, the lancedb Rust cdylib) into the env. `core` and
+`sandbox` are independent binaries — they cooperate at runtime (the harness runs
+the vault binary sandboxed), not via Mojo imports.

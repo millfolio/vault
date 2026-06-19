@@ -5,3 +5,5 @@
 .astro/
 node_modules/
 *.lock
+/.scratch*
+.scratch_build.out

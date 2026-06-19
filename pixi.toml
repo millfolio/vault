@@ -1,0 +1,44 @@
+[workspace]
+name = "vault"
+version = "0.1.0"
+description = "millfolio personal data vault — local Q&A over your own documents. One build for the two Mojo binaries (core=vault, sandbox=privacy harness); the Swift cli builds separately."
+channels = [
+    "https://conda.modular.com/max-nightly",
+    "conda-forge",
+]
+platforms = ["osx-arm64"]
+
+[dependencies]
+mojo = "==1.0.0b3.dev2026061206"
+# FFI runtime deps shared by both binaries (flare TLS/HTTP, zlib FlateDecode for
+# PDFs, brotli for Content-Encoding). The shims are built into $CONDA_PREFIX/lib
+# by the `ffi` task below.
+openssl          = ">=3.6.1,<4"
+ca-certificates  = ">=2025.1.31"
+zlib             = ">=1.3.1,<2"
+libbrotlicommon  = ">=1,<2"
+libbrotlidec     = ">=1,<2"
+libbrotlienc     = ">=1,<2"
+
+# Libraries are sibling repos under the millfolio org, consumed via `-I` (no path
+# deps): ../flare ../json ../lancedb.mojo ../pdftotext.mojo ../zlib.mojo ../csv.mojo
+# ../jinja2.mojo. The engine (../engine) is NOT a build dep — it's a runtime
+# embedding server, vendored as a binary at install.
+
+[tasks]
+# Build every FFI shim both binaries need into this env's $CONDA_PREFIX/lib:
+#   libzlibmojo (PDF FlateDecode), libflare_tls/http (HTTP client),
+#   liblancedbmojo (the Rust cdylib vector store — slow on first build).
+ffi = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh; bash ../lancedb.mojo/ffi/build.sh'"
+
+# core = the vault binary (indexer, embeddings, tool surface, ask loop).
+vault = { cmd = "mkdir -p build && mojo build core/src/veilens.mojo -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -o build/vault", depends-on = ["ffi"] }
+
+# sandbox = the privacy harness (frontier/local broker, codegen, egress guard).
+sandbox = { cmd = "mkdir -p build && mojo build sandbox/src/headgate.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -o build/sandbox", depends-on = ["ffi"] }
+
+# the "one mojo" — both Mojo binaries.
+build = { depends-on = ["vault", "sandbox"] }
+
+# the Swift umbrella CLI (separate toolchain; install/start/stop/index/ask).
+cli = "swift build --package-path cli -c release"
