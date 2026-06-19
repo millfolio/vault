@@ -84,7 +84,10 @@ def _extract_message(body: String) -> String:
 
 
 def _content_type(path: String) -> String:
-    """Guess a Content-Type from the file extension (the few Vite emits)."""
+    """Guess a Content-Type from the file extension. `.json` is checked before
+    `.js` (".json" contains ".js")."""
+    if path.find(".json") != -1:
+        return String("application/json; charset=utf-8")
     if path.find(".js") != -1:
         return String("application/javascript; charset=utf-8")
     if path.find(".css") != -1:
@@ -141,10 +144,10 @@ struct Api(Handler, Copyable, Movable):
         if path.find("..") == -1:
             if path == "/" or path == "/index.html":
                 return _serve_file("web/dist/index.html", "text/html; charset=utf-8")
-            if path == "/favicon.svg":
-                return _serve_file("web/dist/favicon.svg", "image/svg+xml")
-            if path.find("/assets/") == 0:
-                return _serve_file("web/dist" + path, _content_type(path))
+            # Any other path is a built asset — SvelteKit emits /_app/immutable/…
+            # (JS/CSS), /_app/version.json, /favicon.svg, etc. Serve it from
+            # web/dist (404 only if it genuinely isn't there).
+            return _serve_file("web/dist" + path, _content_type(path))
         return _cors(not_found(path))
 
     def handle_chat(self, req: Request) raises -> Response:
