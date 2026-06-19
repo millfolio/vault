@@ -24,6 +24,7 @@ mkdir -p "$STAGE/src" "$STAGE/web/dist"
 
 cp "$ROOT/server/src/ws_server.mojo" "$STAGE/src/"
 cp "$ROOT/server/src/server.mojo" "$STAGE/src/"
+cp "$ROOT/server/src/events.mojo" "$STAGE/src/"   # ws_server imports this
 cp -R "$ROOT/web/build/." "$STAGE/web/dist/"
 
 ( cd "$STAGE" && zip -qr -X "$OUT" src web )

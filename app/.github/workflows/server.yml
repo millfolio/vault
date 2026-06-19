@@ -41,6 +41,10 @@ jobs:
         with:
           manifest-path: app/server/pixi.toml
 
+      - name: Test protocol wire helpers
+        working-directory: app/server
+        run: pixi run test
+
       - name: Build veilens-server + veilens-ws
         working-directory: app/server
         run: |
