@@ -15,7 +15,7 @@ Events are ServerEvent JSON, one per text frame (see ../../protocol/events.ts).
 flare's WS handler is a THIN (non-capturing) function, so the handler builds the
 orchestrator per connection — fine for a local single-user server.
 
-    pixi run build-ws   # -> build/veilens-ws, WebSocket on 127.0.0.1:10000
+    pixi run build-ws   # -> build/veilens-ws, WebSocket on 127.0.0.1:10001
 """
 
 from flare.ws import WsServer, WsConnection, WsFrame, WsOpcode, WsCloseCode
@@ -26,7 +26,9 @@ from wiring import build_vault_orchestrator
 from vaultcfg import vault_dir as resolve_vault_dir
 from json import loads
 
-comptime PORT = 10000
+# The static web UI is served by veilens-server on :10000; the WS stream gets its
+# own port (flare can't multiplex static-HTTP + WebSocket on one listener).
+comptime PORT = 10001
 
 
 def _json_escape(s: String) -> String:

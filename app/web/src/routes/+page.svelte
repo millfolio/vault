@@ -11,12 +11,19 @@
     text: string;
   }
 
-  // Use the real WebSocket transport when a server is given (?server=ws://host:10000/chat);
-  // otherwise fall back to the in-browser mock so the UI runs with no backend.
+  // Transport selection:
+  //  - explicit ?server=ws://… wins (any host/port);
+  //  - else when served locally by veilens-server (:10000), use the WS stream on
+  //    :10001 (same host, so http→ws avoids browser mixed-content);
+  //  - else (e.g. `npm run dev` on :5173) fall back to the in-browser mock.
   function pickClient(): VeilensClient {
     if (typeof location === "undefined") return createMockClient();
-    const url = new URLSearchParams(location.search).get("server");
-    return url ? createWsClient(url) : createMockClient();
+    const explicit = new URLSearchParams(location.search).get("server");
+    if (explicit) return createWsClient(explicit);
+    if (location.port === "10000") {
+      return createWsClient(`ws://${location.hostname}:10001/chat`);
+    }
+    return createMockClient();
   }
   const client = pickClient();
 
