@@ -1,4 +1,4 @@
-"""Vault — the tool surface a headgate-generated program imports via
+"""Vault — the tool surface a privacy_box-generated program imports via
 `from vault import *`.
 
 This is the confidentiality boundary on the *tool* side: the generated program
@@ -6,8 +6,8 @@ This is the confidentiality boundary on the *tool* side: the generated program
 (`file_0`, ...). Every tool here takes an alias, resolves it to a real path
 internally (via the manifest), and never returns or exposes the real path.
 
-The tool contract (signatures + semantics) matches headgate/resources/
-headgate-system.md exactly:
+The tool contract (signatures + semantics) matches privacy_box/resources/
+privacy_box-system.md exactly:
 
   manifest()                       -> List[FileInfo]   (.alias / .kind / .size / .columns)
   search(query, k)                 -> List[Chunk]      (.file_alias / .text / .score)
@@ -47,7 +47,7 @@ from index import Chunk
 struct VaultFile(Copyable, Movable):
     # `alias` is a reserved keyword, so the field is DECLARED with backticks; a
     # generated program reads it as plain `.alias` (member access doesn't need
-    # the escape), matching the headgate-system.md contract exactly.
+    # the escape), matching the privacy_box-system.md contract exactly.
     var `alias`: String         # the alias, e.g. "file_0" (== manifest FileInfo.id)
     var kind: String            # "csv" | "pdf" | "md"
     var size: Int
@@ -141,7 +141,7 @@ def ask_local(instruction: String, content: String) raises -> String:
     """The trusted on-device reader: POST `instruction` + real `content` to the
     local chat-completions endpoint and return the assistant's reply. This is the
     ONLY tool that sees real content as text; it runs locally and never egresses.
-    Mirrors headgate transport.LocalClient.chat."""
+    Mirrors privacy_box transport.LocalClient.chat."""
     var msg = instruction + "\n\n" + content
     var body = String('{"model":"') + _local_model() + '","messages":[{"role":"user","content":"'
     body += _json_escape(msg) + '"}]}'

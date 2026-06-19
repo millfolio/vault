@@ -82,40 +82,40 @@ public final class Bootstrapper: ObservableObject {
     private let serverZipURL =
         URL(string: "https://github.com/millrace/inference-server/releases/latest/download/runner.zip")!
 
-    // ── headgate (privacy harness) ─────────────────────────────────────────────
-    // headgate is a separate engine on a DIFFERENT Mojo nightly than the server
+    // ── privacy_box (privacy harness) ─────────────────────────────────────────────
+    // privacy_box is a separate engine on a DIFFERENT Mojo nightly than the server
     // (its flare/json forks don't build on the server's), so it gets its own
     // toolchain + install tree. It's a one-shot CLI (not a daemon), so "start"
     // opens a ready-to-use Terminal rather than launching a server.
-    public static let headgateMojoVersion = "1.0.0b3.dev2026061206"
-    private let headgateZipURL =
-        URL(string: "https://github.com/veilensapp/headgate/releases/latest/download/headgate.zip")!
-    private var headgateMojoCompilerURL: URL {
-        URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.headgateMojoVersion)-release.conda")!
+    public static let privacy_boxMojoVersion = "1.0.0b3.dev2026061206"
+    private let privacy_boxZipURL =
+        URL(string: "https://github.com/veilensapp/privacy_box/releases/latest/download/privacy_box.zip")!
+    private var privacy_boxMojoCompilerURL: URL {
+        URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
-    private var headgateMojoPythonURL: URL {
-        URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.headgateMojoVersion)-release.conda")!
+    private var privacy_boxMojoPythonURL: URL {
+        URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
-    private var headgateMojoPrefix: URL { support.appendingPathComponent("headgate-mojo", isDirectory: true) }
-    private var headgateRoot: URL { support.appendingPathComponent("headgate-engine", isDirectory: true) }
-    /// headgate checkout inside the unpacked bundle (sibling of flare/json/jinja2.mojo).
-    private var headgateDir: URL { headgateRoot.appendingPathComponent("headgate", isDirectory: true) }
-    private var headgateBin: URL { headgateDir.appendingPathComponent("build/headgate") }
-    /// The built headgate binary is present.
-    public var isHeadgateInstalled: Bool { FileManager.default.isExecutableFile(atPath: headgateBin.path) }
+    private var privacy_boxMojoPrefix: URL { support.appendingPathComponent("privacy_box-mojo", isDirectory: true) }
+    private var privacy_boxRoot: URL { support.appendingPathComponent("privacy_box-engine", isDirectory: true) }
+    /// privacy_box checkout inside the unpacked bundle (sibling of flare/json/jinja2.mojo).
+    private var privacy_boxDir: URL { privacy_boxRoot.appendingPathComponent("privacy_box", isDirectory: true) }
+    private var privacy_boxBin: URL { privacy_boxDir.appendingPathComponent("build/privacy_box") }
+    /// The built privacy_box binary is present.
+    public var isPrivacyBoxInstalled: Bool { FileManager.default.isExecutableFile(atPath: privacy_boxBin.path) }
 
     // ── veilens (personal data vault) ───────────────────────────────────────────
-    // veilens is a one-shot vault CLI built on the SAME Mojo nightly as headgate.
+    // veilens is a one-shot vault CLI built on the SAME Mojo nightly as privacy_box.
     // Its bundle vendors the toolbox (flare/json + the LanceDB binding + pdftotext/
     // zlib readers) + prebuilt FFI shims, so the on-device build is
     // `mojo build src/veilens.mojo -I ../flare -I … ` then installVeilensShims().
     private let veilensZipURL =
         URL(string: "https://github.com/veilensapp/veilens/releases/latest/download/veilens.zip")!
     private var veilensMojoCompilerURL: URL {
-        URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.headgateMojoVersion)-release.conda")!
+        URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
     private var veilensMojoPythonURL: URL {
-        URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.headgateMojoVersion)-release.conda")!
+        URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
     private var veilensMojoPrefix: URL { support.appendingPathComponent("veilens-mojo", isDirectory: true) }
     private var veilensRoot: URL { support.appendingPathComponent("veilens-engine", isDirectory: true) }
@@ -126,7 +126,7 @@ public final class Bootstrapper: ObservableObject {
     public var isVeilensInstalled: Bool { FileManager.default.isExecutableFile(atPath: veilensBin.path) }
 
     // ── app server (the streaming WS backend, from veilensapp/app) ──────────────
-    // Built ON-DEVICE against the headgate engine tree, reusing headgate's Mojo
+    // Built ON-DEVICE against the privacy_box engine tree, reusing privacy_box's Mojo
     // toolchain + flare shims — so no new toolchain. See app/server/CUTOVER.md.
     private let appZipURL =
         URL(string: "https://github.com/veilensapp/app/releases/latest/download/veilens-app.zip")!
@@ -138,12 +138,12 @@ public final class Bootstrapper: ObservableObject {
     // ── default config files (~/.config) ───────────────────────────────────────
     // Seeded with sensible defaults on install if absent, so a fresh setup has an
     // editable starting point. The engines read these (millrace = inference-server,
-    // headgate = headgate); we NEVER overwrite an existing file.
+    // privacy_box = privacy_box); we NEVER overwrite an existing file.
     private var dotConfig: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config", isDirectory: true)
     }
     private var millraceConfigURL: URL { dotConfig.appendingPathComponent("millrace/config.json") }
-    private var headgateConfigURL: URL { dotConfig.appendingPathComponent("headgate/config.json") }
+    private var privacy_boxConfigURL: URL { dotConfig.appendingPathComponent("privacy_box/config.json") }
 
     private static let millraceConfigDefault = """
     {
@@ -153,7 +153,7 @@ public final class Bootstrapper: ObservableObject {
       "kv_budget_mb": 8192
     }
     """
-    private static let headgateConfigDefault = """
+    private static let privacy_boxConfigDefault = """
     {
       "local_url": "http://127.0.0.1:8000/v1",
       "local_model": "Qwen2.5-0.5B-Instruct",
@@ -676,90 +676,90 @@ public final class Bootstrapper: ObservableObject {
         try run(dl, [modelID], cwd: backendDir, env: env)
     }
 
-    // ── headgate: install ──────────────────────────────────────────────────────
+    // ── privacy_box: install ──────────────────────────────────────────────────────
     /// Menu-app entry point: fire-and-forget, drives `phase`.
-    public func installHeadgate() {
+    public func installPrivacyBox() {
         guard !isBusy else { return }
         phase = .running("Starting…")
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            do { try await self.installHeadgateEngine(); await self.set(done: true) }
+            do { try await self.installPrivacyBoxEngine(); await self.set(done: true) }
             catch { await self.set(failed: humanError(error)) }
         }
     }
 
-    /// Download headgate's Mojo toolchain + source bundle and build it. Separate
-    /// from the server: headgate is on a different nightly and ships its own
+    /// Download privacy_box's Mojo toolchain + source bundle and build it. Separate
+    /// from the server: privacy_box is on a different nightly and ships its own
     /// vendored flare/json/jinja2.mojo + prebuilt FFI shims.
-    public func installHeadgateEngine() async throws {
+    public func installPrivacyBoxEngine() async throws {
         // Idempotent: skip the whole download+build if the binary is already there.
-        if isHeadgateInstalled
-            && !mojoToolchainStale(headgateMojoPrefix, Self.headgateMojoVersion) {
-            set("headgate already installed — skipping")
+        if isPrivacyBoxInstalled
+            && !mojoToolchainStale(privacy_boxMojoPrefix, Self.privacy_boxMojoVersion) {
+            set("privacy_box already installed — skipping")
             return
         }
         let fm = FileManager.default
-        for d in [support, headgateMojoPrefix, headgateRoot, cacheDir] {
+        for d in [support, privacy_boxMojoPrefix, privacy_boxRoot, cacheDir] {
             try fm.createDirectory(at: d, withIntermediateDirectories: true)
         }
-        logHeader("Install headgate")
+        logHeader("Install privacy_box")
 
-        // 1. Mojo toolchain (headgate's nightly — distinct from the engine's).
-        if mojoToolchainStale(headgateMojoPrefix, Self.headgateMojoVersion) {
-            set("Downloading Mojo compiler for headgate (~70 MB)…")
-            try? fm.removeItem(at: headgateMojoPrefix)   // clear any stale nightly
-            try fm.createDirectory(at: headgateMojoPrefix, withIntermediateDirectories: true)
-            let compiler = try await download(headgateMojoCompilerURL, name: "headgate-mojo-compiler.conda")
+        // 1. Mojo toolchain (privacy_box's nightly — distinct from the engine's).
+        if mojoToolchainStale(privacy_boxMojoPrefix, Self.privacy_boxMojoVersion) {
+            set("Downloading Mojo compiler for privacy_box (~70 MB)…")
+            try? fm.removeItem(at: privacy_boxMojoPrefix)   // clear any stale nightly
+            try fm.createDirectory(at: privacy_boxMojoPrefix, withIntermediateDirectories: true)
+            let compiler = try await download(privacy_boxMojoCompilerURL, name: "privacy_box-mojo-compiler.conda")
             set("Extracting Mojo…")
-            try extractConda(compiler, into: headgateMojoPrefix)
-            let py = try await download(headgateMojoPythonURL, name: "headgate-mojo-python.conda")
-            try extractConda(py, into: headgateMojoPrefix)
-            recordMojoVersion(headgateMojoPrefix, Self.headgateMojoVersion)
+            try extractConda(compiler, into: privacy_boxMojoPrefix)
+            let py = try await download(privacy_boxMojoPythonURL, name: "privacy_box-mojo-python.conda")
+            try extractConda(py, into: privacy_boxMojoPrefix)
+            recordMojoVersion(privacy_boxMojoPrefix, Self.privacy_boxMojoVersion)
         }
-        try relocateMojoPrefix(headgateMojoPrefix)
+        try relocateMojoPrefix(privacy_boxMojoPrefix)
 
-        // 2. headgate source bundle (headgate + vendored flare/json/jinja2.mojo +
-        //    prebuilt FFI shims), published by headgate CI.
-        set("Downloading headgate source…")
-        let zip = try await download(headgateZipURL, name: "headgate.zip")
-        set("Unpacking headgate…")
-        try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", headgateRoot.path])
-        guard fm.fileExists(atPath: headgateDir.appendingPathComponent("src/headgate.mojo").path) else {
-            throw BootstrapError.step("unpack", "headgate zip missing headgate/src/headgate.mojo")
+        // 2. privacy_box source bundle (privacy_box + vendored flare/json/jinja2.mojo +
+        //    prebuilt FFI shims), published by privacy_box CI.
+        set("Downloading privacy_box source…")
+        let zip = try await download(privacy_boxZipURL, name: "privacy_box.zip")
+        set("Unpacking privacy_box…")
+        try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", privacy_boxRoot.path])
+        guard fm.fileExists(atPath: privacy_boxDir.appendingPathComponent("src/privacy_box.mojo").path) else {
+            throw BootstrapError.step("unpack", "privacy_box zip missing privacy_box/src/privacy_box.mojo")
         }
 
-        // 3. Build headgate against its vendored siblings.
+        // 3. Build privacy_box against its vendored siblings.
         set("Locating Python…")
         let python = try findPython()
-        set("Building headgate (first run, ~1 min)…")
-        let mojo = headgateMojoPrefix.appendingPathComponent("bin/mojo").path
-        try run(mojo, ["build", "src/headgate.mojo",
+        set("Building privacy_box (first run, ~1 min)…")
+        let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
+        try run(mojo, ["build", "src/privacy_box.mojo",
                        "-I", "../flare", "-I", "../json", "-I", "../jinja2.mojo/src",
-                       "-o", "build/headgate"],
-                cwd: headgateDir, env: headgateMojoEnv(python: python))
+                       "-o", "build/privacy_box"],
+                cwd: privacy_boxDir, env: privacy_boxMojoEnv(python: python))
         // The HTTP server for the web UI (serves web/dist + POST /chat on :10000).
-        set("Building headgate web server…")
+        set("Building privacy_box web server…")
         try run(mojo, ["build", "src/server.mojo",
                        "-I", "../flare", "-I", "../json", "-I", "../jinja2.mojo/src",
-                       "-o", "build/headgate-server"],
-                cwd: headgateDir, env: headgateMojoEnv(python: python))
+                       "-o", "build/privacy_box-server"],
+                cwd: privacy_boxDir, env: privacy_boxMojoEnv(python: python))
 
         // 4. Put the bundle's FFI shims under the toolchain's lib/, so flare finds
-        //    them via $CONDA_PREFIX/lib at runtime — headgate runs WITH CONDA_PREFIX
+        //    them via $CONDA_PREFIX/lib at runtime — privacy_box runs WITH CONDA_PREFIX
         //    set (it shells `mojo build` for the sandboxed generated-code compile),
         //    unlike the always-serving server.
-        try installHeadgateShims()
-        ensureConfig(at: headgateConfigURL, Self.headgateConfigDefault)
-        await recordLatest("headgate", repo: "veilensapp/headgate")
+        try installPrivacyBoxShims()
+        ensureConfig(at: privacy_boxConfigURL, Self.privacy_boxConfigDefault)
+        await recordLatest("privacy_box", repo: "veilensapp/privacy_box")
     }
 
-    /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the headgate
+    /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the privacy_box
     /// Mojo prefix's lib/, where flare's `$CONDA_PREFIX/lib` lookup finds them.
-    private func installHeadgateShims() throws {
+    private func installPrivacyBoxShims() throws {
         let fm = FileManager.default
-        let libDir = headgateMojoPrefix.appendingPathComponent("lib", isDirectory: true)
+        let libDir = privacy_boxMojoPrefix.appendingPathComponent("lib", isDirectory: true)
         try fm.createDirectory(at: libDir, withIntermediateDirectories: true)
-        let buildDir = headgateDir.appendingPathComponent("build", isDirectory: true)
+        let buildDir = privacy_boxDir.appendingPathComponent("build", isDirectory: true)
         for name in (try? fm.contentsOfDirectory(atPath: buildDir.path)) ?? []
         where name.hasSuffix(".so") || name.hasSuffix(".dylib") {
             let dst = libDir.appendingPathComponent(name)
@@ -768,83 +768,83 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// `mojo build` env for the headgate toolchain prefix.
-    private func headgateMojoEnv(python: URL) -> [String: String] {
+    /// `mojo build` env for the privacy_box toolchain prefix.
+    private func privacy_boxMojoEnv(python: URL) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        let extraPath = "\(python.deletingLastPathComponent().path):\(headgateMojoPrefix.appendingPathComponent("bin").path)"
+        let extraPath = "\(python.deletingLastPathComponent().path):\(privacy_boxMojoPrefix.appendingPathComponent("bin").path)"
         env["PATH"] = extraPath + ":" + (env["PATH"] ?? "/usr/bin:/bin")
-        env["CONDA_PREFIX"] = headgateMojoPrefix.path
-        env["MODULAR_HOME"] = headgateMojoPrefix.appendingPathComponent("share/max").path
+        env["CONDA_PREFIX"] = privacy_boxMojoPrefix.path
+        env["MODULAR_HOME"] = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
         return env
     }
 
-    // ── headgate: start (open a ready-to-use Terminal) ──────────────────────────
-    /// headgate is a one-shot CLI, so "start" opens a Terminal in the install dir
+    // ── privacy_box: start (open a ready-to-use Terminal) ──────────────────────────
+    /// privacy_box is a one-shot CLI, so "start" opens a Terminal in the install dir
     /// with the toolchain env pre-set — the user sets ANTHROPIC_API_KEY, points it
-    /// at their data, and runs `./build/headgate`.
-    public func startHeadgate() {
+    /// at their data, and runs `./build/privacy_box`.
+    public func startPrivacyBox() {
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            do { try await self.launchHeadgateTerminal() }
-            catch { await self.set(failed: "headgate: \(humanError(error))") }
+            do { try await self.launchPrivacyBoxTerminal() }
+            catch { await self.set(failed: "privacy_box: \(humanError(error))") }
         }
     }
 
-    /// Write the `run-headgate.sh` launcher — sets the toolchain env (headgate
+    /// Write the `run-privacy_box.sh` launcher — sets the toolchain env (privacy_box
     /// shells `mojo build` for the sandboxed generated-code compile), cd's to the
-    /// install dir, and execs the headgate binary, forwarding any args (`"$@"`) as
+    /// install dir, and execs the privacy_box binary, forwarding any args (`"$@"`) as
     /// the task. Shared by the menu app (runs it in a NEW Terminal) and the CLI
-    /// (execs it in the CURRENT terminal so headgate takes over stdin/stdout — a
+    /// (execs it in the CURRENT terminal so privacy_box takes over stdin/stdout — a
     /// one-shot run with a task, or an interactive REPL with none). Returns its path.
     @discardableResult
-    public func writeHeadgateScript() throws -> URL {
-        let mojoBin = headgateMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = headgateMojoPrefix.appendingPathComponent("share/max").path
+    public func writePrivacyBoxScript() throws -> URL {
+        let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
+        let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
         // Single-quote paths (they live under "Application Support" — note the space).
-        let script = support.appendingPathComponent("run-headgate.sh")
+        let script = support.appendingPathComponent("run-privacy_box.sh")
         let body = """
         #!/bin/bash
-        cd '\(headgateDir.path)'
-        export CONDA_PREFIX='\(headgateMojoPrefix.path)'
+        cd '\(privacy_boxDir.path)'
+        export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
         export MODULAR_HOME='\(modularHome)'
         export PATH='\(mojoBin)':"$PATH"
         # The vault path shells `<veilens>/build/veilens manifest`, compiles the
         # generated program with `-I <veilens>/src` + its vendored siblings, and
-        # reads the ~/.config/veilens index. headgate defaults to the dev sibling
+        # reads the ~/.config/veilens index. privacy_box defaults to the dev sibling
         # layout (../veilens); point it at the installed veilens checkout instead.
-        export HEADGATE_VEILENS='\(veilensDir.path)'
+        export PRIVACY_BOX_VEILENS='\(veilensDir.path)'
         # flare's bundled OpenSSL has a CI-baked CA path; point it at the system
         # bundle so HTTPS to the Anthropic API verifies (else CertificateUntrusted).
         [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
-        exec ./build/headgate "$@"
+        exec ./build/privacy_box "$@"
         """
         try body.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
         return script
     }
 
-    public func launchHeadgateTerminal() async throws {
-        let script = try writeHeadgateScript()
+    public func launchPrivacyBoxTerminal() async throws {
+        let script = try writePrivacyBoxScript()
         let cmd = "'\(script.path)'"
         try run("/usr/bin/osascript",
                 ["-e", "tell application \"Terminal\" to activate",
                  "-e", "tell application \"Terminal\" to do script \"\(cmd)\""])
     }
 
-    // ── headgate: web (server on :10000 + open the browser) ─────────────────────
-    /// Write the `run-headgate-web.sh` launcher: set the toolchain env, start the
+    // ── privacy_box: web (server on :10000 + open the browser) ─────────────────────
+    /// Write the `run-privacy_box-web.sh` launcher: set the toolchain env, start the
     /// HTTP server (which serves the built web UI + the /chat API on :10000), and
     /// open the browser at it. Shared by the menu app (new Terminal) and the CLI
     /// (execs it in the current terminal). Returns its path.
     @discardableResult
-    public func writeHeadgateWebScript() throws -> URL {
-        let mojoBin = headgateMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = headgateMojoPrefix.appendingPathComponent("share/max").path
-        let script = support.appendingPathComponent("run-headgate-web.sh")
+    public func writePrivacyBoxWebScript() throws -> URL {
+        let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
+        let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
+        let script = support.appendingPathComponent("run-privacy_box-web.sh")
         let body = """
         #!/bin/bash
-        cd '\(headgateDir.path)'
-        export CONDA_PREFIX='\(headgateMojoPrefix.path)'
+        cd '\(privacy_boxDir.path)'
+        export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
         export MODULAR_HOME='\(modularHome)'
         export PATH='\(mojoBin)':"$PATH"
         # flare's bundled OpenSSL has a CI-baked CA path; use the system bundle.
@@ -858,32 +858,32 @@ public final class Bootstrapper: ObservableObject {
         return script
     }
 
-    /// Menu-app entry point: open the headgate web app in a new Terminal.
-    public func startHeadgateWeb() {
+    /// Menu-app entry point: open the privacy_box web app in a new Terminal.
+    public func startPrivacyBoxWeb() {
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            do { try await self.launchHeadgateWebTerminal() }
-            catch { await self.set(failed: "headgate web: \(humanError(error))") }
+            do { try await self.launchPrivacyBoxWebTerminal() }
+            catch { await self.set(failed: "privacy_box web: \(humanError(error))") }
         }
     }
 
-    public func launchHeadgateWebTerminal() async throws {
-        let script = try writeHeadgateWebScript()
+    public func launchPrivacyBoxWebTerminal() async throws {
+        let script = try writePrivacyBoxWebScript()
         let cmd = "'\(script.path)'"
         try run("/usr/bin/osascript",
                 ["-e", "tell application \"Terminal\" to activate",
                  "-e", "tell application \"Terminal\" to do script \"\(cmd)\""])
     }
 
-    /// Stop the headgate web server (started by `headgate web`). It runs as a
+    /// Stop the privacy_box web server (started by `privacy_box web`). It runs as a
     /// foreground process (not a launchd agent), so terminate it by name —
     /// killing the server makes serve-web.sh's own `wait` return and its cleanup
     /// trap tear down any `tailscale serve` mapping. Returns true if one was
     /// running. Best-effort; never throws.
     @discardableResult
-    public func stopHeadgateWeb() -> Bool {
+    public func stopPrivacyBoxWeb() -> Bool {
         // pkill exits 0 if it signaled at least one process, 1 if none matched.
-        let hit = (try? runStatus("/usr/bin/pkill", ["-f", "build/headgate-server"])) == 0
+        let hit = (try? runStatus("/usr/bin/pkill", ["-f", "build/privacy_box-server"])) == 0
         _ = try? runStatus("/usr/bin/pkill", ["-f", "scripts/serve-web.sh"])
         return hit
     }
@@ -901,12 +901,12 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// Download veilens's Mojo toolchain + source bundle and build it. Same nightly
-    /// as headgate; the bundle vendors flare/json + the LanceDB binding + pdftotext/
+    /// as privacy_box; the bundle vendors flare/json + the LanceDB binding + pdftotext/
     /// zlib + prebuilt FFI shims, so the build uses `-I` includes + installs shims.
     public func installVeilensEngine() async throws {
         // Idempotent: skip the whole download+build if the binary is already there.
         if isVeilensInstalled
-            && !mojoToolchainStale(veilensMojoPrefix, Self.headgateMojoVersion) {
+            && !mojoToolchainStale(veilensMojoPrefix, Self.privacy_boxMojoVersion) {
             set("veilens already installed — skipping")
             return
         }
@@ -916,8 +916,8 @@ public final class Bootstrapper: ObservableObject {
         }
         logHeader("Install veilens")
 
-        // 1. Mojo toolchain (same nightly as headgate).
-        if mojoToolchainStale(veilensMojoPrefix, Self.headgateMojoVersion) {
+        // 1. Mojo toolchain (same nightly as privacy_box).
+        if mojoToolchainStale(veilensMojoPrefix, Self.privacy_boxMojoVersion) {
             set("Downloading Mojo compiler for veilens (~70 MB)…")
             try? fm.removeItem(at: veilensMojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: veilensMojoPrefix, withIntermediateDirectories: true)
@@ -926,7 +926,7 @@ public final class Bootstrapper: ObservableObject {
             try extractConda(compiler, into: veilensMojoPrefix)
             let py = try await download(veilensMojoPythonURL, name: "veilens-mojo-python.conda")
             try extractConda(py, into: veilensMojoPrefix)
-            recordMojoVersion(veilensMojoPrefix, Self.headgateMojoVersion)
+            recordMojoVersion(veilensMojoPrefix, Self.privacy_boxMojoVersion)
         }
         try relocateMojoPrefix(veilensMojoPrefix)
 
@@ -962,7 +962,7 @@ public final class Bootstrapper: ObservableObject {
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the veilens
     /// Mojo prefix's lib/, where flare/zlib/lancedb's `$CONDA_PREFIX/lib` lookup
-    /// finds them. Mirrors installHeadgateShims.
+    /// finds them. Mirrors installPrivacyBoxShims.
     private func installVeilensShims() throws {
         let fm = FileManager.default
         let libDir = veilensMojoPrefix.appendingPathComponent("lib", isDirectory: true)
@@ -976,21 +976,21 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// The vault program headgate compiles + runs executes under headgate's
-    /// CONDA_PREFIX (headgate-mojo), so the veilens vault FFI shims it dlopens
+    /// The vault program privacy_box compiles + runs executes under privacy_box's
+    /// CONDA_PREFIX (privacy_box-mojo), so the veilens vault FFI shims it dlopens
     /// (liblancedbmojo / libzlibmojo + their dylib deps) must live in
-    /// headgate-mojo/lib too. Copy the ones headgate lacks from the veilens
+    /// privacy_box-mojo/lib too. Copy the ones privacy_box lacks from the veilens
     /// toolchain (same Mojo nightly → ABI-compatible). Best-effort; idempotent.
     public func linkVaultShims() {
         let fm = FileManager.default
         let src = veilensMojoPrefix.appendingPathComponent("lib")
-        let dst = headgateMojoPrefix.appendingPathComponent("lib")
+        let dst = privacy_boxMojoPrefix.appendingPathComponent("lib")
         guard fm.fileExists(atPath: src.path) else { return }
         try? fm.createDirectory(at: dst, withIntermediateDirectories: true)
         for name in (try? fm.contentsOfDirectory(atPath: src.path)) ?? []
         where name.hasSuffix(".dylib") || name.hasSuffix(".so") {
             let d = dst.appendingPathComponent(name)
-            if !fm.fileExists(atPath: d.path) {   // don't clobber headgate's own shims
+            if !fm.fileExists(atPath: d.path) {   // don't clobber privacy_box's own shims
                 try? fm.copyItem(at: src.appendingPathComponent(name), to: d)
             }
         }
@@ -1025,16 +1025,16 @@ public final class Bootstrapper: ObservableObject {
 
     /// Download the veilens app bundle (veilensapp/app) and build the streaming WS
     /// server (+ the unary HTTP server) ON-DEVICE against the already-installed
-    /// headgate engine tree — reusing headgate's Mojo toolchain + flare shims, so
-    /// no new toolchain. Requires the headgate engine (installHeadgateEngine).
+    /// privacy_box engine tree — reusing privacy_box's Mojo toolchain + flare shims, so
+    /// no new toolchain. Requires the privacy_box engine (installPrivacyBoxEngine).
     public func installAppServer() async throws {
         if isAppServerInstalled {
             set("veilens app server already installed — skipping")
             return
         }
-        guard isHeadgateInstalled else {
+        guard isPrivacyBoxInstalled else {
             throw BootstrapError.step("app server",
-                "headgate engine not installed — run `veilens install` first")
+                "privacy_box engine not installed — run `veilens install` first")
         }
         let fm = FileManager.default
         try fm.createDirectory(at: appRoot, withIntermediateDirectories: true)
@@ -1051,19 +1051,19 @@ public final class Bootstrapper: ObservableObject {
         set("Locating Python…")
         let python = try findPython()
         set("Building veilens app server (first run, ~1 min)…")
-        let mojo = headgateMojoPrefix.appendingPathComponent("bin/mojo").path
-        // Build against the installed headgate engine tree: the orchestrator
-        // (headgate/src) + the vendored flare/json/jinja2 siblings under
-        // headgate-engine/. Same -I set headgate's own server build uses, plus
-        // headgate/src.
+        let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
+        // Build against the installed privacy_box engine tree: the orchestrator
+        // (privacy_box/src) + the vendored flare/json/jinja2 siblings under
+        // privacy_box-engine/. Same -I set privacy_box's own server build uses, plus
+        // privacy_box/src.
         let inc = [
             "-I", "src",  // the bundle's own modules (events.mojo, imported by ws_server)
-            "-I", headgateDir.appendingPathComponent("src").path,
-            "-I", headgateRoot.appendingPathComponent("flare").path,
-            "-I", headgateRoot.appendingPathComponent("json").path,
-            "-I", headgateRoot.appendingPathComponent("jinja2.mojo/src").path,
+            "-I", privacy_boxDir.appendingPathComponent("src").path,
+            "-I", privacy_boxRoot.appendingPathComponent("flare").path,
+            "-I", privacy_boxRoot.appendingPathComponent("json").path,
+            "-I", privacy_boxRoot.appendingPathComponent("jinja2.mojo/src").path,
         ]
-        let env = headgateMojoEnv(python: python)
+        let env = privacy_boxMojoEnv(python: python)
         // `mojo build -o build/…` won't create the output dir, and the app bundle
         // ships no build/ — make it (mirrors the pixi tasks' `mkdir -p build`).
         try fm.createDirectory(at: appRoot.appendingPathComponent("build"), withIntermediateDirectories: true)
@@ -1119,7 +1119,7 @@ public final class Bootstrapper: ObservableObject {
     // ── veilens: the VAULT umbrella (millrace veilens …) ─────────────────────────
     // veilens is the umbrella entry point for the personal-data-vault use case. It
     // composes the three engines: the combined inference server (chat + embeddings
-    // — both models' weights), headgate (the harness + its vault web chat), and the
+    // — both models' weights), privacy_box (the harness + its vault web chat), and the
     // veilens vault tools/indexer.
 
     /// Resolve the vault dir: an explicit arg wins, then $VEILENS_VAULT, then
@@ -1145,14 +1145,14 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// `millrace veilens install` — install the combined inference server (+ both
-    /// models' weights) + headgate + veilens, idempotently. Each step skips what's
-    /// already installed (see the guards in installServer/HeadgateEngine/Veilens-
+    /// models' weights) + privacy_box + veilens, idempotently. Each step skips what's
+    /// already installed (see the guards in installServer/PrivacyBoxEngine/Veilens-
     /// Engine), so re-running is cheap and reuses anything present.
     public func installVault() async throws {
         try await installServer()           // engine + chat + embedding weights
-        try await installHeadgateEngine()   // the harness + vault web chat server
+        try await installPrivacyBoxEngine()   // the harness + vault web chat server
         try await installVeilensEngine()    // the vault tools + indexer
-        linkVaultShims()                    // veilens FFI shims → headgate-mojo/lib (vault-run dlopen)
+        linkVaultShims()                    // veilens FFI shims → privacy_box-mojo/lib (vault-run dlopen)
         ensureVaultDir()                    // leave the default vault dir ready
     }
 
@@ -1168,34 +1168,34 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// Write `run-veilens-web.sh` — the VAULT web chat launcher. Like
-    /// writeHeadgateWebScript, but exports HEADGATE_VAULT=1 + HEADGATE_VAULT_DIR
-    /// (+ VEILENS_VAULT and the loopback veilens URLs) and execs headgate's
-    /// serve-web.sh, so the headgate web server comes up in VAULT mode pointed at
+    /// writePrivacyBoxWebScript, but exports PRIVACY_BOX_VAULT=1 + PRIVACY_BOX_VAULT_DIR
+    /// (+ VEILENS_VAULT and the loopback veilens URLs) and execs privacy_box's
+    /// serve-web.sh, so the privacy_box web server comes up in VAULT mode pointed at
     /// the vault dir. The vault tools the generated program calls reach the
     /// combined inference server over loopback (:8000). Returns its path.
     @discardableResult
     public func writeVeilensWebScript(vaultDir dir: String) throws -> URL {
-        let mojoBin = headgateMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = headgateMojoPrefix.appendingPathComponent("share/max").path
+        let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
+        let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
         let script = support.appendingPathComponent("run-veilens-web.sh")
         let body = """
         #!/bin/bash
-        cd '\(headgateDir.path)'
-        export CONDA_PREFIX='\(headgateMojoPrefix.path)'
+        cd '\(privacy_boxDir.path)'
+        export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
         export MODULAR_HOME='\(modularHome)'
         export PATH='\(mojoBin)':"$PATH"
         [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
-        # VAULT mode: the headgate web server answers questions about the vault dir.
-        export HEADGATE_VAULT=1
-        export HEADGATE_VAULT_DIR='\(dir)'
+        # VAULT mode: the privacy_box web server answers questions about the vault dir.
+        export PRIVACY_BOX_VAULT=1
+        export PRIVACY_BOX_VAULT_DIR='\(dir)'
         export VEILENS_VAULT='\(dir)'
         # The vault tools (search/ask_local) hit the combined inference server over
         # loopback — embeddings + chat on one port (:8000).
         export VEILENS_EMBED_URL='http://127.0.0.1:8000/v1'
         export VEILENS_LOCAL_URL='http://127.0.0.1:8000/v1'
-        # headgate compiles the generated vault program against the veilens sources —
+        # privacy_box compiles the generated vault program against the veilens sources —
         # point its -I resolution at the installed veilens checkout.
-        export HEADGATE_VEILENS='\(veilensDir.path)'
+        export PRIVACY_BOX_VEILENS='\(veilensDir.path)'
         exec bash scripts/serve-web.sh
         """
         try body.write(to: script, atomically: true, encoding: .utf8)
@@ -1205,36 +1205,36 @@ public final class Bootstrapper: ObservableObject {
 
     /// Cutover launcher (two local servers): veilens-server serves the web UI on
     /// :10000, veilens-ws streams on :10001 — flare can't do both on one port. Both
-    /// run from the app bundle dir (so `./web/dist` resolves) with headgate's
+    /// run from the app bundle dir (so `./web/dist` resolves) with privacy_box's
     /// toolchain env (CONDA_PREFIX + flare shims) + the vault resolution env. Opens
     /// the browser; kills the background WS server when the foreground static
     /// server exits.
     public func writeVeilensAppScript(vaultDir dir: String) throws -> URL {
-        let mojoBin = headgateMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = headgateMojoPrefix.appendingPathComponent("share/max").path
+        let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
+        let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
         let serverLog = veilensLogDir.appendingPathComponent("server.log").path
         let script = support.appendingPathComponent("run-veilens-app.sh")
         let serverBin = appRoot.appendingPathComponent("build/veilens-server").path
         let wsBin = appRoot.appendingPathComponent("build/veilens-ws").path
         let body = """
         #!/bin/bash
-        # Run from the headgate engine dir: the vault orchestrator reads its
+        # Run from the privacy_box engine dir: the vault orchestrator reads its
         # sandbox/*.sb.template profiles relative to cwd (the same dir the `ask`
         # launcher uses). The UI is served via VEILENS_WEB_DIR (absolute), and the
-        # server binaries are referenced by absolute path, so cwd can be headgate's.
-        cd '\(headgateDir.path)'
-        export CONDA_PREFIX='\(headgateMojoPrefix.path)'
+        # server binaries are referenced by absolute path, so cwd can be privacy_box's.
+        cd '\(privacy_boxDir.path)'
+        export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
         export MODULAR_HOME='\(modularHome)'
         export PATH='\(mojoBin)':"$PATH"
         [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
-        export HEADGATE_VAULT_DIR='\(dir)'
+        export PRIVACY_BOX_VAULT_DIR='\(dir)'
         export VEILENS_VAULT='\(dir)'
         # The vault tools (search/ask_local) hit the combined inference server over
         # loopback — embeddings + chat on one port (:8000).
         export VEILENS_EMBED_URL='http://127.0.0.1:8000/v1'
         export VEILENS_LOCAL_URL='http://127.0.0.1:8000/v1'
         # veilens-ws compiles the generated vault program against the veilens sources.
-        export HEADGATE_VEILENS='\(veilensDir.path)'
+        export PRIVACY_BOX_VEILENS='\(veilensDir.path)'
         # Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
         export VEILENS_WEB_DIR='\(appRoot.appendingPathComponent("web/dist").path)'
         # Run both servers detached in the BACKGROUND (no Terminal) — static UI on
@@ -1257,7 +1257,7 @@ public final class Bootstrapper: ObservableObject {
     /// then start the vault app servers in the BACKGROUND (no Terminal) and open
     /// http://localhost:10000. Server output goes to the veilens server log.
     public func startVaultChat(vaultDir dir: String) async throws {
-        // 0. The vault dir must exist before headgate/veilens's `manifest` runs
+        // 0. The vault dir must exist before privacy_box/veilens's `manifest` runs
         //    over it (a clean machine has no vault dir yet).
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true)
@@ -1267,13 +1267,13 @@ public final class Bootstrapper: ObservableObject {
             if !serverRunning { try startServer() }
         }
         // Reap any stale servers holding :10000/:10001 (a prior `start`, or the
-        // legacy headgate web server) so the fresh ones can bind cleanly.
+        // legacy privacy_box web server) so the fresh ones can bind cleanly.
         _ = stopAppServer()
-        _ = stopHeadgateWeb()
+        _ = stopPrivacyBoxWeb()
         // 2. Start the vault chat. With the app server, the launcher spawns both
         //    servers detached in the background and opens the browser, then exits —
         //    no Terminal window (clients are web/mobile). Fall back to the legacy
-        //    headgate web UI (still a Terminal) only when the app server is absent.
+        //    privacy_box web UI (still a Terminal) only when the app server is absent.
         if isAppServerInstalled {
             let script = try writeVeilensAppScript(vaultDir: dir)
             try run("/bin/bash", [script.path])
@@ -1358,27 +1358,27 @@ public final class Bootstrapper: ObservableObject {
 
     // ── diagnosable one-shot runs (ask / index) ────────────────────────────────
     // The `ask` and `index` subcommands used to execv /bin/bash, which REPLACES
-    // this process — so a failure inside the child (e.g. headgate's `posix_spawn`
+    // this process — so a failure inside the child (e.g. privacy_box's `posix_spawn`
     // of the mojo compiler failing with ENOENT) left nothing to log. These run the
     // launcher as a child instead, mirroring its combined stdout/stderr to both the
     // terminal and the veilens log, after dumping the launcher + the paths it
     // depends on. Returns the child's exit status (caller maps it to the CLI exit).
 
-    /// Run the headgate vault loop for one question. See runLoggedScript.
+    /// Run the privacy_box vault loop for one question. See runLoggedScript.
     public func runVaultAsk(question: String, vaultDir: String) throws -> Int32 {
         refreshServerRunning()
-        let script = try writeHeadgateScript()
+        let script = try writePrivacyBoxScript()
         let args = ["vault", question, vaultDir]
         logRunDiagnostics(label: "ask", launcher: script, args: args, probes: [
-            ("headgate launcher", script.path),
-            ("headgate dir (cwd)", headgateDir.path),
-            ("headgate binary", headgateBin.path),
-            ("mojo compiler (headgate shells it)", headgateMojoPrefix.appendingPathComponent("bin/mojo").path),
+            ("privacy_box launcher", script.path),
+            ("privacy_box dir (cwd)", privacy_boxDir.path),
+            ("privacy_box binary", privacy_boxBin.path),
+            ("mojo compiler (privacy_box shells it)", privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path),
             ("veilens vault tools (src)", veilensDir.appendingPathComponent("src/vault.mojo").path),
             ("vault dir", vaultDir),
         ])
         // Per-ask transcript: the CLI names it (timestamp + question slug) and the
-        // headgate orchestrator appends the outside-model prompt + program to it.
+        // privacy_box orchestrator appends the outside-model prompt + program to it.
         let session = newSessionLog(for: question)
         set("session transcript → \(session.path)")
         return try runLoggedScript(script.path, args, label: "ask",
@@ -1471,7 +1471,7 @@ public final class Bootstrapper: ObservableObject {
 
     // ── self-update (CLI + components) ──────────────────────────────────────────
     /// Update the `veilens` CLI via Homebrew (best-effort), then refresh the
-    /// downloadable components — the inference-server engine, headgate, and the
+    /// downloadable components — the inference-server engine, privacy_box, and the
     /// veilens engine — to their latest releases. The pinned Mojo toolchains and the
     /// (multi-GB) model weights are preserved; only the source bundles are re-fetched
     /// and rebuilt. Progress streams through `onProgress`.
@@ -1485,16 +1485,16 @@ public final class Bootstrapper: ObservableObject {
         try? FileManager.default.removeItem(at: engineRoot)   // drop built binary + source (weights/toolchain kept)
         try await installServer()
 
-        set("Refreshing headgate, the privacy agent harness…")
-        try? FileManager.default.removeItem(at: headgateRoot)
-        try await installHeadgateEngine()
+        set("Refreshing privacy_box, the privacy agent harness…")
+        try? FileManager.default.removeItem(at: privacy_boxRoot)
+        try await installPrivacyBoxEngine()
 
         set("Refreshing veilens, the vault engine…")
         try? FileManager.default.removeItem(at: veilensRoot)
         try await installVeilensEngine()
-        linkVaultShims()   // veilens FFI shims → headgate-mojo/lib (vault-run dlopen)
+        linkVaultShims()   // veilens FFI shims → privacy_box-mojo/lib (vault-run dlopen)
 
-        // The streaming app server (built on-device against headgate). Best-effort:
+        // The streaming app server (built on-device against privacy_box). Best-effort:
         // skips cleanly until veilensapp/app publishes a release to download.
         set("Refreshing veilens app server…")
         try? FileManager.default.removeItem(at: appRoot)
@@ -1581,7 +1581,7 @@ public final class Bootstrapper: ObservableObject {
         return [
             ("cli (veilens)", shown(brewCliVersion())),
             ("inference server", shown(readVersion("inference-server"))),
-            ("headgate", shown(readVersion("headgate"))),
+            ("privacy_box", shown(readVersion("privacy_box"))),
             ("veilens engine", shown(readVersion("veilens"))),
             ("app server", shown(readVersion("app"))),
         ]

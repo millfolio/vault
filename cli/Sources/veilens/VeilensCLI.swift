@@ -7,7 +7,7 @@ import VeilensCore
 // lifecycle as the millrace app's Bootstrapper, into the shared install tree
 // (~/Library/Application Support/Millrace) + the me.millrace.server launchd job, so
 // `veilens` and the `millrace` CLI interoperate on one inference server. `install`
-// provisions the server + headgate + the veilens vault; `start` brings them all up
+// provisions the server + privacy_box + the veilens vault; `start` brings them all up
 // (the vault site at http://localhost:10000); `stop` tears them down.
 
 @main
@@ -22,16 +22,16 @@ struct Veilens: AsyncParsableCommand {
 // ── veilens install ──────────────────────────────────────────────────────────
 struct Install: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Install the millrace inference server, headgate, and the veilens local site.",
+        abstract: "Install the millrace inference server, privacy_box, and the veilens local site.",
         discussion: """
         Idempotent — reuses anything already installed. Provisions the combined \
         inference server (chat + embeddings, including both models' weights), the \
-        headgate privacy harness + its vault web site, and the veilens vault tools.
+        privacy_box privacy harness + its vault web site, and the veilens vault tools.
         """)
     @MainActor func run() async throws {
         let boot = streaming()
         try await boot.installVault()
-        print("✓ veilens installed (inference server + headgate + veilens site)")
+        print("✓ veilens installed (inference server + privacy_box + veilens site)")
     }
 }
 
@@ -41,7 +41,7 @@ struct Update: AsyncParsableCommand {
         abstract: "Update veilens and its components to the latest release.",
         discussion: """
         Upgrades the `veilens` CLI via Homebrew, then refreshes the downloadable \
-        components (inference-server engine, headgate, veilens engine) to their \
+        components (inference-server engine, privacy_box, veilens engine) to their \
         latest releases. The Mojo toolchains and the model weights are kept, so it \
         only re-fetches + rebuilds the source bundles. Progress is logged to \
         ~/Library/Logs/Veilens/<date>.log.
@@ -106,7 +106,7 @@ struct Stop: AsyncParsableCommand {
         try boot.stopServer()
         print(wasRunning ? "✓ inference server stopped" : "• inference server was not running")
         let stoppedApp = boot.stopAppServer()
-        let stoppedWeb = boot.stopHeadgateWeb()
+        let stoppedWeb = boot.stopPrivacyBoxWeb()
         print(stoppedApp || stoppedWeb
               ? "✓ veilens app stopped" : "• veilens app was not running")
     }
@@ -120,7 +120,7 @@ struct Status: AsyncParsableCommand {
         print("server:     \(mark(boot.isServerInstalled))")
         print("weights:    \(mark(boot.weightsPresent))")
         print("embeddings: \(mark(boot.embedWeightsPresent))")
-        print("headgate:   \(mark(boot.isHeadgateInstalled))")
+        print("privacy_box:   \(mark(boot.isPrivacyBoxInstalled))")
         print("veilens:    \(mark(boot.isVeilensInstalled))")
         print("app server: \(mark(boot.isAppServerInstalled))")
     }
@@ -152,7 +152,7 @@ struct Ask: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "One-shot vault answer (`veilens ask \"<question>\"`).",
         discussion: """
-        Runs the headgate vault loop over your vault dir: a model writes a Mojo \
+        Runs the privacy_box vault loop over your vault dir: a model writes a Mojo \
         program that uses the veilens vault tools over your real data locally, and \
         the answer is printed here. The vault dir is $VEILENS_VAULT, else ~/.config/veilens/vault. \
         Needs the inference server running.
@@ -171,7 +171,7 @@ struct Ask: AsyncParsableCommand {
         // up, else `ask` blocks on a dead endpoint with no feedback.
         try boot.ensureInferenceServer()
         print("Thinking — progress below (first run can take a minute):")
-        // Run the headgate vault loop (`vault "<q>" <dir>`) as a logged child so its
+        // Run the privacy_box vault loop (`vault "<q>" <dir>`) as a logged child so its
         // streamed progress + the answer (and any failure) surface here and in the log.
         let code = try boot.runVaultAsk(question: q, vaultDir: dir)
         try finish(code, boot, "veilens ask")

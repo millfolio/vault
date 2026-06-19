@@ -1,8 +1,8 @@
 name: veilens zip
 
 # Builds veilens.zip — the veilens source bundle the Millrace app downloads, then
-# `mojo build`s on-device. See scripts/package_veilens.sh. Mirrors headgate's
-# headgate-zip.yml; veilens now links the full toolbox (flare HTTP, the LanceDB
+# `mojo build`s on-device. See scripts/package_veilens.sh. Mirrors privacy_box's
+# privacy_box-zip.yml; veilens now links the full toolbox (flare HTTP, the LanceDB
 # Rust shim, pdftotext + zlib), so the siblings are checked out and their FFI
 # shims built before the compile-check.
 on:

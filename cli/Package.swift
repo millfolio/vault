@@ -17,7 +17,7 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         // Shared engine-lifecycle logic: install/build/start the millrace inference
-        // server + headgate + the veilens vault. The same Bootstrapper the millrace
+        // server + privacy_box + the veilens vault. The same Bootstrapper the millrace
         // app uses (it installs into the shared ~/Library/Application Support/Millrace
         // tree + the me.millrace.server launchd job), so the `veilens` and `millrace`
         // CLIs interoperate on one server.

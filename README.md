@@ -5,7 +5,7 @@ ask open-ended questions, answered **locally**. A frontier model writes the code
 that runs on your data; the data never leaves the machine.
 
 This repo consolidates what used to be three separate repos
-(`veilens` + `headgate` + `cli`) into one. History was intentionally not
+(`veilens` + `privacy_box` + `cli`) into one. History was intentionally not
 preserved.
 
 ## Layout
@@ -13,7 +13,7 @@ preserved.
 | dir | was | language | what it does |
 |---|---|---|---|
 | **`core/`** | veilens | Mojo | the vault: indexer, embeddings, the tool surface a sandboxed program imports, the ask loop |
-| **`sandbox/`** | headgate | Mojo | the privacy harness: brokers between the local engine and a frontier model, sandboxes generated code, enforces egress |
+| **`privacy-box/`** | headgate | Mojo | the privacy harness: brokers between the local engine and a frontier model, sandboxes generated code, enforces egress |
 | **`cli/`** | cli | Swift | the `vault` umbrella command — `install` / `start` / `stop` / `index` / `ask`; provisions the engine + sandbox + vault |
 
 ## Dependencies (separate repos in the `millfolio` org)
@@ -36,10 +36,10 @@ access is just an `ANTHROPIC_API_KEY` the user supplies — nothing to install.
 One `pixi.toml` at the repo root builds both Mojo binaries — the "one mojo":
 
 ```sh
-pixi run build      # -> build/vault (core) + build/sandbox (headgate)
-pixi run vault      # just the vault binary
-pixi run sandbox    # just the privacy harness
-pixi run cli        # the Swift umbrella CLI (separate toolchain)
+pixi run build       # -> build/vault (core) + build/privacy_box
+pixi run vault       # just the vault binary
+pixi run privacy-box # just the privacy harness
+pixi run cli         # the Swift umbrella CLI (separate toolchain)
 ```
 
 The libraries are sibling repos under `~/dev/millfolio/` (flare, json,

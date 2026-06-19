@@ -2,7 +2,7 @@
 #
 # Build veilens.zip — the veilens source bundle the Millrace app downloads, then
 # `mojo build`s on-device against a separately-fetched Mojo compiler (see
-# millrace/app Bootstrapper). Mirrors headgate/scripts/package_headgate.sh.
+# millrace/app Bootstrapper). Mirrors privacy_box/scripts/package_privacy_box.sh.
 #
 # veilens links the whole toolbox, so the bundle unzips to six siblings:
 #
