@@ -1,0 +1,74 @@
+[workspace]
+name = "headgate"
+version = "0.0.1"
+authors = ["Marius S <marius@seritan.net>"]
+description = "Privacy harness: a frontier model writes code that runs on private data locally; the data never leaves the machine. See README.md / PRIOR-ART.md."
+# Nightly Mojo, pinned to the org nightly. flare + json forks are on this nightly
+# (json ported, mozz disabled), so headgate matches: `-I ../flare` (HTTP transport,
+# pulls `-I ../json` transitively) and `-I ../jinja2.mojo/src` (templating) all resolve
+# against the same toolchain. See PRIOR-ART.md.
+channels = [
+    "https://conda.modular.com/max-nightly",
+    "conda-forge",
+]
+platforms = ["osx-arm64"]
+
+[dependencies]
+mojo = "==1.0.0b3.dev2026061206"
+# flare's runtime deps — needed to build flare's FFI shims into this env (the
+# `flare-ffi` task) so flare's HTTP/TLS client works when consumed via -I ../flare.
+openssl          = ">=3.6.1,<4"
+ca-certificates  = ">=2025.1.31"
+zlib             = ">=1.3.1,<2"
+libbrotlicommon  = ">=1,<2"
+libbrotlidec     = ">=1,<2"
+libbrotlienc     = ">=1,<2"
+
+[tasks]
+# The verified containment boundary (SPIKE.md). Pure shell + sandbox-exec — needs
+# no Mojo toolchain, so this runs even before `pixi install` finishes.
+spike = "./sandbox/spike.sh"
+
+# The VAULT run profile's loopback-only network rule: proves outbound to
+# 127.0.0.1/localhost is allowed while all other egress is denied (plus the same
+# read/write containment as `spike`). Stands in stock tools for the Mojo binary;
+# Seatbelt enforces at the syscall level. See sandbox/headgate-vault.sb.template.
+vault-spike = "bash ./sandbox/vault-spike.sh"
+
+# Build flare's FFI shims (libflare_tls/zlib/brotli/fs) into THIS env's
+# $CONDA_PREFIX/lib so flare's HTTP/TLS client works when consumed via -I ../flare.
+# Sourced (the scripts use `return`); idempotent. Mirrors inference-server's flare-tls.
+flare-ffi = "bash -c 'source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh'"
+
+# Build the EXTRA FFI shims a VAULT program (from vault import *) dlopens at RUN
+# time, into THIS env's $CONDA_PREFIX/lib: libzlibmojo (PDF FlateDecode) +
+# liblancedbmojo (the on-device vector store search() queries). flare's shims come
+# from flare-ffi. Without these the loopback-sandboxed vault binary fails to
+# dlopen liblancedbmojo/libzlibmojo. Mirrors veilens/pixi.toml's `ffi` task, but
+# installs into headgate's env (where the generated binary loads its dylibs).
+vault-ffi = { cmd = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; bash ../lancedb.mojo/ffi/build.sh'", depends-on = ["flare-ffi"] }
+
+# Compile probe: prove flare's HttpClient is usable from headgate's env.
+flare-probe = { cmd = "mkdir -p build && mojo build src/flare_probe.mojo -I ../flare -I ../json -o build/flare-probe && ./build/flare-probe", depends-on = ["flare-ffi"] }
+
+# Runtime-verify LocalClient's flare HTTP path against a canned OpenAI server.
+local-probe = { cmd = "mkdir -p build && python3 scripts/local_test_server.py & SRV=$!; sleep 1; mojo build src/local_probe.mojo -I ../flare -I ../json -o build/local-probe && ./build/local-probe; R=$?; kill $SRV 2>/dev/null; exit $R", depends-on = ["flare-ffi"] }
+
+# Proves the EgressGuard blocks real-data fingerprints + canary tokens while
+# letting clean payloads through (confidentiality is actually enforced).
+egress-test  = { cmd = "mkdir -p build && mojo build src/egress_test.mojo -o build/egress-test && ./build/egress-test" }
+
+# Unit-test the remote-API token Budget (offline).
+budget-test = { cmd = "mkdir -p build && mojo build src/budget_test.mojo -o build/budget-test && ./build/budget-test" }
+
+# Full composition root (src/headgate.mojo — the VAULT CLI harness). transport.mojo
+# imports flare's HttpClient + json, so this needs -I ../flare -I ../json and the
+# flare FFI shims; the vault run path dlopens the extra shims from vault-ffi. This
+# is what `pixi run build` produces.
+build      = { cmd = "mkdir -p build && mojo build src/headgate.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -o build/headgate", depends-on = ["flare-ffi", "vault-ffi"] }
+build-full = { cmd = "mkdir -p build && mojo build src/headgate.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -o build/headgate", depends-on = ["flare-ffi", "vault-ffi"] }
+
+# headgate over HTTP (src/server.mojo) — the local backend for web/. Same
+# orchestrator as the CLI, served on 127.0.0.1:10000 (POST /chat).
+build-server = { cmd = "mkdir -p build && mojo build src/server.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -o build/headgate-server", depends-on = ["flare-ffi"] }
+serve-web    = { cmd = "bash scripts/serve-web.sh", depends-on = ["build-server"] }

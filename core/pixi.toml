@@ -1,0 +1,55 @@
+[workspace]
+name = "veilens"
+version = "0.1.0"
+authors = ["Marius S <marius@seritan.net>"]
+description = "Personal data vault — ask open-ended questions about your CSV/PDF/Markdown files locally, built on the headgate privacy harness."
+# Org nightly — matches headgate/flare/lancedb.mojo so cross-repo `-I` resolves
+# against the same toolchain.
+channels = [
+    "https://conda.modular.com/max-nightly",
+    "conda-forge",
+]
+platforms = ["osx-arm64"]
+
+[dependencies]
+mojo = "==1.0.0b3.dev2026061206"
+# zlib — pdftotext.mojo's /FlateDecode path goes through zlib.mojo's shim, which
+# is compiled against this conda zlib by the `ffi` task.
+zlib = ">=1.3.1,<2"
+# flare's runtime deps — needed to build flare's HTTP FFI shim into this env so
+# the embed/ask_local HTTP clients work when consumed via -I ../flare.
+openssl          = ">=3.6.1,<4"
+ca-certificates  = ">=2025.1.31"
+libbrotlicommon  = ">=1,<2"
+libbrotlidec     = ">=1,<2"
+libbrotlienc     = ">=1,<2"
+
+[tasks]
+# Build the native FFI shims this project links against into $CONDA_PREFIX/lib:
+#   - libzlibmojo  (zlib.mojo)      — PDF /FlateDecode decompression
+#   - libflare_*   (flare http/tls) — the HTTP client for embed/ask_local
+#   - liblancedbmojo (Rust cdylib)  — the on-device vector store (slow first build)
+# Idempotent; sourced where the scripts use `return`. Run via `pixi run ffi`.
+ffi = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh; bash ../lancedb.mojo/ffi/build.sh'"
+
+# All the -I include paths veilens needs: flare/json (HTTP + JSON), the LanceDB
+# binding, and the pdftotext + zlib readers. Keep in sync with `build`.
+manifest = { cmd = "mkdir -p build && mojo build src/veilens.mojo -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -o build/veilens && ./build/veilens manifest", depends-on = ["ffi"] }
+build = { cmd = "mkdir -p build && mojo build src/veilens.mojo -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -o build/veilens", depends-on = ["ffi"] }
+# Smoke-test the readers against the throwaway vault in .scratch/vault (csv, md,
+# and a real PDF). No network/model needed — exercises csv_rows/md_text/pdf_text.
+smoke-readers = { cmd = "./build/veilens manifest .scratch/vault && echo '---' && ./build/veilens read file_0 .scratch/vault && echo '---' && ./build/veilens read file_1 .scratch/vault && echo '---' && ./build/veilens read file_2 .scratch/vault", depends-on = ["build"] }
+
+# Smoke-test the embedding client. With no inference-server up it should fail
+# gracefully with a clear "endpoint not live" message (proves the client side).
+smoke-embed = { cmd = "./build/veilens embed 'hello world'", depends-on = ["build"] }
+
+# Smoke-test the indexer end to end against .scratch/vault. Needs the
+# inference-server embeddings endpoint live; without it, aborts at the first
+# chunk's embed() with a clear error (proving the chunk+LanceDB wiring runs).
+smoke-index = { cmd = "./build/veilens index .scratch/vault", depends-on = ["build"] }
+
+# Type-check the vault tool surface the way a headgate-generated program uses it:
+# `from vault import *` over -I src. Proves the `from vault import *` contract
+# compiles (manifest/search/csv_rows/pdf_text/md_text/ask_local/print_answer).
+build-vault = { cmd = "mkdir -p build && mojo build .scratch/vault_probe.mojo -I src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -o build/vault-probe", depends-on = ["ffi"] }

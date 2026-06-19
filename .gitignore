@@ -1,0 +1,7 @@
+/build/
+/dist/
+/.pixi/
+/.build/
+.astro/
+node_modules/
+*.lock
