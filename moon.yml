@@ -1,0 +1,30 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+layer: 'application'
+tags: ['mojo', 'swift']
+# Mojo build-dep siblings (-I ../x). Affected-detection: rebuild vault when a dep's sources change.
+dependsOn: ['flare', 'json', 'lancedb', 'pdftotext', 'zlib', 'csv', 'jinja2']
+
+tasks:
+  # ── build / check ──────────────────────────────────────────────
+  build: # Mojo binaries: build/vault (core) + build/privacy_box
+    command: 'pixi run build'
+    toolchain: 'system'
+    inputs: ['core/**/*.mojo', 'privacy-box/**/*', 'pixi.toml', 'pixi.lock']
+    outputs: ['build/**/*']
+  check:
+    command: 'pixi run build'
+    toolchain: 'system'
+  build-cli: # the Swift `mill` umbrella CLI
+    command: 'swift build --package-path cli --product mill'
+    toolchain: 'system'
+    inputs: ['cli/Sources/**/*.swift', 'cli/Package.swift']
+
+  # ── release artifacts (replaces scripts/package_bundle.sh + update-formula.sh) ──
+  bundle: # the single install source bundle the `mill` installer downloads
+    command: 'bash scripts/package_bundle.sh millfolio.zip'
+    toolchain: 'system'
+    inputs: ['scripts/package_bundle.sh', 'core/**/*', 'privacy-box/**/*']
+    outputs: ['millfolio.zip']
+  formula: # bump the Homebrew formula to a published tag — moon run vault:formula -- v0.4.1
+    command: 'bash cli/dist/homebrew/update-formula.sh'
+    toolchain: 'system'
