@@ -1,4 +1,4 @@
-"""server — the Veilens app backend over HTTP (flare).
+"""server — the millfolio app backend over HTTP (flare).
 
 Migrated from headgate/src/server.mojo. The vault brains stay in headgate; this
 server imports them as a library via `-I ../../headgate/src` (build wired in
@@ -10,18 +10,18 @@ the CLI does, on localhost:10000, behind:
     OPTIONS *    (CORS preflight, so a web app on another port can call us)
 
 Single-threaded reactor — one task in flight at a time. The orchestrator lives
-in a heap `VeilensState` reached through a pointer so the borrowed-self handler
+in a heap `MillfolioState` reached through a pointer so the borrowed-self handler
 can still run `mut` codegen.
 
 VAULT-ONLY: `/chat` always runs the private-vault codegen loop (`run_vault_task`)
 over the resolved vault dir.
 
 PHASE 1 (this file): behavior-preserving lift of the headgate server. The
-streaming Veilens protocol (status / approval-request / debug / message events,
+streaming millfolio protocol (status / approval-request / debug / message events,
 see ../../protocol) is the next phase — it needs an event hook in the orchestrator
 and a streaming/duplex transport, so it's intentionally NOT here yet.
 
-    pixi run build   # -> build/veilens-server, listens on 127.0.0.1:10000
+    pixi run build   # -> build/millfolio-server, listens on 127.0.0.1:10000
 """
 
 from std.memory import alloc
@@ -39,7 +39,7 @@ from json import loads
 comptime PORT = 10000
 
 
-struct VeilensState(Movable):
+struct MillfolioState(Movable):
     """The vault orchestrator + vault dir, loaded once and reached by the
     (borrowed-self) handler through a pointer so `run_vault_task` can still take
     `mut self`. `/chat` always runs `run_vault_task` over `vault_dir`."""
@@ -85,10 +85,10 @@ def _extract_message(body: String) -> String:
 
 
 def _web_root() -> String:
-    """The dir holding the built UI. $VEILENS_WEB_DIR (an ABSOLUTE path set by the
+    """The dir holding the built UI. $MILLFOLIO_WEB_DIR (an ABSOLUTE path set by the
     launcher) so serving never depends on the process's cwd; falls back to the
     cwd-relative web/dist for `pixi run`/dev."""
-    return getenv("VEILENS_WEB_DIR", "web/dist")
+    return getenv("MILLFOLIO_WEB_DIR", "web/dist")
 
 
 def _content_type(path: String) -> String:
@@ -136,7 +136,7 @@ def _cors(var resp: Response) -> Response:
 
 @fieldwise_init
 struct Api(Handler, Copyable, Movable):
-    var st: UnsafePointer[VeilensState, MutExternalOrigin]
+    var st: UnsafePointer[MillfolioState, MutExternalOrigin]
 
     def serve(self, req: Request) raises -> Response:
         var path = req.url
@@ -146,7 +146,7 @@ struct Api(Handler, Copyable, Movable):
         if req.method == Method.POST and path == "/chat":
             return self.handle_chat(req)
         if path == "/health":
-            return _cors(ok("veilens ok"))
+            return _cors(ok("millfolio ok"))
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -178,18 +178,18 @@ def main() raises:
     var cfg = load_config()
 
     # VAULT-ONLY: build the vault orchestrator over the resolved vault dir
-    # (HEADGATE_VAULT_DIR / $VEILENS_VAULT / $HEADGATE_DATA / ~/veilens) and route
+    # (HEADGATE_VAULT_DIR / $MILLFOLIO_VAULT / $HEADGATE_DATA / ~/millfolio) and route
     # /chat to run_vault_task.
     var vault_dir = resolve_vault_dir()
-    print("veilens server — VAULT mode — vault dir: " + vault_dir)
+    print("millfolio server — VAULT mode — vault dir: " + vault_dir)
     var orch = build_vault_orchestrator(cfg, vault_dir)
 
-    var st = VeilensState(orch^, vault_dir^)
-    var sp = alloc[VeilensState](1)
+    var st = MillfolioState(orch^, vault_dir^)
+    var sp = alloc[MillfolioState](1)
     sp.init_pointee_move(st^)
     var api = Api(sp)
 
-    print("veilens server on http://127.0.0.1:", PORT, "  (flare)", sep="")
+    print("millfolio server on http://127.0.0.1:", PORT, "  (flare)", sep="")
     print('  POST /chat   { "message": ... } -> { "reply": ... }')
     var srv = HttpServer.bind(SocketAddr.localhost(UInt16(PORT)))
     srv.serve(api^)

@@ -17,10 +17,10 @@ static file serving, running the same `run_vault_task` orchestrator. CI
 jinja2 checked out as siblings.
 
 Not yet cut over: headgate still builds its own `headgate-server` and the CLI
-still launches that. Cutover (point the CLI at `build/veilens-server`, drop
+still launches that. Cutover (point the CLI at `build/millfolio-server`, drop
 headgate's copy + `web/`) follows once the streaming phase lands.
 
-**Phase 2 — the streaming Veilens protocol (next).** Grow `/chat` into the
+**Phase 2 — the streaming millfolio protocol (next).** Grow `/chat` into the
 streaming contract in [`../protocol`](../protocol): `status` / `approval-request`
 / `debug` / `message` events. This needs two things beyond this file:
 
@@ -34,10 +34,10 @@ streaming contract in [`../protocol`](../protocol): `status` / `approval-request
 ```sh
 # repos laid out as siblings: app/ headgate/ flare/ json/ jinja2.mojo/
 cd server
-pixi run build        # -> build/veilens-server (127.0.0.1:10000)
+pixi run build        # -> build/millfolio-server (127.0.0.1:10000)
 ```
 
 ## Why Mojo
 
-Same language/toolchain as the engine it wraps (headgate/millrace), so it reuses
+Same language/toolchain as the engine it wraps (headgate/millfolio), so it reuses
 the orchestrator directly with no FFI/IPC boundary.

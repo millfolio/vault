@@ -1,4 +1,4 @@
-// Veilens protocol types — mirrors ../../../protocol/events.ts (the source of
+// millfolio protocol types — mirrors ../../../protocol/events.ts (the source of
 // truth). Kept as a local copy until we generate the client from a neutral
 // schema. Keep in sync with protocol/events.ts.
 
@@ -62,6 +62,6 @@ export interface Session {
   reject(stepId: string, reason?: string): void;
 }
 
-export interface VeilensClient {
+export interface MillfolioClient {
   ask(text: string, onEvent: (e: ServerEvent) => void): Session;
 }

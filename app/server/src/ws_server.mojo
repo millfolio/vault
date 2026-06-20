@@ -1,4 +1,4 @@
-"""ws_server — streaming Veilens chat over WebSocket (flare.ws).
+"""ws_server — streaming millfolio chat over WebSocket (flare.ws).
 
 Drives the vault pipeline step by step, streaming a `status`/`debug` event for each
 stage and gating the sandbox run on the user's approval — the full workflow panel.
@@ -15,7 +15,7 @@ serialization lives in events.mojo (unit-tested in events_test.mojo).
 flare's WS handler is a THIN (non-capturing) function, so the handler builds the
 orchestrator per connection — fine for a local single-user server.
 
-    pixi run build-ws   # -> build/veilens-ws, WebSocket on 127.0.0.1:10001
+    pixi run build-ws   # -> build/millfolio-ws, WebSocket on 127.0.0.1:10001
 """
 
 from flare.ws import WsServer, WsConnection, WsFrame, WsOpcode, WsCloseCode
@@ -27,7 +27,7 @@ from vaultcfg import vault_dir as resolve_vault_dir
 
 from events import field, status, debug_event, approval, message, error_event
 
-# The static web UI is served by veilens-server on :10000; the WS stream gets its
+# The static web UI is served by millfolio-server on :10000; the WS stream gets its
 # own port (flare can't multiplex static-HTTP + WebSocket on one listener).
 comptime PORT = 10001
 
@@ -83,6 +83,6 @@ def on_connect(mut conn: WsConnection) raises:
 
 
 def main() raises:
-    print("veilens ws server on ws://127.0.0.1:", PORT, "  (flare.ws)", sep="")
+    print("millfolio ws server on ws://127.0.0.1:", PORT, "  (flare.ws)", sep="")
     var srv = WsServer.bind(SocketAddr.localhost(UInt16(PORT)))
     srv.serve(on_connect)

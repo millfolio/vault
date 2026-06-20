@@ -39,7 +39,7 @@
 
   <div class="steps">
     {#if steps.length === 0}
-      <p class="empty">Steps, approvals, and debug detail appear here as Veilens works.</p>
+      <p class="empty">Steps, approvals, and debug detail appear here as millfolio works.</p>
     {/if}
 
     {#each steps as step (step.id)}

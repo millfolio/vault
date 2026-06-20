@@ -1,6 +1,6 @@
-# Veilens app
+# Millfolio app
 
-The Veilens client surface — web, iOS, and Android apps plus the local backend
+The millfolio client surface — web, iOS, and Android apps plus the local backend
 server they talk to. All three apps present a **chat interface** alongside a
 **workflow panel** where you watch status, approve gated steps, and debug the
 interaction with the foundational model.
@@ -21,14 +21,14 @@ app/
 ## Architecture
 
 ```
-web / iOS / android  ──(Veilens protocol, over Tailscale)──▶  server (Mojo)
+web / iOS / android  ──(millfolio protocol, over Tailscale)──▶  server (Mojo)
                                                                   │
                                                                   ▼
                                                        headgate orchestrator
                                                        (vault codegen + sandbox)
                                                                   │
                                                                   ▼
-                                                       millrace (:8000 inference)
+                                                       millfolio (:8000 inference)
 ```
 
 - The apps are **thin clients**: they never run the engine locally. They reach

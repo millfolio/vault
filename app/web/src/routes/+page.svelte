@@ -3,7 +3,7 @@
   import WorkflowPanel, { type Step } from "$lib/components/WorkflowPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
-  import type { ServerEvent, Session, VeilensClient } from "$lib/protocol";
+  import type { ServerEvent, Session, MillfolioClient } from "$lib/protocol";
 
   interface ChatMessage {
     id: string;
@@ -13,10 +13,10 @@
 
   // Transport selection:
   //  - explicit ?server=ws://… wins (any host/port);
-  //  - else when served locally by veilens-server (:10000), use the WS stream on
+  //  - else when served locally by millfolio-server (:10000), use the WS stream on
   //    :10001 (same host, so http→ws avoids browser mixed-content);
   //  - else (e.g. `npm run dev` on :5173) fall back to the in-browser mock.
-  function pickClient(): VeilensClient {
+  function pickClient(): MillfolioClient {
     if (typeof location === "undefined") return createMockClient();
     const explicit = new URLSearchParams(location.search).get("server");
     if (explicit) return createWsClient(explicit);
@@ -83,7 +83,7 @@
 </script>
 
 <main>
-  <div class="brand">veilens</div>
+  <div class="brand">millfolio</div>
   <div class="panes">
     <ChatPanel {messages} {busy} onsend={send} />
     <WorkflowPanel {steps} onapprove={approve} onreject={reject} />

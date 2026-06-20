@@ -1,4 +1,4 @@
-"""events — Veilens protocol wire helpers (server side).
+"""events — millfolio protocol wire helpers (server side).
 
 Pure String/JSON functions: serialize ServerEvents (status/debug/approval-request/
 message/error) and parse a field out of a ClientMessage. Split out of ws_server so

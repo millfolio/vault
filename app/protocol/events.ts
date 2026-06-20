@@ -1,4 +1,4 @@
-// Veilens protocol — canonical message types (v0, draft).
+// millfolio protocol — canonical message types (v0, draft).
 //
 // Source of truth for the chat + workflow/approval/debug contract between the
 // clients and the server. The web app mirrors these in web/src/lib/protocol.ts;

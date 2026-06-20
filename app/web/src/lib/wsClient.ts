@@ -1,14 +1,14 @@
-// Real Veilens client over WebSocket — the production transport (see
+// Real millfolio client over WebSocket — the production transport (see
 // ../../../server/STREAMING.md). One WS connection per session: send `ask`,
 // receive a stream of ServerEvents, answer any `approval-request` with
-// `approve`/`reject` on the same socket. Same VeilensClient interface as the
+// `approve`/`reject` on the same socket. Same MillfolioClient interface as the
 // mock, so the UI is identical either way.
 
 import type {
   ClientMessage,
   ServerEvent,
   Session,
-  VeilensClient,
+  MillfolioClient,
 } from "./protocol";
 
 class WsSession implements Session {
@@ -59,7 +59,7 @@ class WsSession implements Session {
   }
 }
 
-export function createWsClient(url: string): VeilensClient {
+export function createWsClient(url: string): MillfolioClient {
   return {
     ask(text, onEvent) {
       return new WsSession(url, text, onEvent);

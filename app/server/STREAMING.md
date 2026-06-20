@@ -1,12 +1,12 @@
 # Streaming protocol — design (phase 2)
 
-How `/chat` grows from one-shot `{message}->{reply}` into the streaming Veilens
+How `/chat` grows from one-shot `{message}->{reply}` into the streaming millfolio
 protocol (status / approval-request / debug / message events). Grounded in what
 flare and the headgate orchestrator actually support today.
 
 ## Transport: WebSocket
 
-flare's capabilities (verified in `millrace/flare`):
+flare's capabilities (verified in `millfolio/flare`):
 
 - **WebSocket** (`flare/ws/server.mojo`) is fully implemented — RFC 6455 handshake,
   full-duplex `send`/`recv`. Production-ready. ✅
@@ -47,7 +47,7 @@ emit points map 1:1 to the workflow panel:
 
 | stage | events |
 |---|---|
-| `veilens manifest` capture | `status` running→done; `debug` the aliased manifest |
+| `millfolio manifest` capture | `status` running→done; `debug` the aliased manifest |
 | `_codegen` | `status` running→done; `debug` the generated program |
 | **before the sandbox run** | `approval-request` "run the generated program?" → **wait** |
 | compile + run in sandbox | `status` running→done; `debug` sandbox stdout |
@@ -66,7 +66,7 @@ trait EventSink:
 - The **WS handler** provides a sink backed by the connection: `status/debug/
   message` serialize a `ServerEvent` and `ws.send` it; `approval` sends an
   `approval-request` then `ws.recv`s the client's `approve`/`reject`.
-- Existing callers (the `veilens ask` CLI, today's `/chat`) provide a **no-op
+- Existing callers (the `millfolio ask` CLI, today's `/chat`) provide a **no-op
   sink** that drops events and auto-approves — so current behavior is unchanged.
 
 **Back-compat / call sites.** The sink should be attached to the `Orchestrator`
@@ -86,4 +86,4 @@ the sink type — settle this first when implementing, as it drives the diff sha
    `status` + final `message` (no orchestrator changes yet). *(CI-validated)*
 4. **Orchestrator event sink** — add the `EventSink` hook + the no-op default;
    wire the WS handler's sink so mid-run `status`/`debug`/`approval` flow.
-5. **Cutover** — point the CLI at `veilens-server`, retire headgate's server/web.
+5. **Cutover** — point the CLI at `millfolio-server`, retire headgate's server/web.

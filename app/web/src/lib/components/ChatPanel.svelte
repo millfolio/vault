@@ -35,7 +35,7 @@
     {/if}
     {#each messages as m (m.id)}
       <div class="msg {m.role}">
-        <span class="who">{m.role === "user" ? "you" : "veilens"}</span>
+        <span class="who">{m.role === "user" ? "you" : "millfolio"}</span>
         <p>{m.text}</p>
       </div>
     {/each}

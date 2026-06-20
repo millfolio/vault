@@ -1,4 +1,4 @@
-# Veilens protocol
+# millfolio protocol
 
 The contract between the clients (web/iOS/android) and the `server/`. This is the
 **source of truth**: the server implements its server half, the clients implement

@@ -22,19 +22,19 @@ jobs:
           path: app
       - uses: actions/checkout@v4
         with:
-          repository: veilensapp/headgate
+          repository: millfolio/headgate
           path: headgate
       - uses: actions/checkout@v4
         with:
-          repository: millrace/flare
+          repository: millfolio/flare
           path: flare
       - uses: actions/checkout@v4
         with:
-          repository: millrace/json
+          repository: millfolio/json
           path: json
       - uses: actions/checkout@v4
         with:
-          repository: millrace/jinja2.mojo
+          repository: millfolio/jinja2.mojo
           path: jinja2.mojo
 
       - uses: prefix-dev/setup-pixi@v0.9.6
@@ -45,7 +45,7 @@ jobs:
         working-directory: app/server
         run: pixi run test
 
-      - name: Build veilens-server + veilens-ws
+      - name: Build millfolio-server + millfolio-ws
         working-directory: app/server
         run: |
           pixi run build

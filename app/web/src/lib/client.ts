@@ -1,10 +1,10 @@
-// Mock Veilens client — drives the UI without a backend yet. It simulates the
+// Mock millfolio client — drives the UI without a backend yet. It simulates the
 // server streaming the vault workflow (alias manifest → ask model → approval
 // gate → compile → run → answer), including a debug payload per step and one
 // approval gate. Swap this for a real transport (WebSocket/SSE to the Mojo
-// `server/` over Tailscale) implementing the same VeilensClient interface.
+// `server/` over Tailscale) implementing the same MillfolioClient interface.
 
-import type { ServerEvent, Session, VeilensClient } from "./protocol";
+import type { ServerEvent, Session, MillfolioClient } from "./protocol";
 
 let seq = 0;
 const uid = (p: string) => `${p}-${++seq}`;
@@ -84,7 +84,7 @@ class MockSession implements Session {
   }
 }
 
-export function createMockClient(): VeilensClient {
+export function createMockClient(): MillfolioClient {
   return {
     ask(text, onEvent) {
       return new MockSession(text, onEvent);
