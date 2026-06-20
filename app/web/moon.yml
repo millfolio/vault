@@ -1,0 +1,10 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+layer: 'application'
+tags: ['web']
+
+tasks:
+  build:
+    command: 'npm run build'
+    toolchain: 'system'
+    inputs: ['src/**/*', 'package.json']
+    outputs: ['build/**/*']

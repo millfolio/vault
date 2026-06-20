@@ -1,0 +1,12 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+layer: 'application'
+tags: ['mojo']
+
+tasks:
+  build:
+    command: 'pixi run build-ws'
+    toolchain: 'system'
+    inputs: ['src/**/*.mojo', 'pixi.toml', 'pixi.lock']
+  check:
+    command: 'pixi run build-ws'
+    toolchain: 'system'
