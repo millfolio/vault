@@ -2,7 +2,7 @@
 
 Precedence, highest first:  environment variable  >  config file  >  built-in default.
 
-The config file is JSON, parsed with the millrace `json` fork (dogfooding). Every
+The config file is JSON, parsed with the millfolio `json` fork (dogfooding). Every
 key is optional; a missing file or key falls back to env/defaults. Path override:
 PRIVACY_BOX_CONFIG. Secrets (`anthropic_api_key`) are better supplied via the
 ANTHROPIC_API_KEY env var than written to a plaintext file.

@@ -11,27 +11,27 @@
 # time-bounded in the background, so it can never block the local server.
 #
 # Run from the privacy_box install dir with the toolchain env set (CONDA_PREFIX,
-# MODULAR_HOME, PATH). Used by `pixi run serve-web` and `millrace privacy_box web`.
+# MODULAR_HOME, PATH). Used by `pixi run serve-web` and `millfolio privacy_box web`.
 set -u
 PORT=10000
 
 if [ ! -x ./build/privacy_box-server ]; then
-    echo "privacy_box web server not built — run: millrace privacy_box install" >&2
+    echo "privacy_box web server not built — run: millfolio privacy_box install" >&2
     exit 1
 fi
 
 # The privacy_box web server is VAULT-ONLY: /chat answers questions about the vault
-# dir (PRIVACY_BOX_VAULT_DIR, else $VEILENS_VAULT / $PRIVACY_BOX_DATA / ~/millfolio). The
+# dir (PRIVACY_BOX_VAULT_DIR, else $MILLFOLIO_VAULT / $PRIVACY_BOX_DATA / ~/millfolio). The
 # millfolio vault tools that the generated program calls (search/ask_local) reach
-# the local inference server over loopback at VEILENS_EMBED_URL (embeddings) and
-# VEILENS_LOCAL_URL (chat) — both default to the combined server on :8000/v1.
+# the local inference server over loopback at MILLFOLIO_EMBED_URL (embeddings) and
+# MILLFOLIO_LOCAL_URL (chat) — both default to the combined server on :8000/v1.
 # Export them so the privacy_box-server process env propagates to the sandboxed
 # generated program (which inherits the parent's environment) over loopback.
 # (The server is unconditionally vault-only — no PRIVACY_BOX_VAULT gate.)
 export PRIVACY_BOX_VAULT_DIR="${PRIVACY_BOX_VAULT_DIR:-}"
-export VEILENS_VAULT="${VEILENS_VAULT:-$PRIVACY_BOX_VAULT_DIR}"
-export VEILENS_EMBED_URL="${VEILENS_EMBED_URL:-http://127.0.0.1:8000/v1}"
-export VEILENS_LOCAL_URL="${VEILENS_LOCAL_URL:-http://127.0.0.1:8000/v1}"
+export MILLFOLIO_VAULT="${MILLFOLIO_VAULT:-$PRIVACY_BOX_VAULT_DIR}"
+export MILLFOLIO_EMBED_URL="${MILLFOLIO_EMBED_URL:-http://127.0.0.1:8000/v1}"
+export MILLFOLIO_LOCAL_URL="${MILLFOLIO_LOCAL_URL:-http://127.0.0.1:8000/v1}"
 echo "mode:     VAULT (dir: ${PRIVACY_BOX_VAULT_DIR:-<resolved>})" >&2
 
 # Locate the Tailscale CLI (on PATH, or the macOS app bundle).

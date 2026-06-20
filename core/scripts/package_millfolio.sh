@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build millfolio.zip — the millfolio source bundle the Millrace app downloads, then
+# Build millfolio.zip — the millfolio source bundle the Millfolio app downloads, then
 # `mojo build`s on-device against a separately-fetched Mojo compiler (see
-# millrace/app Bootstrapper). Mirrors privacy_box/scripts/package_privacy_box.sh.
+# millfolio/app Bootstrapper). Mirrors privacy_box/scripts/package_privacy_box.sh.
 #
 # millfolio links the whole toolbox, so the bundle unzips to six siblings:
 #

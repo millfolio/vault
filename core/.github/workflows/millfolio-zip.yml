@@ -1,6 +1,6 @@
 name: millfolio zip
 
-# Builds millfolio.zip — the millfolio source bundle the Millrace app downloads, then
+# Builds millfolio.zip — the millfolio source bundle the Millfolio app downloads, then
 # `mojo build`s on-device. See scripts/package_millfolio.sh. Mirrors privacy_box's
 # privacy_box-zip.yml; millfolio now links the full toolbox (flare HTTP, the LanceDB
 # Rust shim, pdftotext + zlib), so the siblings are checked out and their FFI
@@ -28,27 +28,27 @@ jobs:
           path: millfolio
       - uses: actions/checkout@v6
         with:
-          repository: millrace/flare
+          repository: millfolio/flare
           path: flare
       - uses: actions/checkout@v6
         with:
-          repository: millrace/json
+          repository: millfolio/json
           path: json
       - uses: actions/checkout@v6
         with:
-          repository: millrace/lancedb.mojo
+          repository: millfolio/lancedb.mojo
           path: lancedb.mojo
       - uses: actions/checkout@v6
         with:
-          repository: millrace/pdftotext.mojo
+          repository: millfolio/pdftotext.mojo
           path: pdftotext.mojo
       - uses: actions/checkout@v6
         with:
-          repository: millrace/zlib.mojo
+          repository: millfolio/zlib.mojo
           path: zlib.mojo
       - uses: actions/checkout@v6
         with:
-          repository: millrace/csv.mojo
+          repository: millfolio/csv.mojo
           path: csv.mojo
 
       - uses: prefix-dev/setup-pixi@v0.9.6

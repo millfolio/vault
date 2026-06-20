@@ -4,9 +4,9 @@ import ArgumentParser
 import MillfolioCore
 
 // The `millfolio` CLI — the personal-data-vault umbrella. It drives the same engine
-// lifecycle as the millrace app's Bootstrapper, into the shared install tree
-// (~/Library/Application Support/Millrace) + the me.millrace.server launchd job, so
-// `millfolio` and the `millrace` CLI interoperate on one inference server. `install`
+// lifecycle as the millfolio app's Bootstrapper, into the shared install tree
+// (~/Library/Application Support/Millfolio) + the me.millfolio.server launchd job, so
+// `millfolio` and the `millfolio` CLI interoperate on one inference server. `install`
 // provisions the server + privacy_box + the millfolio vault; `start` brings them all up
 // (the vault site at http://localhost:10000); `stop` tears them down.
 
@@ -22,7 +22,7 @@ struct Millfolio: AsyncParsableCommand {
 // ── mill install ──────────────────────────────────────────────────────────
 struct Install: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Install the millrace inference server, privacy_box, and the millfolio local site.",
+        abstract: "Install the millfolio inference server, privacy_box, and the millfolio local site.",
         discussion: """
         Idempotent — reuses anything already installed. Provisions the combined \
         inference server (chat + embeddings, including both models' weights), the \
@@ -154,7 +154,7 @@ struct Ask: AsyncParsableCommand {
         discussion: """
         Runs the privacy_box vault loop over your vault dir: a model writes a Mojo \
         program that uses the millfolio vault tools over your real data locally, and \
-        the answer is printed here. The vault dir is $VEILENS_VAULT, else ~/.config/millfolio/vault. \
+        the answer is printed here. The vault dir is $MILLFOLIO_VAULT, else ~/.config/millfolio/vault. \
         Needs the inference server running.
         """)
     @Argument(parsing: .remaining, help: "The question to ask your vault.")

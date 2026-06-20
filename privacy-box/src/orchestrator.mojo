@@ -24,10 +24,10 @@ from vaultcfg import millfolio_bin, vault_include_paths
 
 
 def _session_append(text: String):
-    """Append `text` to the session transcript at $VEILENS_SESSION_LOG (set by the
+    """Append `text` to the session transcript at $MILLFOLIO_SESSION_LOG (set by the
     CLI per `ask`), best-effort. Captures the full outside-model exchange — prompt
     + program — for after-the-fact inspection. No-op when the env var is unset."""
-    var path = getenv("VEILENS_SESSION_LOG", "")
+    var path = getenv("MILLFOLIO_SESSION_LOG", "")
     if path == "":
         return
     try:
@@ -145,11 +145,11 @@ struct Orchestrator(Movable):
     def vault_run(mut self, vault_dir: String) raises -> String:
         """Step 4 — run the compiled binary in the LOOPBACK sandbox over the REAL
         data (network-denied EXCEPT 127.0.0.1, so search()/ask_local() reach the
-        local models but the program cannot phone home). VEILENS_VAULT points the
+        local models but the program cannot phone home). MILLFOLIO_VAULT points the
         tools at the vault dir. Returns stdout (print_answer) — local; a runtime
         error surfaces here and is NEVER fed upstream."""
         print("• running it locally over your vault…")
-        _ = setenv("VEILENS_VAULT", vault_dir, True)
+        _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
         var bin = self.sandbox.scratch_bin()
         var out = self.sandbox.run(bin, List[String]()).output.copy()
         _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")

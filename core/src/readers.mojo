@@ -19,7 +19,7 @@ def csv_rows(path: String) raises -> List[List[String]]:
 
     Quoted fields, embedded commas/newlines, and `""` escapes are handled; empty
     rows dropped; header included. Thin wrapper over the `csv` library so the
-    parser is reusable (millrace/csv.mojo)."""
+    parser is reusable (millfolio/csv.mojo)."""
     return csv_read(path)
 
 

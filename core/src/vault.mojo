@@ -22,10 +22,10 @@ program needs no configuration. One inference-server process now serves BOTH a
 chat model and the embedding model on a single port (its /v1/embeddings routes
 to a secondary Qwen3-Embedding model), so chat + embeddings default to the same
 base. The URLs are still separate env knobs in case you run two instances:
-  VEILENS_VAULT      (default ~/.config/millfolio/vault)
-  VEILENS_LOCAL_URL  (default http://127.0.0.1:8000/v1)  — CHAT (ask_local)
-  VEILENS_EMBED_URL  (default http://127.0.0.1:8000/v1)  — EMBEDDINGS (search)
-  VEILENS_LOCAL_MODEL(default "local")                   — chat model name
+  MILLFOLIO_VAULT      (default ~/.config/millfolio/vault)
+  MILLFOLIO_LOCAL_URL  (default http://127.0.0.1:8000/v1)  — CHAT (ask_local)
+  MILLFOLIO_EMBED_URL  (default http://127.0.0.1:8000/v1)  — EMBEDDINGS (search)
+  MILLFOLIO_LOCAL_MODEL(default "local")                   — chat model name
 
 Both URLs are 127.0.0.1: the only network the run sandbox permits is loopback,
 so nothing the generated program does can leave the machine.
@@ -57,7 +57,7 @@ struct VaultFile(Copyable, Movable):
 # ── config from env ───────────────────────────────────────────────────────────
 
 def _vault_dir() raises -> String:
-    var d = getenv("VEILENS_VAULT", "")
+    var d = getenv("MILLFOLIO_VAULT", "")
     if d != "":
         return d
     return getenv("HOME", ".") + "/.config/millfolio/vault"
@@ -65,20 +65,20 @@ def _vault_dir() raises -> String:
 
 def _local_url() raises -> String:
     """CHAT endpoint — ask_local talks to this. Default :8000."""
-    return getenv("VEILENS_LOCAL_URL", "http://127.0.0.1:8000/v1")
+    return getenv("MILLFOLIO_LOCAL_URL", "http://127.0.0.1:8000/v1")
 
 
 def _embed_url() raises -> String:
     """EMBEDDINGS endpoint — search() embeds the query here. Defaults to the SAME
     base as the chat endpoint (:8000): one inference-server process now serves
     both a chat model and the embedding model on one port (its /v1/embeddings
-    routes to the secondary Qwen3-Embedding model). Override with VEILENS_EMBED_URL
+    routes to the secondary Qwen3-Embedding model). Override with MILLFOLIO_EMBED_URL
     to point at a separate embedding server if you still run two instances."""
-    return getenv("VEILENS_EMBED_URL", "http://127.0.0.1:8000/v1")
+    return getenv("MILLFOLIO_EMBED_URL", "http://127.0.0.1:8000/v1")
 
 
 def _local_model() raises -> String:
-    return getenv("VEILENS_LOCAL_MODEL", "local")
+    return getenv("MILLFOLIO_LOCAL_MODEL", "local")
 
 
 # ── alias resolution (internal — real paths never leave this function) ────────

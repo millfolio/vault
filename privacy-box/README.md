@@ -4,10 +4,10 @@
 data locally — the data never leaves the machine.\*\*
 
 > Part of [**millfolio.app**](https://millfolio.app) using
-> [**millrace**](https://millrace.app) — local-first AI on Apple Silicon.
+> [**millfolio**](https://millfolio.app) — local-first AI on Apple Silicon.
 > **Experimental.**
 
-A _privacy_box_ is the gate at the intake of a millrace that controls how much
+A _privacy_box_ is the gate at the intake of a millfolio that controls how much
 water enters the channel. This project is the controlled intake on the channel
 that drives the mill: it lets a powerful remote model do the thinking, while
 keeping your private data on your side of the gate.
@@ -15,7 +15,7 @@ keeping your private data on your side of the gate.
 ## Approach
 
 You have private/local data and a small, capable **local model** (served by
-[`millrace`](https://github.com/millrace/millrace), the pure-Mojo local LLM
+[`millfolio`](https://github.com/millfolio/engine), the pure-Mojo local LLM
 engine). The local model is good enough to reason over your data, but some tasks
 need a frontier model's code-generation ability.
 
@@ -29,12 +29,12 @@ data. Results stay local. The data never crosses the gate.
 
 | role             | executes                                              | who                             |
 | ---------------- | ----------------------------------------------------- | ------------------------------- |
-| **model runner** | the local _model_ (inference)                         | `millrace` OpenAI API           |
+| **model runner** | the local _model_ (inference)                         | `millfolio` OpenAI API           |
 | **code runner**  | the remote model's generated _code_ over private data | the **sandbox inside privacy_box** |
 
-`millrace` stays harness-agnostic: it is just an OpenAI-compatible inference
+`millfolio` stays harness-agnostic: it is just an OpenAI-compatible inference
 server. The seam between it and privacy_box is the OpenAI API, so anyone can run
-`millrace` under a harness of their choice, or point privacy_box at a different
+`millfolio` under a harness of their choice, or point privacy_box at a different
 local engine.
 
 ## Threat model: the careful SaaS provider

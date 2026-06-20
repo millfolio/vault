@@ -12,7 +12,7 @@ set -euo pipefail
 VER="${1:?usage: tools/release.sh X.Y.Z [message]}"
 TAG="v$VER"
 MSG="${2:-$TAG}"
-REPO="millrace/privacy_box"
+REPO="millfolio/privacy_box"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "==> push main + tag $TAG"

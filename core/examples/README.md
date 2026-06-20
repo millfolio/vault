@@ -3,7 +3,7 @@
 A few **synthetic, text-layer** PDF documents you can drop into a millfolio vault
 to try the end-to-end flow without using your own financial data. They mimic what
 you'd export from a bank/insurer portal — real *digital* PDFs with a selectable
-text layer, so [pdftotext.mojo](https://github.com/millrace/pdftotext.mojo)
+text layer, so [pdftotext.mojo](https://github.com/millfolio/pdftotext.mojo)
 extracts them directly (no OCR). **All data is fictional.**
 
 `vault/`:

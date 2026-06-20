@@ -12,7 +12,7 @@ millfolio checkout (or the sibling layout):
 
 Resolution (highest precedence first):
   PRIVACY_BOX_VAULT_SRC  — explicit colon-separated -I list (overrides everything)
-  PRIVACY_BOX_VEILENS    — path to the millfolio checkout; deps assumed sibling to it
+  PRIVACY_BOX_MILLFOLIO    — path to the millfolio checkout; deps assumed sibling to it
   default             — the sibling layout: <privacy_box>/../millfolio etc.
 
 `_millfolio_dir()` defaults to ../millfolio relative to the privacy_box cwd. Everything
@@ -35,9 +35,9 @@ def _split_colon(s: String) raises -> List[String]:
 
 
 def millfolio_dir() raises -> String:
-    """The millfolio checkout. PRIVACY_BOX_VEILENS overrides; else ../millfolio (sibling
+    """The millfolio checkout. PRIVACY_BOX_MILLFOLIO overrides; else ../millfolio (sibling
     of the privacy_box cwd — how the repos are laid out)."""
-    var d = getenv("PRIVACY_BOX_VEILENS", "")
+    var d = getenv("PRIVACY_BOX_MILLFOLIO", "")
     if d != "":
         return d
     return String("../millfolio")
@@ -78,13 +78,13 @@ def vault_include_paths() raises -> List[String]:
 
 def vault_dir() raises -> String:
     """Resolve the vault dir for the SERVER's vault mode: PRIVACY_BOX_VAULT_DIR wins,
-    then $VEILENS_VAULT, then $PRIVACY_BOX_DATA, then ~/millfolio (millfolio's own
+    then $MILLFOLIO_VAULT, then $PRIVACY_BOX_DATA, then ~/millfolio (millfolio's own
     default). Mirrors privacy_box.mojo `_vault_dir()` (with no CLI arg) + millfolio/src/
     vault.mojo `_vault_dir()`."""
     var d = getenv("PRIVACY_BOX_VAULT_DIR", "")
     if d != "":
         return d
-    d = getenv("VEILENS_VAULT", "")
+    d = getenv("MILLFOLIO_VAULT", "")
     if d != "":
         return d
     d = getenv("PRIVACY_BOX_DATA", "")

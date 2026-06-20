@@ -13,11 +13,11 @@ import AppKit
 ///      the CLI and the menu app share one managed process).
 ///   3. **Start opencode** — point opencode at the running server (new Terminal).
 ///
-/// Everything lives under ~/Library/Application Support/Millrace, including the
+/// Everything lives under ~/Library/Application Support/Millfolio, including the
 /// model weights (HF_HOME=<support>/hf), so uninstall is a single directory.
 ///
 /// This type is UI-agnostic on purpose: the menu-bar app observes it as an
-/// `ObservableObject` (via `phase`/`serverRunning`), while the `millrace` CLI
+/// `ObservableObject` (via `phase`/`serverRunning`), while the `mill` CLI
 /// drives the same methods and streams progress through `onProgress`.
 ///
 /// NOTE: the Mojo fetch is "rattler-by-URL" — we don't link the rattler crate, we
@@ -80,7 +80,7 @@ public final class Bootstrapper: ObservableObject {
     /// prebuilt libflare_tls.so), published by inference-server CI. The asset is still
     /// named `runner.zip` (wire name retained for now).
     private let serverZipURL =
-        URL(string: "https://github.com/millrace/inference-server/releases/latest/download/runner.zip")!
+        URL(string: "https://github.com/millfolio/engine/releases/latest/download/runner.zip")!
 
     // ── privacy_box (privacy harness) ─────────────────────────────────────────────
     // privacy_box is a separate engine on a DIFFERENT Mojo nightly than the server
@@ -89,7 +89,7 @@ public final class Bootstrapper: ObservableObject {
     // opens a ready-to-use Terminal rather than launching a server.
     public static let privacy_boxMojoVersion = "1.0.0b3.dev2026061206"
     private let privacy_boxZipURL =
-        URL(string: "https://github.com/millfolioapp/privacy_box/releases/latest/download/privacy_box.zip")!
+        URL(string: "https://github.com/millfolio/privacy_box/releases/latest/download/privacy_box.zip")!
     private var privacy_boxMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
@@ -110,7 +110,7 @@ public final class Bootstrapper: ObservableObject {
     // zlib readers) + prebuilt FFI shims, so the on-device build is
     // `mojo build src/millfolio.mojo -I ../flare -I … ` then installMillfolioShims().
     private let millfolioZipURL =
-        URL(string: "https://github.com/millfolioapp/millfolio/releases/latest/download/millfolio.zip")!
+        URL(string: "https://github.com/millfolio/millfolio/releases/latest/download/millfolio.zip")!
     private var millfolioMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
@@ -125,11 +125,11 @@ public final class Bootstrapper: ObservableObject {
     /// The built millfolio binary is present.
     public var isMillfolioInstalled: Bool { FileManager.default.isExecutableFile(atPath: millfolioBin.path) }
 
-    // ── app server (the streaming WS backend, from millfolioapp/app) ──────────────
+    // ── app server (the streaming WS backend, from millfolio/app) ──────────────
     // Built ON-DEVICE against the privacy_box engine tree, reusing privacy_box's Mojo
     // toolchain + flare shims — so no new toolchain. See app/server/CUTOVER.md.
     private let appZipURL =
-        URL(string: "https://github.com/millfolioapp/app/releases/latest/download/millfolio-app.zip")!
+        URL(string: "https://github.com/millfolio/app/releases/latest/download/millfolio-app.zip")!
     private var appRoot: URL { support.appendingPathComponent("app", isDirectory: true) }
     private var appWsBin: URL { appRoot.appendingPathComponent("build/millfolio-ws") }
     /// The built streaming WS server is present.
@@ -137,15 +137,15 @@ public final class Bootstrapper: ObservableObject {
 
     // ── default config files (~/.config) ───────────────────────────────────────
     // Seeded with sensible defaults on install if absent, so a fresh setup has an
-    // editable starting point. The engines read these (millrace = inference-server,
+    // editable starting point. The engines read these (engine = the inference engine,
     // privacy_box = privacy_box); we NEVER overwrite an existing file.
     private var dotConfig: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config", isDirectory: true)
     }
-    private var millraceConfigURL: URL { dotConfig.appendingPathComponent("millrace/config.json") }
+    private var engineConfigURL: URL { dotConfig.appendingPathComponent("millfolio/config.json") }
     private var privacy_boxConfigURL: URL { dotConfig.appendingPathComponent("privacy_box/config.json") }
 
-    private static let millraceConfigDefault = """
+    private static let engineConfigDefault = """
     {
       "port": 8000,
       "model": "Qwen/Qwen2.5-3B-Instruct",
@@ -182,7 +182,7 @@ public final class Bootstrapper: ObservableObject {
     // ── install locations ─────────────────────────────────────────────────────
     private var support: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Millrace", isDirectory: true)
+            .appendingPathComponent("Millfolio", isDirectory: true)
     }
     private var mojoPrefix: URL { support.appendingPathComponent("mojo", isDirectory: true) }
     private var engineRoot: URL { support.appendingPathComponent("engine", isDirectory: true) }
@@ -194,7 +194,7 @@ public final class Bootstrapper: ObservableObject {
     private var serverBin: URL { backendDir.appendingPathComponent("build/server") }
     /// All subprocess output (mojo build, weights download, the running server)
     /// is appended here so errors that flash by in the menu can be read in full.
-    public var logFileURL: URL { support.appendingPathComponent("Millrace.log") }
+    public var logFileURL: URL { support.appendingPathComponent("Millfolio.log") }
     public var hasLog: Bool { FileManager.default.fileExists(atPath: logFileURL.path) }
 
     /// The built engine server binary is present.
@@ -254,7 +254,7 @@ public final class Bootstrapper: ObservableObject {
     }
 
     // ── millfolio diagnostic log (~/Library/Logs/Millfolio/<date>.log) ──────────────
-    // Separate from Millrace.log: a per-day, user-facing diagnostic log for the
+    // Separate from Millfolio.log: a per-day, user-facing diagnostic log for the
     // `millfolio` CLI itself (the ask/index runs + update), in the conventional
     // macOS ~/Library/Logs location so it's easy to find and attach to a report.
     public var millfolioLogDir: URL {
@@ -322,16 +322,75 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
+    // ── one-time migration: millrace → millfolio (pre-rename installs) ───────────
+    /// Older versions installed under `~/Library/Application Support/Millrace`, with
+    /// config/cache under `~/.config/millrace` + `~/.cache/millrace` and a
+    /// `me.millrace.server` LaunchAgent. Move each to its `millfolio` location once,
+    /// so upgraders keep their multi-GB model weights instead of re-downloading.
+    ///
+    /// Idempotent and best-effort: a path is moved only when the legacy location
+    /// exists and the new one does not, so re-running (or a fresh install) is a
+    /// no-op. After moving the tree, the stale engine *build* is dropped (weights
+    /// under `hf/` are kept) so `installServer` rebuilds the binary against the new
+    /// source + `~/.config/millfolio` config path.
+    public func migrateLegacyLayout() {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let appSup = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+
+        // Boot out + remove the old LaunchAgent first; the new install writes the
+        // me.millfolio.server agent, and leaving the old one loaded runs a stale
+        // binary against a config path that no longer exists.
+        let oldAgent = home.appendingPathComponent("Library/LaunchAgents/me.millrace.server.plist")
+        if fm.fileExists(atPath: oldAgent.path) {
+            _ = try? run("/bin/launchctl", ["bootout", "gui/\(getuid())/me.millrace.server"])
+            try? fm.removeItem(at: oldAgent)
+            appendLog("migrated: removed legacy LaunchAgent me.millrace.server\n")
+        }
+
+        let legacyTree = appSup.appendingPathComponent("Millrace", isDirectory: true)
+        let migratedTree = fm.fileExists(atPath: legacyTree.path)
+            && !fm.fileExists(atPath: support.path)
+
+        let moves: [(URL, URL)] = [
+            (legacyTree, support),
+            (home.appendingPathComponent(".config/millrace", isDirectory: true),
+             home.appendingPathComponent(".config/millfolio", isDirectory: true)),
+            (home.appendingPathComponent(".cache/millrace", isDirectory: true),
+             home.appendingPathComponent(".cache/millfolio", isDirectory: true)),
+        ]
+        for (old, new) in moves where fm.fileExists(atPath: old.path) && !fm.fileExists(atPath: new.path) {
+            do {
+                try fm.createDirectory(at: new.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.moveItem(at: old, to: new)
+                appendLog("migrated: \(old.path) → \(new.path)\n")
+            } catch {
+                appendLog("migration skipped for \(old.lastPathComponent): \(humanError(error))\n")
+            }
+        }
+
+        guard migratedTree else { return }
+        // Keep the model weights (hf/) + cache; drop the stale engine checkout so the
+        // server is rebuilt from the new source against ~/.config/millfolio.
+        try? fm.removeItem(at: engineRoot)
+        // The per-day diagnostic log inside the moved tree kept its old name.
+        let oldLog = support.appendingPathComponent("Millrace.log")
+        if fm.fileExists(atPath: oldLog.path) && !fm.fileExists(atPath: logFileURL.path) {
+            try? fm.moveItem(at: oldLog, to: logFileURL)
+        }
+    }
+
     /// Provision the Mojo toolchain, engine source, build, and weights. Throws on
     /// the first failure (the CLI surfaces it; the menu wrapper maps it to `phase`).
     public func installServer() async throws {
+        migrateLegacyLayout()   // upgrade an older millrace-layout install in place
         // Idempotent fast-path: everything (engine + both models' weights) already
         // present → nothing to do. Otherwise fall through; the steps below each
         // skip what's already done (toolchain, weights), so a partial install
         // resumes (e.g. just the missing embedding weights).
         if isServerInstalled && weightsPresent && embedWeightsPresent
             && !mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
-            set("millrace already installed — skipping")
+            set("engine already installed — skipping")
             return
         }
         let fm = FileManager.default
@@ -341,7 +400,7 @@ public final class Bootstrapper: ObservableObject {
         logHeader("Install server")
 
         if mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
-            set("Downloading Mojo compiler for millrace (~70 MB)…")
+            set("Downloading Mojo compiler for engine (~70 MB)…")
             try? fm.removeItem(at: mojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: mojoPrefix, withIntermediateDirectories: true)
             let compiler = try await download(mojoCompilerURL, name: "mojo-compiler.conda")
@@ -353,15 +412,15 @@ public final class Bootstrapper: ObservableObject {
         }
         try relocateMojoPrefix(mojoPrefix)   // rewrite modular.cfg's baked placeholder prefix
 
-        set("Downloading millrace source…")
+        set("Downloading engine source…")
         let zip = try await download(serverZipURL, name: "runner.zip")
-        set("Unpacking millrace…")
+        set("Unpacking engine…")
         try unpackZip(zip, into: engineRoot)
 
         set("Locating Python…")
         let python = try findPython()
 
-        set("Building millrace (first run, ~1 min)…")
+        set("Building engine (first run, ~1 min)…")
         try buildBinary(python: python, source: "src/server.mojo",
                         args: ["-I", "../jinja2.mojo/src", "-I", "../flare"], out: "build/server")
         signServerIdentity()
@@ -383,15 +442,15 @@ public final class Bootstrapper: ObservableObject {
             try downloadWeights(Self.embedModel)
         }
 
-        ensureConfig(at: millraceConfigURL, Self.millraceConfigDefault)
-        await recordLatest("inference-server", repo: "millrace/inference-server")
+        ensureConfig(at: engineConfigURL, Self.engineConfigDefault)
+        await recordLatest("engine", repo: "millfolio/engine")
     }
 
     // ── step 2: start / stop server (launchd LaunchAgent) ────────────────────────
-    // The server runs as a per-user LaunchAgent (me.millrace.server) instead of a
-    // child Process, so a CLI `millrace server start` and the menu app's "Start
+    // The server runs as a per-user LaunchAgent (me.millfolio.server) instead of a
+    // child Process, so the `mill` CLI and the menu app's "Start
     // server" drive the SAME managed process — either surface can start/stop/see it.
-    public static let serverLabel = "me.millrace.server"
+    public static let serverLabel = "me.millfolio.server"
     private var launchAgentURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(Self.serverLabel).plist")
@@ -483,7 +542,7 @@ public final class Bootstrapper: ObservableObject {
         #!/bin/bash
         export OPENCODE_CONFIG="\(configPath)"
         export OPENAI_BASE_URL="\(base)"
-        export OPENAI_API_KEY="millrace"
+        export OPENAI_API_KEY="millfolio"
         # opencode's own dir + common bins on PATH (Terminal already sources the
         # user's profile, but be explicit in case it shells out to helpers).
         export PATH="\(URL(fileURLWithPath: opencode).deletingLastPathComponent().path):$PATH"
@@ -520,11 +579,11 @@ public final class Bootstrapper: ObservableObject {
         for id in ids { models[id] = ["name": id.components(separatedBy: "/").last ?? id] }
         let config: [String: Any] = [
             "$schema": "https://opencode.ai/config.json",
-            "model": "millrace/" + first,
-            "provider": ["millrace": [
+            "model": "millfolio/" + first,
+            "provider": ["millfolio": [
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "millrace (local)",
-                "options": ["baseURL": baseURL, "apiKey": "millrace"],
+                "name": "millfolio (local)",
+                "options": ["baseURL": baseURL, "apiKey": "millfolio"],
                 "models": models,
             ]],
         ]
@@ -658,12 +717,12 @@ public final class Bootstrapper: ObservableObject {
     /// `mojo build` ad-hoc "linker-signs" the server with the identifier "server".
     /// macOS's "<name> can run in the background" notification + Login Items entry
     /// for the LaunchAgent take that signing identifier as the name, so re-sign it
-    /// (still ad-hoc) as "millrace". Best-effort — purely cosmetic, so a failure
+    /// (still ad-hoc) as "millfolio". Best-effort — purely cosmetic, so a failure
     /// never blocks the install.
     private func signServerIdentity() {
         do {
             try run("/usr/bin/codesign",
-                    ["--force", "--sign", "-", "--identifier", "millrace", serverBin.path])
+                    ["--force", "--sign", "-", "--identifier", "millfolio", serverBin.path])
         } catch {
             appendLog("could not re-sign server identity (cosmetic): \(humanError(error))\n")
         }
@@ -750,7 +809,7 @@ public final class Bootstrapper: ObservableObject {
         //    unlike the always-serving server.
         try installPrivacyBoxShims()
         ensureConfig(at: privacy_boxConfigURL, Self.privacy_boxConfigDefault)
-        await recordLatest("privacy_box", repo: "millfolioapp/privacy_box")
+        await recordLatest("privacy_box", repo: "millfolio/privacy_box")
     }
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the privacy_box
@@ -812,7 +871,7 @@ public final class Bootstrapper: ObservableObject {
         # generated program with `-I <millfolio>/src` + its vendored siblings, and
         # reads the ~/.config/mill index. privacy_box defaults to the dev sibling
         # layout (../millfolio); point it at the installed millfolio checkout instead.
-        export PRIVACY_BOX_VEILENS='\(millfolioDir.path)'
+        export PRIVACY_BOX_MILLFOLIO='\(millfolioDir.path)'
         # flare's bundled OpenSSL has a CI-baked CA path; point it at the system
         # bundle so HTTPS to the Anthropic API verifies (else CertificateUntrusted).
         [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
@@ -957,7 +1016,7 @@ public final class Bootstrapper: ObservableObject {
         //    `$CONDA_PREFIX/lib` lookup finds them at runtime (millfolio runs WITH
         //    CONDA_PREFIX set via run-millfolio.sh).
         try installMillfolioShims()
-        await recordLatest("millfolio", repo: "millfolioapp/millfolio")
+        await recordLatest("millfolio", repo: "millfolio/millfolio")
     }
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the millfolio
@@ -1023,7 +1082,7 @@ public final class Bootstrapper: ObservableObject {
         return env
     }
 
-    /// Download the millfolio app bundle (millfolioapp/app) and build the streaming WS
+    /// Download the millfolio app bundle (millfolio/app) and build the streaming WS
     /// server (+ the unary HTTP server) ON-DEVICE against the already-installed
     /// privacy_box engine tree — reusing privacy_box's Mojo toolchain + flare shims, so
     /// no new toolchain. Requires the privacy_box engine (installPrivacyBoxEngine).
@@ -1071,7 +1130,7 @@ public final class Bootstrapper: ObservableObject {
                 cwd: appRoot, env: env)
         try run(mojo, ["build", "src/server.mojo"] + inc + ["-o", "build/millfolio-server"],
                 cwd: appRoot, env: env)
-        await recordLatest("app", repo: "millfolioapp/app")
+        await recordLatest("app", repo: "millfolio/app")
     }
 
     // ── millfolio: start (open a ready-to-use Terminal) ───────────────────────────
@@ -1116,18 +1175,18 @@ public final class Bootstrapper: ObservableObject {
                  "-e", "tell application \"Terminal\" to do script \"\(cmd)\""])
     }
 
-    // ── millfolio: the VAULT umbrella (millrace millfolio …) ─────────────────────────
+    // ── millfolio: the VAULT umbrella (engine + privacy_box + vault) ──────────────────
     // millfolio is the umbrella entry point for the personal-data-vault use case. It
     // composes the three engines: the combined inference server (chat + embeddings
     // — both models' weights), privacy_box (the harness + its vault web chat), and the
     // millfolio vault tools/indexer.
 
-    /// Resolve the vault dir: an explicit arg wins, then $VEILENS_VAULT, then
+    /// Resolve the vault dir: an explicit arg wins, then $MILLFOLIO_VAULT, then
     /// ~/.config/millfolio/vault. The Swift side always passes this through to the
-    /// engines (VEILENS_VAULT env / explicit arg), so it's the canonical location.
+    /// engines (MILLFOLIO_VAULT env / explicit arg), so it's the canonical location.
     public func vaultDir(_ arg: String? = nil) -> String {
         if let arg, !arg.isEmpty { return arg }
-        let env = ProcessInfo.processInfo.environment["VEILENS_VAULT"]
+        let env = ProcessInfo.processInfo.environment["MILLFOLIO_VAULT"]
         if let env, !env.isEmpty { return env }
         return dotConfig.appendingPathComponent("millfolio/vault", isDirectory: true).path
     }
@@ -1144,7 +1203,7 @@ public final class Bootstrapper: ObservableObject {
         return dir
     }
 
-    /// `millrace mill install` — install the combined inference server (+ both
+    /// `mill install` — install the combined inference server (+ both
     /// models' weights) + privacy_box + millfolio, idempotently. Each step skips what's
     /// already installed (see the guards in installServer/PrivacyBoxEngine/Millfolio-
     /// Engine), so re-running is cheap and reuses anything present.
@@ -1169,7 +1228,7 @@ public final class Bootstrapper: ObservableObject {
 
     /// Write `run-millfolio-web.sh` — the VAULT web chat launcher. Like
     /// writePrivacyBoxWebScript, but exports PRIVACY_BOX_VAULT=1 + PRIVACY_BOX_VAULT_DIR
-    /// (+ VEILENS_VAULT and the loopback millfolio URLs) and execs privacy_box's
+    /// (+ MILLFOLIO_VAULT and the loopback millfolio URLs) and execs privacy_box's
     /// serve-web.sh, so the privacy_box web server comes up in VAULT mode pointed at
     /// the vault dir. The vault tools the generated program calls reach the
     /// combined inference server over loopback (:8000). Returns its path.
@@ -1188,14 +1247,14 @@ public final class Bootstrapper: ObservableObject {
         # VAULT mode: the privacy_box web server answers questions about the vault dir.
         export PRIVACY_BOX_VAULT=1
         export PRIVACY_BOX_VAULT_DIR='\(dir)'
-        export VEILENS_VAULT='\(dir)'
+        export MILLFOLIO_VAULT='\(dir)'
         # The vault tools (search/ask_local) hit the combined inference server over
         # loopback — embeddings + chat on one port (:8000).
-        export VEILENS_EMBED_URL='http://127.0.0.1:8000/v1'
-        export VEILENS_LOCAL_URL='http://127.0.0.1:8000/v1'
+        export MILLFOLIO_EMBED_URL='http://127.0.0.1:8000/v1'
+        export MILLFOLIO_LOCAL_URL='http://127.0.0.1:8000/v1'
         # privacy_box compiles the generated vault program against the millfolio sources —
         # point its -I resolution at the installed millfolio checkout.
-        export PRIVACY_BOX_VEILENS='\(millfolioDir.path)'
+        export PRIVACY_BOX_MILLFOLIO='\(millfolioDir.path)'
         exec bash scripts/serve-web.sh
         """
         try body.write(to: script, atomically: true, encoding: .utf8)
@@ -1220,7 +1279,7 @@ public final class Bootstrapper: ObservableObject {
         #!/bin/bash
         # Run from the privacy_box engine dir: the vault orchestrator reads its
         # sandbox/*.sb.template profiles relative to cwd (the same dir the `ask`
-        # launcher uses). The UI is served via VEILENS_WEB_DIR (absolute), and the
+        # launcher uses). The UI is served via MILLFOLIO_WEB_DIR (absolute), and the
         # server binaries are referenced by absolute path, so cwd can be privacy_box's.
         cd '\(privacy_boxDir.path)'
         export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
@@ -1228,15 +1287,15 @@ public final class Bootstrapper: ObservableObject {
         export PATH='\(mojoBin)':"$PATH"
         [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
         export PRIVACY_BOX_VAULT_DIR='\(dir)'
-        export VEILENS_VAULT='\(dir)'
+        export MILLFOLIO_VAULT='\(dir)'
         # The vault tools (search/ask_local) hit the combined inference server over
         # loopback — embeddings + chat on one port (:8000).
-        export VEILENS_EMBED_URL='http://127.0.0.1:8000/v1'
-        export VEILENS_LOCAL_URL='http://127.0.0.1:8000/v1'
+        export MILLFOLIO_EMBED_URL='http://127.0.0.1:8000/v1'
+        export MILLFOLIO_LOCAL_URL='http://127.0.0.1:8000/v1'
         # millfolio-ws compiles the generated vault program against the millfolio sources.
-        export PRIVACY_BOX_VEILENS='\(millfolioDir.path)'
+        export PRIVACY_BOX_MILLFOLIO='\(millfolioDir.path)'
         # Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
-        export VEILENS_WEB_DIR='\(appRoot.appendingPathComponent("web/dist").path)'
+        export MILLFOLIO_WEB_DIR='\(appRoot.appendingPathComponent("web/dist").path)'
         # Run both servers detached in the BACKGROUND (no Terminal) — static UI on
         # :10000, streaming WS on :10001 — logging to the millfolio server log. nohup
         # so they survive this launcher (and the CLI) exiting; `mill stop` reaps
@@ -1382,7 +1441,7 @@ public final class Bootstrapper: ObservableObject {
         let session = newSessionLog(for: question)
         set("session transcript → \(session.path)")
         return try runLoggedScript(script.path, args, label: "ask",
-                                   env: ["VEILENS_SESSION_LOG": session.path])
+                                   env: ["MILLFOLIO_SESSION_LOG": session.path])
     }
 
     /// Run the millfolio engine `index <folder>`. See runLoggedScript.
@@ -1481,7 +1540,7 @@ public final class Bootstrapper: ObservableObject {
 
         // First reference to each component introduces it with a gloss; the
         // granular install steps below then use the short product name.
-        set("Refreshing millrace, the inference server…")
+        set("Refreshing engine, the inference server…")
         try? FileManager.default.removeItem(at: engineRoot)   // drop built binary + source (weights/toolchain kept)
         try await installServer()
 
@@ -1495,7 +1554,7 @@ public final class Bootstrapper: ObservableObject {
         linkVaultShims()   // millfolio FFI shims → privacy_box-mojo/lib (vault-run dlopen)
 
         // The streaming app server (built on-device against privacy_box). Best-effort:
-        // skips cleanly until millfolioapp/app publishes a release to download.
+        // skips cleanly until millfolio/app publishes a release to download.
         set("Refreshing millfolio app server…")
         try? FileManager.default.removeItem(at: appRoot)
         // Surface failures: a real build error must fail the update, not be
@@ -1519,7 +1578,7 @@ public final class Bootstrapper: ObservableObject {
         set("Updating the millfolio CLI via Homebrew…")
         _ = try? run(brew, ["update"])   // refresh tap metadata (non-fatal if offline)
         do {
-            let out = try run(brew, ["upgrade", "millfolioapp/tap/millfolio"])
+            let out = try run(brew, ["upgrade", "millfolio/tap/mill"])
             vlog("brew upgrade:\n\(out)")
             set("✓ CLI updated (takes effect next run)")
         } catch {
@@ -1570,7 +1629,7 @@ public final class Bootstrapper: ObservableObject {
     private func brewCliVersion() -> String {
         guard let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { return "" }
-        guard let out = try? run(brew, ["list", "--versions", "millfolioapp/tap/millfolio"]) else { return "" }
+        guard let out = try? run(brew, ["list", "--versions", "millfolio/tap/mill"]) else { return "" }
         let toks = out.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
         return toks.count >= 2 ? "v" + toks.last! : ""
     }

@@ -1,5 +1,5 @@
 class Mill < Formula
-  desc "CLI for the millfolio personal data vault (millrace server + headgate)"
+  desc "CLI for the millfolio personal data vault"
   homepage "https://github.com/millfolio/vault"
   # version / url / sha256 are bumped per release by dist/homebrew/update-formula.sh
   # (downloads the mill-macos.tar.gz release asset and fills in its checksum).

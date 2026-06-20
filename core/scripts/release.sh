@@ -38,10 +38,10 @@ APP_DIR="${APP_DIR:-$UMBRELLA/app}"
 CLI_DIR="${CLI_DIR:-$UMBRELLA/cli}"
 TAP_DIR="${TAP_DIR:-$UMBRELLA/homebrew-tap}"
 
-ENGINE_REPO="${ENGINE_REPO:-millfolioapp/millfolio}"
-PRIVACY_BOX_REPO="${PRIVACY_BOX_REPO:-millfolioapp/privacy_box}"
-APP_REPO="${APP_REPO:-millfolioapp/app}"
-CLI_REPO="${CLI_REPO:-millfolioapp/cli}"
+ENGINE_REPO="${ENGINE_REPO:-millfolio/millfolio}"
+PRIVACY_BOX_REPO="${PRIVACY_BOX_REPO:-millfolio/privacy_box}"
+APP_REPO="${APP_REPO:-millfolio/app}"
+CLI_REPO="${CLI_REPO:-millfolio/cli}"
 
 ENGINE_ASSET="millfolio.zip"
 PRIVACY_BOX_ASSET="privacy_box.zip"
@@ -218,7 +218,7 @@ wait_for_asset "$CLI_REPO" "$CLI_ASSET"
 # -- 5. tap (formula -> cli's published asset) --------------------------------
 if [ "$SKIP_TAP" = 0 ]; then
   log "tap: regenerating formula from $CLI_REPO $VERSION asset"
-  ( cd "$CLI_DIR" && VEILENS_REPO="$CLI_REPO" dist/homebrew/update-formula.sh "$VERSION" )
+  ( cd "$CLI_DIR" && MILL_REPO="$CLI_REPO" dist/homebrew/update-formula.sh "$VERSION" )
 
   cp "$CLI_DIR/dist/homebrew/$TAP_FORMULA" "$TAP_DIR/Formula/$TAP_FORMULA"
 
@@ -242,4 +242,4 @@ if [ "$SKIP_TAP" = 0 ]; then
 fi
 
 echo
-log "Done ($VERSION). Install with:  brew install millfolioapp/tap/millfolio"
+log "Done ($VERSION). Install with:  brew install millfolio/tap/mill"

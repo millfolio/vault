@@ -92,16 +92,16 @@ def _default_dir() raises -> String:
 
 def _local_url() raises -> String:
     """CHAT endpoint (default :8000)."""
-    return getenv("VEILENS_LOCAL_URL", "http://127.0.0.1:8000/v1")
+    return getenv("MILLFOLIO_LOCAL_URL", "http://127.0.0.1:8000/v1")
 
 
 def _embed_url() raises -> String:
     """EMBEDDINGS endpoint (default :8000, same base as chat). `index` + `search`
     + `embed` use this — one inference-server process now serves both the chat
     model and the embedding model on a single port (/v1/embeddings routes to the
-    secondary Qwen3-Embedding model). Override VEILENS_EMBED_URL to point at a
+    secondary Qwen3-Embedding model). Override MILLFOLIO_EMBED_URL to point at a
     separate embedding server. Mirrors vault._embed_url()."""
-    return getenv("VEILENS_EMBED_URL", "http://127.0.0.1:8000/v1")
+    return getenv("MILLFOLIO_EMBED_URL", "http://127.0.0.1:8000/v1")
 
 
 def main() raises:

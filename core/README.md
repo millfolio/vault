@@ -1,7 +1,7 @@
 # millfolio
 
 > Part of [**millfolio.app**](https://millfolio.app) using
-> [**millrace**](https://millrace.app) — local-first AI on Apple Silicon.
+> [**millfolio**](https://millfolio.app) — local-first AI on Apple Silicon.
 > **Experimental.**
 
 Ask open-ended questions about your own files — _"how much did I spend on travel
@@ -10,11 +10,11 @@ my car?"_ — over a private vault of **CSV, PDF, and Markdown** documents,
 **without your data ever leaving the machine**.
 
 millfolio is the **vault application**. It builds on the
-[privacy_box](https://github.com/millrace/privacy_box) privacy harness and the
-millrace toolbox: [lancedb.mojo](https://github.com/millrace/lancedb.mojo) for
+[privacy_box](https://github.com/millfolio/privacy_box) privacy harness and the
+millfolio toolbox: [lancedb.mojo](https://github.com/millfolio/lancedb.mojo) for
 the on-device vector index,
-[pdftotext.mojo](https://github.com/millrace/pdftotext.mojo) for PDF extraction,
-and the local [inference server](https://github.com/millrace/millrace) as the
+[pdftotext.mojo](https://github.com/millfolio/pdftotext.mojo) for PDF extraction,
+and the local [inference server](https://github.com/millfolio/engine) as the
 trusted on-device reader.
 
 ## How the privacy model works
@@ -92,8 +92,8 @@ millfolio search "<query>" [k]              # semantic search over the index*
 ```
 
 The index lives under `~/.config/millfolio/` (`index.db` + `chunks.tsv`
-side-table). Local model URLs are configurable via `VEILENS_LOCAL_URL` (default
-`http://127.0.0.1:8000/v1`) and `VEILENS_VAULT` (default `~/.config/millfolio/vault`).
+side-table). Local model URLs are configurable via `MILLFOLIO_LOCAL_URL` (default
+`http://127.0.0.1:8000/v1`) and `MILLFOLIO_VAULT` (default `~/.config/millfolio/vault`).
 
 There are also `pixi run smoke-readers` / `smoke-embed` / `smoke-index` /
 `build-vault` tasks that exercise each layer against a throwaway vault.

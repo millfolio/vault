@@ -20,14 +20,15 @@ URL="https://github.com/$REPO/releases/download/$TAG/mill-macos.tar.gz"
 VER="${TAG#v}"
 
 echo "==> fetching $URL" >&2
-TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
 curl -fsSL "$URL" -o "$TMP"
 SHA="$(shasum -a 256 "$TMP" | awk '{print $1}')"
 echo "==> sha256 $SHA" >&2
 
-cat > "$OUT" <<EOF
+cat >"$OUT" <<EOF
 class Mill < Formula
-  desc "CLI for the millfolio personal data vault (millrace server + headgate)"
+  desc "CLI for the millfolio personal data vault"
   homepage "https://github.com/$REPO"
   # version / url / sha256 are bumped per release by dist/homebrew/update-formula.sh
   # (downloads the mill-macos.tar.gz release asset and fills in its checksum).

@@ -21,7 +21,7 @@ Usage:
                                        tools; it runs locally over the real data and
                                        only the printed answer surfaces.
 
-The vault dir defaults to $VEILENS_VAULT, else $PRIVACY_BOX_DATA, else ~/millfolio.
+The vault dir defaults to $MILLFOLIO_VAULT, else $PRIVACY_BOX_DATA, else ~/millfolio.
 Index it first with `mill index <dir>` (needs the embedding server live).
 """
 
@@ -34,11 +34,11 @@ from wiring import build_vault_orchestrator
 
 def _vault_dir(var arg: String) raises -> String:
     """Resolve the vault dir for the `vault` subcommand: an explicit CLI arg wins,
-    then $VEILENS_VAULT, then $PRIVACY_BOX_DATA, then ~/millfolio (millfolio's own
+    then $MILLFOLIO_VAULT, then $PRIVACY_BOX_DATA, then ~/millfolio (millfolio's own
     default). Kept consistent with millfolio/src/vault.mojo `_vault_dir()`."""
     if arg != "":
         return arg^
-    var d = getenv("VEILENS_VAULT", "")
+    var d = getenv("MILLFOLIO_VAULT", "")
     if d != "":
         return d
     d = getenv("PRIVACY_BOX_DATA", "")
@@ -71,4 +71,4 @@ def main() raises:
     print('usage: privacy_box vault "<question>" [vault_dir]')
     print("  Answer a question about your private VAULT (CSV/PDF/Markdown).")
     print("  Index it first with `mill index <dir>` (embedding server live).")
-    print("  The vault dir defaults to $VEILENS_VAULT, else $PRIVACY_BOX_DATA, else ~/millfolio.")
+    print("  The vault dir defaults to $MILLFOLIO_VAULT, else $PRIVACY_BOX_DATA, else ~/millfolio.")

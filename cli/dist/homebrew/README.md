@@ -43,7 +43,7 @@ git -C homebrew-tap commit -m "mill 0.1.0" && git -C homebrew-tap push
 - **Signing, not notarization.** A Developer-ID-signed CLI runs from the
   terminal without a Gatekeeper prompt, and Homebrew doesn't quarantine tap
   downloads, so notarization isn't required.
-- **Shared state with millrace.** `mill` installs into the same tree
-  (`~/Library/Application Support/Millrace`) and drives the same launchd job
-  (`me.millrace.server`) as the `millrace` CLI — they interoperate on one
+- **Shared state with millfolio.** `mill` installs into the same tree
+  (`~/Library/Application Support/Millfolio`) and drives the same launchd job
+  (`me.millfolio.server`) as the `millfolio` CLI — they interoperate on one
   inference server. `mill` adds headgate + the vault on top.

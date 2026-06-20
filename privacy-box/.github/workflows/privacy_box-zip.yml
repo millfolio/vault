@@ -1,6 +1,6 @@
 name: privacy_box zip
 
-# Builds privacy_box.zip — the privacy_box source bundle the Millrace menu app downloads,
+# Builds privacy_box.zip — the privacy_box source bundle the Millfolio menu app downloads,
 # then `mojo build`s on-device. See scripts/package_privacy_box.sh. Mirrors
 # mojo-backend's engine-zip.yml.
 on:
@@ -25,15 +25,15 @@ jobs:
           path: privacy_box
       - uses: actions/checkout@v6
         with:
-          repository: millrace/flare
+          repository: millfolio/flare
           path: flare
       - uses: actions/checkout@v6
         with:
-          repository: millrace/json
+          repository: millfolio/json
           path: json
       - uses: actions/checkout@v6
         with:
-          repository: millrace/jinja2.mojo
+          repository: millfolio/jinja2.mojo
           path: jinja2.mojo
 
       - uses: prefix-dev/setup-pixi@v0.9.6

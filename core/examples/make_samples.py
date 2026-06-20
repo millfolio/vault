@@ -1,5 +1,5 @@
 """Generate the demo vault — a few synthetic, text-layer PDF documents you can
-drop into a veilens vault to try the end-to-end flow without your own data.
+drop into a millfolio vault to try the end-to-end flow without your own data.
 
 These mimic what you'd export from a bank/insurer portal: real *digital* PDFs
 with a selectable text layer (so pdftotext.mojo extracts them — no OCR). All data

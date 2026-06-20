@@ -5,14 +5,14 @@ ask open-ended questions, answered **locally**. A frontier model writes the code
 that runs on your data; the data never leaves the machine.
 
 This repo consolidates what used to be three separate repos
-(`veilens` + `headgate` + `cli`) into one. History was intentionally not
+(`millfolio` + `headgate` + `cli`) into one. History was intentionally not
 preserved. The `mill` command (Swift CLI) is the umbrella; `millfolio` is the brand.
 
 ## Layout
 
 | dir | was | language | what it does |
 |---|---|---|---|
-| **`core/`** | veilens | Mojo | the vault: indexer, embeddings, the tool surface a sandboxed program imports, the ask loop |
+| **`core/`** | millfolio | Mojo | the vault: indexer, embeddings, the tool surface a sandboxed program imports, the ask loop |
 | **`privacy-box/`** | headgate | Mojo | the privacy harness: brokers between the local engine and a frontier model, sandboxes generated code, enforces egress |
 | **`cli/`** | cli | Swift | the `vault` umbrella command — `install` / `start` / `stop` / `index` / `ask`; provisions the engine + sandbox + vault |
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build privacy_box.zip — the privacy_box source bundle the Millrace menu app downloads,
+# Build privacy_box.zip — the privacy_box source bundle the Millfolio menu app downloads,
 # then `mojo build`s on-device against a separately-fetched Mojo compiler (see
-# millrace/app Bootstrapper). Mirrors inference-server/scripts/package_engine.sh.
+# millfolio/app Bootstrapper). Mirrors inference-server/scripts/package_engine.sh.
 #
 # The bundle unzips to four siblings:
 #
