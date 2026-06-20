@@ -414,7 +414,6 @@ public final class Bootstrapper: ObservableObject {
 
         try await ensureBundle()
 
-        set("Locating Python…")
         let python = try findPython()
 
         set("Building engine (first run, ~1 min)…")
@@ -796,7 +795,6 @@ public final class Bootstrapper: ObservableObject {
         }
 
         // 3. Build privacy_box against its vendored siblings.
-        set("Locating Python…")
         let python = try findPython()
         set("Building privacy_box (first run, ~1 min)…")
         let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
@@ -1005,7 +1003,6 @@ public final class Bootstrapper: ObservableObject {
 
         // 3. Build millfolio against its vendored siblings (flare/json + the LanceDB
         //    binding + pdftotext/zlib readers), all bundled by package_millfolio.sh.
-        set("Locating Python…")
         let python = try findPython()
         set("Building millfolio (first run, ~1 min)…")
         let mojo = millfolioMojoPrefix.appendingPathComponent("bin/mojo").path
@@ -1109,7 +1106,6 @@ public final class Bootstrapper: ObservableObject {
             throw BootstrapError.step("unpack", "millfolio-app.zip missing src/ws_server.mojo")
         }
 
-        set("Locating Python…")
         let python = try findPython()
         set("Building millfolio app server (first run, ~1 min)…")
         let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
