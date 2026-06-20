@@ -1538,26 +1538,29 @@ public final class Bootstrapper: ObservableObject {
 
         // First reference to each component introduces it with a gloss; the
         // granular install steps below then use the short product name.
+        // All components ship in ONE millfolio.zip now. Refresh by dropping the whole
+        // unpacked bundle (incl. its .unpacked stamp) ONCE — `ensureBundle` (called by
+        // installServer below) then re-fetches the latest bundle, and each install
+        // rebuilds its component from it. Removing the per-component roots individually
+        // would leave the stamp in place, so ensureBundle would skip the re-unpack and
+        // the build would fail on a missing `inference-server`. Model weights (hf/) and
+        // the Mojo toolchain (mojo/) live outside bundleRoot and are kept.
+        try? FileManager.default.removeItem(at: bundleRoot)
+
         set("Refreshing engine, the inference server…")
-        try? FileManager.default.removeItem(at: engineRoot)   // drop built binary + source (weights/toolchain kept)
         try await installServer()
 
         set("Refreshing privacy_box, the privacy agent harness…")
-        try? FileManager.default.removeItem(at: privacy_boxRoot)
         try await installPrivacyBoxEngine()
 
         set("Refreshing millfolio, the vault engine…")
-        try? FileManager.default.removeItem(at: millfolioRoot)
         try await installMillfolioEngine()
-        linkVaultShims()   // millfolio FFI shims → privacy_box-mojo/lib (vault-run dlopen)
+        linkVaultShims()   // millfolio FFI shims → the shared toolchain lib (vault-run dlopen)
 
-        // The streaming app server (built on-device against privacy_box). Best-effort:
-        // skips cleanly until millfolio/app publishes a release to download.
+        // The streaming app server (built on-device against privacy_box). A real build
+        // error must fail the update, not be swallowed (else `mill update` falsely
+        // reports success).
         set("Refreshing millfolio app server…")
-        try? FileManager.default.removeItem(at: appRoot)
-        // Surface failures: a real build error must fail the update, not be
-        // swallowed (otherwise `mill update` falsely reports success). The
-        // bundle is published now, so there's no "not yet released" case to skip.
         try await installAppServer()
 
         vlog("update complete")
