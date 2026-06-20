@@ -46,6 +46,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
 
+      # protoc: lancedb.mojo's Rust FFI shim (lance-encoding) needs the protobuf
+      # compiler at build time.
+      - name: Install protobuf (protoc)
+        run: brew install protobuf
+
       - name: Package millfolio.zip
         working-directory: vault
         run: bash scripts/package_bundle.sh "$GITHUB_WORKSPACE/millfolio.zip"
