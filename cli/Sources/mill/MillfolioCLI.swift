@@ -41,7 +41,7 @@ struct Update: AsyncParsableCommand {
         abstract: "Update millfolio and its components to the latest release.",
         discussion: """
         Upgrades the `millfolio` CLI via Homebrew, then refreshes the downloadable \
-        components (inference-server engine, privacy_box, millfolio engine) to their \
+        components (inference server, privacy_box, vault engine, app web server) to their \
         latest releases. The Mojo toolchains and the model weights are kept, so it \
         only re-fetches + rebuilds the source bundles. Progress is logged to \
         ~/Library/Logs/Millfolio/<date>.log.
@@ -122,7 +122,7 @@ struct Status: AsyncParsableCommand {
         print("embeddings: \(mark(boot.embedWeightsPresent))")
         print("privacy_box:   \(mark(boot.isPrivacyBoxInstalled))")
         print("millfolio:    \(mark(boot.isMillfolioInstalled))")
-        print("app server: \(mark(boot.isAppServerInstalled))")
+        print("app web server: \(mark(boot.isAppServerInstalled))")
     }
 }
 

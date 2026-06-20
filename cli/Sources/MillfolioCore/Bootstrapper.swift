@@ -185,7 +185,6 @@ public final class Bootstrapper: ObservableObject {
     private let bundleURL =
         URL(string: "https://github.com/millfolio/vault/releases/latest/download/millfolio.zip")!
     private var bundleRoot: URL { support.appendingPathComponent("bundle", isDirectory: true) }
-    private var bundleStamp: URL { bundleRoot.appendingPathComponent(".unpacked") }
     private var engineRoot: URL { bundleRoot.appendingPathComponent("runner", isDirectory: true) }
     /// HF cache root for the model weights (HF_HOME). Self-contained under support/.
     private var hfHome: URL { support.appendingPathComponent("hf", isDirectory: true) }
@@ -601,18 +600,20 @@ public final class Bootstrapper: ObservableObject {
         return dest
     }
 
-    /// Download + unpack the one source bundle (millfolio.zip) once. Idempotent via
-    /// the `.unpacked` stamp; each component (server/privacy_box/millfolio/app) calls
-    /// this before building, so it runs once per install and is a no-op thereafter.
-    /// `unpackZip` also sanity-checks the engine subtree is present.
+    /// Download + unpack the one source bundle (millfolio.zip) once. Each component
+    /// (server/privacy_box/millfolio/app) calls this before building, so it runs once
+    /// per install and is a no-op thereafter. Gates on the **actual unpacked engine
+    /// source**, not a stamp: a stamp can outlive its content (e.g. a stale `mill
+    /// update` that removed runner/), which would skip the re-unpack and then fail
+    /// later on a missing inference-server. `unpackZip` sanity-checks the subtree.
     private func ensureBundle() async throws {
-        if FileManager.default.fileExists(atPath: bundleStamp.path) { return }
+        if FileManager.default.fileExists(
+            atPath: backendDir.appendingPathComponent("src/server.mojo").path) { return }
         set("Downloading millfolio sources…")
         let zip = try await download(bundleURL, name: "millfolio.zip")
         set("Unpacking sources…")
         try FileManager.default.createDirectory(at: bundleRoot, withIntermediateDirectories: true)
         try unpackZip(zip, into: bundleRoot)
-        FileManager.default.createFile(atPath: bundleStamp.path, contents: nil)
     }
 
     /// A `.conda` is a zip containing `pkg-*.tar.zst` (the files) + `info-*.tar.zst`.
@@ -1642,8 +1643,8 @@ public final class Bootstrapper: ObservableObject {
             ("cli (millfolio)", shown(brewCliVersion())),
             ("inference server", shown(readVersion("inference-server"))),
             ("privacy_box", shown(readVersion("privacy_box"))),
-            ("millfolio engine", shown(readVersion("millfolio"))),
-            ("app server", shown(readVersion("app"))),
+            ("vault engine", shown(readVersion("millfolio"))),
+            ("app web server", shown(readVersion("app"))),
         ]
     }
 
