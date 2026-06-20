@@ -2,19 +2,18 @@
 
 The millfolio personal data vault — index your own PDFs, CSVs, and Markdown and
 ask open-ended questions, answered **locally**. A frontier model writes the code
-that runs on your data; the data never leaves the machine.
+that runs on your data; the data never leaves the machine. The `mill` CLI is the
+umbrella command.
 
-This repo consolidates what used to be three separate repos
-(`millfolio` + `headgate` + `cli`) into one. History was intentionally not
-preserved. The `mill` command (Swift CLI) is the umbrella; `millfolio` is the brand.
+→ Learn more at [**millfolio.app**](https://millfolio.app).
 
 ## Layout
 
-| dir | was | language | what it does |
-|---|---|---|---|
-| **`core/`** | millfolio | Mojo | the vault: indexer, embeddings, the tool surface a sandboxed program imports, the ask loop |
-| **`privacy-box/`** | headgate | Mojo | the privacy harness: brokers between the local engine and a frontier model, sandboxes generated code, enforces egress |
-| **`cli/`** | cli | Swift | the `vault` umbrella command — `install` / `start` / `stop` / `index` / `ask`; provisions the engine + sandbox + vault |
+| dir | language | what it does |
+|---|---|---|
+| **`core/`** | Mojo | the vault: indexer, embeddings, the tool surface a sandboxed program imports, the ask loop |
+| **`privacy-box/`** | Mojo | the privacy harness: brokers between the local engine and a frontier model, sandboxes generated code, enforces egress |
+| **`cli/`** | Swift | the `mill` umbrella command — `install` / `start` / `stop` / `index` / `ask`; provisions the engine + sandbox + vault |
 
 ## Dependencies (separate repos in the `millfolio` org)
 
