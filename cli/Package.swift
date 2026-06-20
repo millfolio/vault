@@ -26,8 +26,8 @@ let package = Package(
             dependencies: ["CZstd"],
             path: "Sources/MillfolioCore"
         ),
-        // The `millfolio` CLI. There is no companion .app, so the binary is named
-        // `millfolio` directly; the Homebrew formula installs it as `millfolio`.
+        // The millfolio CLI. There is no companion .app, so the binary is named
+        // `mill` directly; the Homebrew formula installs it as `mill`.
         .executableTarget(
             name: "mill",
             dependencies: [

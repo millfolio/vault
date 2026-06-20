@@ -13,6 +13,9 @@ permissions:
 jobs:
   cli:
     runs-on: macos-14 # Apple Silicon runner; ships a Swift toolchain
+    defaults:
+      run:
+        working-directory: cli # the Swift package lives in the vault repo's cli/ subdir
     env:
       # Developer ID *Application* cert (signs the CLI with the hardened runtime).
       # Optional: without it the binary is ad-hoc signed — fine for `swift run` /
@@ -40,35 +43,35 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KPW" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
           APP_ID="$(security find-identity -v "$KEYCHAIN" | awk '/Developer ID Application/{print $2; exit}')"
-          echo "VEILENS_SIGN_IDENTITY=$APP_ID" >> "$GITHUB_ENV"
-          echo "VEILENS_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "MILL_SIGN_IDENTITY=$APP_ID" >> "$GITHUB_ENV"
+          echo "MILL_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           echo "imported app=${APP_ID:-<none>}"
 
-      - name: Build millfolio CLI (universal, signed)
+      - name: Build mill CLI (universal, signed)
         run: |
-          swift build -c release --arch arm64 --arch x86_64 --product millfolio
-          BIN="$(swift build -c release --arch arm64 --arch x86_64 --product millfolio --show-bin-path)/millfolio"
+          swift build -c release --arch arm64 --arch x86_64 --product mill
+          BIN="$(swift build -c release --arch arm64 --arch x86_64 --product mill --show-bin-path)/mill"
           [ -x "$BIN" ] || { echo "::error::CLI binary not found at $BIN"; exit 1; }
-          STAGE="$RUNNER_TEMP/millfolio-cli"; mkdir -p "$STAGE"
-          cp "$BIN" "$STAGE/millfolio"
-          if [ -n "${VEILENS_SIGN_IDENTITY:-}" ]; then
-            codesign --force --options runtime --timestamp --sign "$VEILENS_SIGN_IDENTITY" "$STAGE/millfolio"
+          STAGE="$RUNNER_TEMP/mill-cli"; mkdir -p "$STAGE"
+          cp "$BIN" "$STAGE/mill"
+          if [ -n "${MILL_SIGN_IDENTITY:-}" ]; then
+            codesign --force --options runtime --timestamp --sign "$MILL_SIGN_IDENTITY" "$STAGE/mill"
           else
-            echo "==> ad-hoc signing CLI (no Developer ID identity)"; codesign --force --sign - "$STAGE/millfolio" || true
+            echo "==> ad-hoc signing CLI (no Developer ID identity)"; codesign --force --sign - "$STAGE/mill" || true
           fi
-          codesign --verify --verbose "$STAGE/millfolio" || true
-          tar -C "$STAGE" -czf "$GITHUB_WORKSPACE/millfolio-macos.tar.gz" millfolio
-          echo "millfolio-macos.tar.gz sha256:"; shasum -a 256 "$GITHUB_WORKSPACE/millfolio-macos.tar.gz"
+          codesign --verify --verbose "$STAGE/mill" || true
+          tar -C "$STAGE" -czf "$GITHUB_WORKSPACE/mill-macos.tar.gz" mill
+          echo "mill-macos.tar.gz sha256:"; shasum -a 256 "$GITHUB_WORKSPACE/mill-macos.tar.gz"
 
       - name: Clean up keychain
-        if: always() && env.VEILENS_KEYCHAIN != ''
-        run: security delete-keychain "$VEILENS_KEYCHAIN" || true
+        if: always() && env.MILL_KEYCHAIN != ''
+        run: security delete-keychain "$MILL_KEYCHAIN" || true
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v7
         with:
-          name: millfolio-cli
-          path: millfolio-macos.tar.gz
+          name: mill-cli
+          path: mill-macos.tar.gz
           if-no-files-found: error
 
       # On a version tag (e.g. v0.1.0), publish a Release with the CLI tarball.
@@ -76,8 +79,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          files: millfolio-macos.tar.gz
+          files: mill-macos.tar.gz
           body: |
-            The `millfolio` CLI — the personal data vault on Apple Silicon.
+            The `mill` CLI — the millfolio personal data vault on Apple Silicon.
 
-            **Install:** `brew install millfolioapp/tap/millfolio`, then `mill install`.
+            **Install:** `brew install millfolio/tap/mill`, then `mill install`.
