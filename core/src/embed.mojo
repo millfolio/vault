@@ -71,3 +71,56 @@ def embed(base_url: String, text: String) raises -> List[Float32]:
     if len(vec) == 0:
         raise Error("embed: empty embedding returned from " + base_url)
     return vec^
+
+
+def embed_batch(base_url: String, texts: List[String]) raises -> List[List[Float32]]:
+    """Embed many texts in ONE request and return one vector per input, in order.
+
+    POSTs `{"input":[...]}` (the OpenAI array form the server already supports) to
+    `<base_url>/embeddings` and parses every `data[i].embedding`. This is the
+    indexing fast path: it collapses N per-chunk round-trips (and N fresh
+    connections) into one request per batch — the single-GPU server still embeds
+    each input, but the network/connection/parse overhead is amortized. Raises if
+    the server is unreachable, the shape is unexpected, or the count mismatches.
+    """
+    if len(texts) == 0:
+        return List[List[Float32]]()
+    var body = String('{"input":[')
+    for i in range(len(texts)):
+        if i > 0:
+            body += ","
+        body += String('"') + _json_escape(texts[i]) + '"'
+    body += "]}"
+    var req = Request(
+        method="POST",
+        url=base_url + "/embeddings",
+        body=List[UInt8](body.as_bytes()),
+    )
+    req.headers.set("content-type", "application/json")
+    var client = HttpClient()
+    var resp = client.send(req)
+
+    var out = List[List[Float32]]()
+    try:
+        var data = resp.json()["data"]
+        var n = data.array_count()
+        for i in range(n):
+            var arr = data[i]["embedding"]
+            var m = arr.array_count()
+            var vec = List[Float32]()
+            for j in range(m):
+                vec.append(Float32(arr[j].float_value()))
+            out.append(vec^)
+    except err:
+        raise Error(
+            "embed_batch: could not parse embeddings response from "
+            + base_url
+            + "/embeddings (is the inference-server embedding model serving?): "
+            + String(err)
+        )
+    if len(out) != len(texts):
+        raise Error(
+            "embed_batch: server returned " + String(len(out))
+            + " embeddings for " + String(len(texts)) + " inputs"
+        )
+    return out^

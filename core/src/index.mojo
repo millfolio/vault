@@ -21,7 +21,7 @@ from std.os.path import exists, isfile
 from lancedb import Store
 from manifest import build_manifest, FileInfo
 from readers import csv_rows, md_text, pdf_text
-from embed import embed, EMBED_DIM
+from embed import embed, embed_batch, EMBED_DIM
 
 
 comptime CHUNK_SIZE = 512      # ~codepoints per chunk
@@ -242,39 +242,54 @@ def build_index(data_dir: String, base_url: String) raises:
         remove(_sidetable_path())
     var infos = build_manifest(data_dir)
 
+    # Phase 1: chunk every file up front, collecting (alias, text) per chunk. The
+    # chunk's position here is its id (aligned with `aliases`/`texts`/`vectors`).
     var aliases = List[String]()
     var texts = List[String]()
-    var ids = List[Int64]()
-    var vectors = List[Float32]()
-
-    var next_id = 0
     for i in range(len(infos)):
         ref fi = infos[i]
         var body = _file_text(fi)
         var chunks = _chunk_text(body)
         print("  " + fi.id + " [" + fi.kind + "] -> " + String(len(chunks)) + " chunk(s)")
         for c in range(len(chunks)):
-            var vec: List[Float32]
-            try:
-                vec = embed(base_url, chunks[c])
-            except err:
-                raise Error(
-                    "build_index: embedding " + fi.id + " chunk " + String(c)
-                    + " failed (is the inference-server embedding model serving at "
-                    + base_url + "?): " + String(err)
-                )
-            if len(vec) != EMBED_DIM:
-                raise Error(
-                    "build_index: embedding dim " + String(len(vec))
-                    + " != expected " + String(EMBED_DIM)
-                )
-            ids.append(Int64(next_id))
-            for d in range(len(vec)):
-                vectors.append(vec[d])
             aliases.append(fi.id.copy())
             texts.append(chunks[c].copy())
-            next_id += 1
 
+    # Phase 2: embed in batches — ONE request (one connection) per `batch_size`
+    # chunks instead of one per chunk. Collapses N round-trips into N/batch_size,
+    # the dominant indexing cost on the single-GPU server.
+    var batch_size = 64
+    var ids = List[Int64]()
+    var vectors = List[Float32]()
+    var start = 0
+    while start < len(texts):
+        var stop = start + batch_size
+        if stop > len(texts):
+            stop = len(texts)
+        var batch = List[String]()
+        for j in range(start, stop):
+            batch.append(texts[j].copy())
+        var vecs: List[List[Float32]]
+        try:
+            vecs = embed_batch(base_url, batch)
+        except err:
+            raise Error(
+                "build_index: embedding chunks [" + String(start) + ".." + String(stop)
+                + ") failed (is the inference-server embedding model serving at "
+                + base_url + "?): " + String(err)
+            )
+        for k in range(len(vecs)):
+            if len(vecs[k]) != EMBED_DIM:
+                raise Error(
+                    "build_index: embedding dim " + String(len(vecs[k]))
+                    + " != expected " + String(EMBED_DIM)
+                )
+            ids.append(Int64(start + k))
+            for d in range(len(vecs[k])):
+                vectors.append(vecs[k][d])
+        start = stop
+
+    # Phase 3: bulk-write to the LanceDB store + the sidetable.
     var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
     store.add(ids, vectors)
     _write_sidetable(aliases, texts)
