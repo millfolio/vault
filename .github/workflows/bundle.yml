@@ -66,7 +66,9 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
           manifest-path: vault/pixi.toml
-          cache: true
+          # conda packages are cached above via ~/Library/Caches/rattler (covers all
+          # pixi envs, not just vault's); setup-pixi's own cache is redundant + its
+          # key-gen fails in this multi-repo layout.
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
 
