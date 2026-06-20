@@ -44,8 +44,8 @@ D="$STAGE/millfolio"
 echo "==> staging millfolio source" >&2
 mkdir -p "$D/build"
 cp -R "$ROOT/src" "$D/src"
-cp "$ROOT/pixi.toml" "$D/pixi.toml"
-[[ -f "$ROOT/pixi.lock" ]] && cp "$ROOT/pixi.lock" "$D/pixi.lock"
+cp "$ROOT/../pixi.toml" "$D/pixi.toml"
+[[ -f "$ROOT/../pixi.lock" ]] && cp "$ROOT/../pixi.lock" "$D/pixi.lock"
 
 echo "==> bundling FFI shims + deps (relocatable)" >&2
 # The shims millfolio dlopens at runtime + the conda dylibs they link (otool -L,
