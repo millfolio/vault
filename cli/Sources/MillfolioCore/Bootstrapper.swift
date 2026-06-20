@@ -76,20 +76,12 @@ public final class Bootstrapper: ObservableObject {
     private var mojoPythonURL: URL {
         URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.mojoVersion)-release.conda")!
     }
-    /// The engine ("server") source bundle (inference-server + vendored jinja2.mojo/flare +
-    /// prebuilt libflare_tls.so), published by inference-server CI. The asset is still
-    /// named `runner.zip` (wire name retained for now).
-    private let serverZipURL =
-        URL(string: "https://github.com/millfolio/engine/releases/latest/download/runner.zip")!
-
     // ── privacy_box (privacy harness) ─────────────────────────────────────────────
     // privacy_box builds on the SAME unified Mojo toolchain as the server + vault —
     // every repo pins one nightly now, so it shares the single `mojoPrefix` toolchain
     // (no separate download). It's a one-shot CLI (not a daemon), so "start" opens a
     // ready-to-use Terminal rather than launching a server.
     public static let privacy_boxMojoVersion = "1.0.0b3.dev2026061206"
-    private let privacy_boxZipURL =
-        URL(string: "https://github.com/millfolio/privacy_box/releases/latest/download/privacy_box.zip")!
     private var privacy_boxMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
@@ -99,7 +91,7 @@ public final class Bootstrapper: ObservableObject {
     /// Unified toolchain: privacy_box shares the single `mojoPrefix` install (the
     /// staleness check dedupes, so the toolchain is downloaded once for all components).
     private var privacy_boxMojoPrefix: URL { mojoPrefix }
-    private var privacy_boxRoot: URL { support.appendingPathComponent("privacy_box-engine", isDirectory: true) }
+    private var privacy_boxRoot: URL { bundleRoot.appendingPathComponent("privacy_box", isDirectory: true) }
     /// privacy_box checkout inside the unpacked bundle (sibling of flare/json/jinja2.mojo).
     private var privacy_boxDir: URL { privacy_boxRoot.appendingPathComponent("privacy_box", isDirectory: true) }
     private var privacy_boxBin: URL { privacy_boxDir.appendingPathComponent("build/privacy_box") }
@@ -111,8 +103,6 @@ public final class Bootstrapper: ObservableObject {
     // Its bundle vendors the toolbox (flare/json + the LanceDB binding + pdftotext/
     // zlib readers) + prebuilt FFI shims, so the on-device build is
     // `mojo build src/millfolio.mojo -I ../flare -I … ` then installMillfolioShims().
-    private let millfolioZipURL =
-        URL(string: "https://github.com/millfolio/millfolio/releases/latest/download/millfolio.zip")!
     private var millfolioMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
@@ -121,7 +111,7 @@ public final class Bootstrapper: ObservableObject {
     }
     /// Unified toolchain: the vault build shares the single `mojoPrefix` install too.
     private var millfolioMojoPrefix: URL { mojoPrefix }
-    private var millfolioRoot: URL { support.appendingPathComponent("millfolio-engine", isDirectory: true) }
+    private var millfolioRoot: URL { bundleRoot.appendingPathComponent("millfolio", isDirectory: true) }
     /// millfolio checkout inside the unpacked bundle.
     private var millfolioDir: URL { millfolioRoot.appendingPathComponent("millfolio", isDirectory: true) }
     private var millfolioBin: URL { millfolioDir.appendingPathComponent("build/millfolio") }
@@ -131,9 +121,7 @@ public final class Bootstrapper: ObservableObject {
     // ── app server (the streaming WS backend, from millfolio/app) ──────────────
     // Built ON-DEVICE against the privacy_box engine tree, reusing privacy_box's Mojo
     // toolchain + flare shims — so no new toolchain. See app/server/CUTOVER.md.
-    private let appZipURL =
-        URL(string: "https://github.com/millfolio/app/releases/latest/download/millfolio-app.zip")!
-    private var appRoot: URL { support.appendingPathComponent("app", isDirectory: true) }
+    private var appRoot: URL { bundleRoot.appendingPathComponent("app", isDirectory: true) }
     private var appWsBin: URL { appRoot.appendingPathComponent("build/millfolio-ws") }
     /// The built streaming WS server is present.
     public var isAppServerInstalled: Bool { FileManager.default.isExecutableFile(atPath: appWsBin.path) }
@@ -188,8 +176,17 @@ public final class Bootstrapper: ObservableObject {
             .appendingPathComponent("Millfolio", isDirectory: true)
     }
     private var mojoPrefix: URL { support.appendingPathComponent("mojo", isDirectory: true) }
-    private var engineRoot: URL { support.appendingPathComponent("engine", isDirectory: true) }
     private var cacheDir: URL { support.appendingPathComponent("cache", isDirectory: true) }
+
+    // ── source bundle (one millfolio.zip from the vault repo) ────────────────────
+    // All on-device-built source ships in ONE archive whose subtrees mirror the
+    // former four zips: runner/ privacy_box/ millfolio/ app/. Downloaded once and
+    // built per-component, so the per-component build steps below are unchanged.
+    private let bundleURL =
+        URL(string: "https://github.com/millfolio/vault/releases/latest/download/millfolio.zip")!
+    private var bundleRoot: URL { support.appendingPathComponent("bundle", isDirectory: true) }
+    private var bundleStamp: URL { bundleRoot.appendingPathComponent(".unpacked") }
+    private var engineRoot: URL { bundleRoot.appendingPathComponent("runner", isDirectory: true) }
     /// HF cache root for the model weights (HF_HOME). Self-contained under support/.
     private var hfHome: URL { support.appendingPathComponent("hf", isDirectory: true) }
     /// inference-server checkout inside the unpacked engine zip.
@@ -373,9 +370,9 @@ public final class Bootstrapper: ObservableObject {
         }
 
         guard migratedTree else { return }
-        // Keep the model weights (hf/) + cache; drop the stale engine checkout so the
-        // server is rebuilt from the new source against ~/.config/millfolio.
-        try? fm.removeItem(at: engineRoot)
+        // Keep the model weights (hf/) + cache; drop the unpacked source bundle so it
+        // re-downloads + rebuilds fresh against the new layout + ~/.config/millfolio.
+        try? fm.removeItem(at: bundleRoot)
         // The per-day diagnostic log inside the moved tree kept its old name.
         let oldLog = support.appendingPathComponent("Millrace.log")
         if fm.fileExists(atPath: oldLog.path) && !fm.fileExists(atPath: logFileURL.path) {
@@ -415,10 +412,7 @@ public final class Bootstrapper: ObservableObject {
         }
         try relocateMojoPrefix(mojoPrefix)   // rewrite modular.cfg's baked placeholder prefix
 
-        set("Downloading engine source…")
-        let zip = try await download(serverZipURL, name: "runner.zip")
-        set("Unpacking engine…")
-        try unpackZip(zip, into: engineRoot)
+        try await ensureBundle()
 
         set("Locating Python…")
         let python = try findPython()
@@ -608,6 +602,20 @@ public final class Bootstrapper: ObservableObject {
         return dest
     }
 
+    /// Download + unpack the one source bundle (millfolio.zip) once. Idempotent via
+    /// the `.unpacked` stamp; each component (server/privacy_box/millfolio/app) calls
+    /// this before building, so it runs once per install and is a no-op thereafter.
+    /// `unpackZip` also sanity-checks the engine subtree is present.
+    private func ensureBundle() async throws {
+        if FileManager.default.fileExists(atPath: bundleStamp.path) { return }
+        set("Downloading millfolio sources…")
+        let zip = try await download(bundleURL, name: "millfolio.zip")
+        set("Unpacking sources…")
+        try FileManager.default.createDirectory(at: bundleRoot, withIntermediateDirectories: true)
+        try unpackZip(zip, into: bundleRoot)
+        FileManager.default.createFile(atPath: bundleStamp.path, contents: nil)
+    }
+
     /// A `.conda` is a zip containing `pkg-*.tar.zst` (the files) + `info-*.tar.zst`.
     /// We unzip it (native), zstd-decompress each payload IN-PROCESS via the
     /// vendored decoder, then untar the resulting plain `.tar`. The two-step
@@ -782,10 +790,7 @@ public final class Bootstrapper: ObservableObject {
 
         // 2. privacy_box source bundle (privacy_box + vendored flare/json/jinja2.mojo +
         //    prebuilt FFI shims), published by privacy_box CI.
-        set("Downloading privacy_box source…")
-        let zip = try await download(privacy_boxZipURL, name: "privacy_box.zip")
-        set("Unpacking privacy_box…")
-        try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", privacy_boxRoot.path])
+        try await ensureBundle()
         guard fm.fileExists(atPath: privacy_boxDir.appendingPathComponent("src/privacy_box.mojo").path) else {
             throw BootstrapError.step("unpack", "privacy_box zip missing privacy_box/src/privacy_box.mojo")
         }
@@ -993,10 +998,7 @@ public final class Bootstrapper: ObservableObject {
         try relocateMojoPrefix(millfolioMojoPrefix)
 
         // 2. millfolio source bundle (just source — no FFI/sibling deps yet).
-        set("Downloading millfolio source…")
-        let zip = try await download(millfolioZipURL, name: "millfolio.zip")
-        set("Unpacking millfolio…")
-        try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", millfolioRoot.path])
+        try await ensureBundle()
         guard fm.fileExists(atPath: millfolioDir.appendingPathComponent("src/millfolio.mojo").path) else {
             throw BootstrapError.step("unpack", "millfolio zip missing millfolio/src/millfolio.mojo")
         }
@@ -1102,10 +1104,7 @@ public final class Bootstrapper: ObservableObject {
         try fm.createDirectory(at: appRoot, withIntermediateDirectories: true)
         logHeader("Install millfolio app server")
 
-        set("Downloading millfolio app bundle…")
-        let zip = try await download(appZipURL, name: "millfolio-app.zip")
-        set("Unpacking app bundle…")
-        try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", appRoot.path])
+        try await ensureBundle()
         guard fm.fileExists(atPath: appRoot.appendingPathComponent("src/ws_server.mojo").path) else {
             throw BootstrapError.step("unpack", "millfolio-app.zip missing src/ws_server.mojo")
         }

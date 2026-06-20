@@ -1,0 +1,63 @@
+name: bundle
+
+# Builds millfolio.zip — the single source bundle the `mill` installer downloads
+# (runner/ + privacy_box/ + millfolio/ + app/). See scripts/package_bundle.sh.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths: ["scripts/package_bundle.sh", ".github/workflows/bundle.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # to attach the zip to a Release on tags
+
+jobs:
+  bundle:
+    runs-on: macos-14
+    steps:
+      # Lay the repos out as siblings under the workspace, matching what the
+      # component packagers + package_bundle.sh expect (engine/, app/, the libs).
+      - uses: actions/checkout@v6
+        with: { path: vault }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/engine, path: engine }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/app, path: app }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/flare, path: flare }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/json, path: json }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/jinja2.mojo, path: jinja2.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/lancedb.mojo, path: lancedb.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/pdftotext.mojo, path: pdftotext.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/zlib.mojo, path: zlib.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/csv.mojo, path: csv.mojo }
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          manifest-path: vault/pixi.toml
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+
+      - name: Package millfolio.zip
+        working-directory: vault
+        run: bash scripts/package_bundle.sh "$GITHUB_WORKSPACE/millfolio.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: millfolio-zip
+          path: millfolio.zip
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: millfolio.zip
