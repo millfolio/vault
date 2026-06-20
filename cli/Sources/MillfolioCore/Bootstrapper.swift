@@ -83,10 +83,10 @@ public final class Bootstrapper: ObservableObject {
         URL(string: "https://github.com/millfolio/engine/releases/latest/download/runner.zip")!
 
     // ── privacy_box (privacy harness) ─────────────────────────────────────────────
-    // privacy_box is a separate engine on a DIFFERENT Mojo nightly than the server
-    // (its flare/json forks don't build on the server's), so it gets its own
-    // toolchain + install tree. It's a one-shot CLI (not a daemon), so "start"
-    // opens a ready-to-use Terminal rather than launching a server.
+    // privacy_box builds on the SAME unified Mojo toolchain as the server + vault —
+    // every repo pins one nightly now, so it shares the single `mojoPrefix` toolchain
+    // (no separate download). It's a one-shot CLI (not a daemon), so "start" opens a
+    // ready-to-use Terminal rather than launching a server.
     public static let privacy_boxMojoVersion = "1.0.0b3.dev2026061206"
     private let privacy_boxZipURL =
         URL(string: "https://github.com/millfolio/privacy_box/releases/latest/download/privacy_box.zip")!
@@ -96,7 +96,9 @@ public final class Bootstrapper: ObservableObject {
     private var privacy_boxMojoPythonURL: URL {
         URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
-    private var privacy_boxMojoPrefix: URL { support.appendingPathComponent("privacy_box-mojo", isDirectory: true) }
+    /// Unified toolchain: privacy_box shares the single `mojoPrefix` install (the
+    /// staleness check dedupes, so the toolchain is downloaded once for all components).
+    private var privacy_boxMojoPrefix: URL { mojoPrefix }
     private var privacy_boxRoot: URL { support.appendingPathComponent("privacy_box-engine", isDirectory: true) }
     /// privacy_box checkout inside the unpacked bundle (sibling of flare/json/jinja2.mojo).
     private var privacy_boxDir: URL { privacy_boxRoot.appendingPathComponent("privacy_box", isDirectory: true) }
@@ -117,7 +119,8 @@ public final class Bootstrapper: ObservableObject {
     private var millfolioMojoPythonURL: URL {
         URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
-    private var millfolioMojoPrefix: URL { support.appendingPathComponent("millfolio-mojo", isDirectory: true) }
+    /// Unified toolchain: the vault build shares the single `mojoPrefix` install too.
+    private var millfolioMojoPrefix: URL { mojoPrefix }
     private var millfolioRoot: URL { support.appendingPathComponent("millfolio-engine", isDirectory: true) }
     /// millfolio checkout inside the unpacked bundle.
     private var millfolioDir: URL { millfolioRoot.appendingPathComponent("millfolio", isDirectory: true) }
