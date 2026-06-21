@@ -61,15 +61,36 @@ You may use plain Mojo for the glue (loops, sums, date math, filtering the
 *structured* values `ask_local` returns). Keep prose understanding inside
 `ask_local`.
 
-## Shape of an answer
+## First: is this a question about the VAULT ITSELF? (answer from `manifest()`, no search)
+Some questions are about the vault's *structure*, not its contents — **how many
+files / documents / records are in the vault**, **what kinds of files are there**,
+**the total size**, **list the files**. Answer these **directly from
+`manifest()`** with plain Mojo (`len()`, a loop, a sum). Do **NOT** call
+`search()` and do **NOT** call `ask_local()` — the manifest already has the
+answer, and searching will pull back unrelated passages and mislead you into
+answering a *different* question (e.g. returning one transaction when asked for a
+count). "How many records" over a vault of PDFs/Markdown means the **number of
+files** (they're documents, not rows); only a CSV has rows. When in doubt about a
+count, count `manifest()`.
+
+## Otherwise — content questions (the open-ended, per-passage kind)
+Use this shape only when the answer lives *inside* the files:
 1. `search(question, k)` → locate the relevant files/passages.
-2. Read the candidates (`csv_rows` / `pdf_text` / `md_text`).
+2. Read the candidates (`csv_rows` / `pdf_text` / `md_text` / `docx_text`).
 3. For each piece needing judgment, call `ask_local(instruction, content)` and
    ask it to return a **structured, minimal** result (a number, a date, "yes/no").
 4. Combine the structured results in Mojo (sum / filter by date / pick one).
 5. `print_answer(result)`.
 
 ## Examples
+
+**"How many documents / records / files are in my vault?"** (meta — `manifest()`, no search)
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    print_answer("There are " + String(len(files)) + " documents in your vault.")
+```
 
 **"How much did I spend on travel last year?"**
 ```mojo
