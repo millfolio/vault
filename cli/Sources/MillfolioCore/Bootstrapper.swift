@@ -122,9 +122,9 @@ public final class Bootstrapper: ObservableObject {
     // Built ON-DEVICE against the privacy_box engine tree, reusing privacy_box's Mojo
     // toolchain + flare shims — so no new toolchain. See app/server/CUTOVER.md.
     private var appRoot: URL { bundleRoot.appendingPathComponent("app", isDirectory: true) }
-    private var appWsBin: URL { appRoot.appendingPathComponent("build/millfolio-ws") }
-    /// The built streaming WS server is present.
-    public var isAppServerInstalled: Bool { FileManager.default.isExecutableFile(atPath: appWsBin.path) }
+    private var appServerBin: URL { appRoot.appendingPathComponent("build/millfolio-server") }
+    /// The built app server (UI + REST + the chat WS, all on one port) is present.
+    public var isAppServerInstalled: Bool { FileManager.default.isExecutableFile(atPath: appServerBin.path) }
 
     // ── default config files (~/.config) ───────────────────────────────────────
     // Seeded with sensible defaults on install if absent, so a fresh setup has an
@@ -1040,8 +1040,8 @@ public final class Bootstrapper: ObservableObject {
         logHeader("Install millfolio app server")
 
         try await ensureBundle()
-        guard fm.fileExists(atPath: appRoot.appendingPathComponent("src/ws_server.mojo").path) else {
-            throw BootstrapError.step("unpack", "millfolio-app.zip missing src/ws_server.mojo")
+        guard fm.fileExists(atPath: appRoot.appendingPathComponent("src/server.mojo").path) else {
+            throw BootstrapError.step("unpack", "millfolio-app.zip missing src/server.mojo")
         }
 
         let python = try findPython()
@@ -1062,8 +1062,7 @@ public final class Bootstrapper: ObservableObject {
         // `mojo build -o build/…` won't create the output dir, and the app bundle
         // ships no build/ — make it (mirrors the pixi tasks' `mkdir -p build`).
         try fm.createDirectory(at: appRoot.appendingPathComponent("build"), withIntermediateDirectories: true)
-        try run(mojo, ["build", "src/ws_server.mojo"] + inc + ["-o", "build/millfolio-ws"],
-                cwd: appRoot, env: env)
+        // One binary now serves the UI + REST + the streaming chat WS on one port.
         try run(mojo, ["build", "src/server.mojo"] + inc + ["-o", "build/millfolio-server"],
                 cwd: appRoot, env: env)
     }
@@ -1162,19 +1161,16 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// Launcher (two local servers): millfolio-server serves the web UI on
-    /// :10000, millfolio-ws streams on :10001 — flare can't do both on one port. Both
-    /// run from the app bundle dir (so `./web/dist` resolves) with privacy_box's
-    /// toolchain env (CONDA_PREFIX + flare shims) + the vault resolution env. Opens
-    /// the browser; kills the background WS server when the foreground static
-    /// server exits.
+    /// Launcher: one millfolio-server serves the web UI + REST + the streaming chat
+    /// WebSocket on a single port (:10000). Runs from the app bundle dir (so
+    /// `./web/dist` resolves) with privacy_box's toolchain env (CONDA_PREFIX + flare
+    /// shims) + the vault resolution env, detached in the background; opens the browser.
     public func writeMillfolioAppScript(vaultDir dir: String) throws -> URL {
         let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
         let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
         let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
         let script = support.appendingPathComponent("run-millfolio-app.sh")
         let serverBin = appRoot.appendingPathComponent("build/millfolio-server").path
-        let wsBin = appRoot.appendingPathComponent("build/millfolio-ws").path
         // The engine runner the app server shells for /api/search (it keeps LanceDB
         // out of the server). Ensure it exists + hand the server its path.
         let runScript = try writeMillfolioScript()
@@ -1195,25 +1191,25 @@ public final class Bootstrapper: ObservableObject {
         # loopback — embeddings + chat on one port (:8000).
         export MILLFOLIO_EMBED_URL='http://127.0.0.1:8000/v1'
         export MILLFOLIO_LOCAL_URL='http://127.0.0.1:8000/v1'
-        # millfolio-ws compiles the generated vault program against the millfolio sources.
+        # The chat WS compiles the generated vault program against the millfolio sources.
         export PRIVACY_BOX_MILLFOLIO='\(millfolioDir.path)'
         # Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
         export MILLFOLIO_WEB_DIR='\(appRoot.appendingPathComponent("web/dist").path)'
         # The app server shells THIS script for /api/search (it runs the millfolio
         # engine with its own toolchain env — LanceDB stays out of the web server).
         export MILLFOLIO_RUN_SCRIPT='\(runScript.path)'
-        # Run both servers detached in the BACKGROUND (no Terminal) — static UI on
-        # :10000, streaming WS on :10001 — logging to the millfolio server log. nohup
-        # so they survive this launcher (and the CLI) exiting; `mill stop` reaps
-        # them. This launcher spawns them and exits immediately.
+        # Run the server detached in the BACKGROUND (no Terminal) — UI + REST + the
+        # chat WS all on :10000 — logging to the millfolio server log. nohup so it
+        # survives this launcher (and the CLI) exiting; `mill stop` reaps it. This
+        # launcher spawns it and exits immediately.
         LOG='\(serverLog)'
         mkdir -p "$(dirname "$LOG")"
-        echo "=== millfolio app servers starting $(date) ===" >> "$LOG"
+        echo "=== millfolio app server starting $(date) ===" >> "$LOG"
         nohup '\(serverBin)' >> "$LOG" 2>&1 &
-        nohup '\(wsBin)'     >> "$LOG" 2>&1 &
         # Expose the app on the tailnet (HTTPS) for the iOS client — best-effort,
-        # only when Tailscale is installed. Serves localhost:10000 (UI + /api/*);
-        # the server itself stays bound to 127.0.0.1, Tailscale proxies it.
+        # only when Tailscale is installed. One port now carries the UI, REST AND the
+        # chat WS, so :10000 over the tailnet gives iOS the whole app (chat included).
+        # The server stays bound to 127.0.0.1; Tailscale proxies it.
         if command -v tailscale >/dev/null 2>&1; then
             tailscale serve --bg 10000 >/dev/null 2>&1 || true
         fi
