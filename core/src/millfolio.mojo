@@ -130,10 +130,21 @@ def main() raises:
         build_index(data_dir, _embed_url())
     elif cmd == "search":
         if len(args) < 3:
-            print("usage: millfolio search \"<query>\" [k]")
+            print("usage: millfolio search \"<query>\" [k] [--json]")
             return
-        var k = Int(String(args[3])) if len(args) >= 4 else 8
-        _search(String(args[2]), k)
+        var query = String(args[2])
+        var k = 8
+        var as_json = False
+        for i in range(3, len(args)):
+            var a = String(args[i])
+            if a == "--json":
+                as_json = True
+            else:
+                k = Int(a)
+        if as_json:
+            _search_json(query, k)
+        else:
+            _search(query, k)
 
     else:
         print("usage: millfolio <manifest|read|embed|index|search> ...")
@@ -165,3 +176,46 @@ def _search(query: String, k: Int) raises:
         ref h = hits[i]
         print("  [" + h.file_alias + "] score=" + String(h.score))
         print("    " + _preview(h.text, 160))
+
+
+def _json_str(s: String) -> String:
+    """Quote + escape `s` as a JSON string (control chars dropped to spaces)."""
+    var out = String('"')
+    for cp in s.codepoints():
+        var c = Int(cp)
+        if c == 34:
+            out += '\\"'
+        elif c == 92:
+            out += "\\\\"
+        elif c == 10:
+            out += "\\n"
+        elif c == 13:
+            out += "\\r"
+        elif c == 9:
+            out += "\\t"
+        elif c < 32:
+            out += " "
+        else:
+            out += chr(c)
+    out += '"'
+    return out
+
+
+def _search_json(query: String, k: Int) raises:
+    """Machine-readable search for the app server / clients: prints a JSON array
+    of {alias, score, text}, nearest first. `alias` is the frontier-safe token;
+    real names stay server-side (resolve via /api/vault). One line, no extra
+    output, so a caller can capture stdout directly."""
+    var hits = search(query, k, _embed_url())
+    var out = String("[")
+    for i in range(len(hits)):
+        ref h = hits[i]
+        if i > 0:
+            out += ","
+        out += "{"
+        out += '"alias":' + _json_str(h.file_alias) + ","
+        out += '"score":' + String(h.score) + ","
+        out += '"text":' + _json_str(h.text)
+        out += "}"
+    out += "]"
+    print(out)
