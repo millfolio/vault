@@ -22,16 +22,17 @@ struct Millfolio: AsyncParsableCommand {
 // ── mill install ──────────────────────────────────────────────────────────
 struct Install: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Install the millfolio inference server, privacy_box, and the millfolio local site.",
+        abstract: "Install the millfolio inference server, privacy_box, and the millfolio web app.",
         discussion: """
         Idempotent — reuses anything already installed. Provisions the combined \
         inference server (chat + embeddings, including both models' weights), the \
-        privacy_box privacy harness + its vault web site, and the millfolio vault tools.
+        privacy_box vault orchestrator + sandbox, the millfolio vault tools, and the \
+        millfolio web app (UI on :10000).
         """)
     @MainActor func run() async throws {
         let boot = streaming()
         try await boot.installVault()
-        print("✓ millfolio installed (inference server + privacy_box + millfolio site)")
+        print("✓ millfolio installed (inference server + privacy_box + millfolio web app)")
     }
 }
 
@@ -106,9 +107,7 @@ struct Stop: AsyncParsableCommand {
         try boot.stopServer()
         print(wasRunning ? "✓ inference server stopped" : "• inference server was not running")
         let stoppedApp = boot.stopAppServer()
-        let stoppedWeb = boot.stopPrivacyBoxWeb()
-        print(stoppedApp || stoppedWeb
-              ? "✓ millfolio app stopped" : "• millfolio app was not running")
+        print(stoppedApp ? "✓ millfolio app stopped" : "• millfolio app was not running")
     }
 }
 

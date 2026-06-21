@@ -803,12 +803,9 @@ public final class Bootstrapper: ObservableObject {
                        "-I", "../flare", "-I", "../json", "-I", "../jinja2.mojo/src",
                        "-o", "build/privacy_box"],
                 cwd: privacy_boxDir, env: privacy_boxMojoEnv(python: python))
-        // The HTTP server for the web UI (serves web/dist + POST /chat on :10000).
-        set("Building privacy_box web server…")
-        try run(mojo, ["build", "src/server.mojo",
-                       "-I", "../flare", "-I", "../json", "-I", "../jinja2.mojo/src",
-                       "-o", "build/privacy_box-server"],
-                cwd: privacy_boxDir, env: privacy_boxMojoEnv(python: python))
+        // The millfolio web UI is served by the app server (millfolio-server +
+        // millfolio-ws); privacy_box here is only the vault orchestrator/sandbox the
+        // generated programs run under, so its standalone web server isn't built.
 
         // 4. Put the bundle's FFI shims under the toolchain's lib/, so flare finds
         //    them via $CONDA_PREFIX/lib at runtime — privacy_box runs WITH CONDA_PREFIX
@@ -895,63 +892,6 @@ public final class Bootstrapper: ObservableObject {
         try run("/usr/bin/osascript",
                 ["-e", "tell application \"Terminal\" to activate",
                  "-e", "tell application \"Terminal\" to do script \"\(cmd)\""])
-    }
-
-    // ── privacy_box: web (server on :10000 + open the browser) ─────────────────────
-    /// Write the `run-privacy_box-web.sh` launcher: set the toolchain env, start the
-    /// HTTP server (which serves the built web UI + the /chat API on :10000), and
-    /// open the browser at it. Shared by the menu app (new Terminal) and the CLI
-    /// (execs it in the current terminal). Returns its path.
-    @discardableResult
-    public func writePrivacyBoxWebScript() throws -> URL {
-        let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
-        let script = support.appendingPathComponent("run-privacy_box-web.sh")
-        let body = """
-        #!/bin/bash
-        cd '\(privacy_boxDir.path)'
-        export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
-        export MODULAR_HOME='\(modularHome)'
-        export PATH='\(mojoBin)':"$PATH"
-        # flare's bundled OpenSSL has a CI-baked CA path; use the system bundle.
-        [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
-        # serve-web.sh: bind 127.0.0.1:10000, open the UI, and expose it on the
-        # tailnet via `tailscale serve` when Tailscale is available (else localhost).
-        exec bash scripts/serve-web.sh
-        """
-        try body.write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        return script
-    }
-
-    /// Menu-app entry point: open the privacy_box web app in a new Terminal.
-    public func startPrivacyBoxWeb() {
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-            do { try await self.launchPrivacyBoxWebTerminal() }
-            catch { await self.set(failed: "privacy_box web: \(humanError(error))") }
-        }
-    }
-
-    public func launchPrivacyBoxWebTerminal() async throws {
-        let script = try writePrivacyBoxWebScript()
-        let cmd = "'\(script.path)'"
-        try run("/usr/bin/osascript",
-                ["-e", "tell application \"Terminal\" to activate",
-                 "-e", "tell application \"Terminal\" to do script \"\(cmd)\""])
-    }
-
-    /// Stop the privacy_box web server (started by `privacy_box web`). It runs as a
-    /// foreground process (not a launchd agent), so terminate it by name —
-    /// killing the server makes serve-web.sh's own `wait` return and its cleanup
-    /// trap tear down any `tailscale serve` mapping. Returns true if one was
-    /// running. Best-effort; never throws.
-    @discardableResult
-    public func stopPrivacyBoxWeb() -> Bool {
-        // pkill exits 0 if it signaled at least one process, 1 if none matched.
-        let hit = (try? runStatus("/usr/bin/pkill", ["-f", "build/privacy_box-server"])) == 0
-        _ = try? runStatus("/usr/bin/pkill", ["-f", "scripts/serve-web.sh"])
-        return hit
     }
 
     // ── millfolio: install ────────────────────────────────────────────────────────
@@ -1208,8 +1148,9 @@ public final class Bootstrapper: ObservableObject {
     /// Engine), so re-running is cheap and reuses anything present.
     public func installVault() async throws {
         try await installServer()           // engine + chat + embedding weights
-        try await installPrivacyBoxEngine()   // the harness + vault web chat server
+        try await installPrivacyBoxEngine()   // the vault orchestrator/sandbox + tools
         try await installMillfolioEngine()    // the vault tools + indexer
+        try await installAppServer()        // the millfolio web app (UI on :10000, WS on :10001)
         linkVaultShims()                    // millfolio FFI shims → privacy_box-mojo/lib (vault-run dlopen)
         ensureVaultDir()                    // leave the default vault dir ready
     }
@@ -1225,43 +1166,7 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// Write `run-millfolio-web.sh` — the VAULT web chat launcher. Like
-    /// writePrivacyBoxWebScript, but exports PRIVACY_BOX_VAULT=1 + PRIVACY_BOX_VAULT_DIR
-    /// (+ MILLFOLIO_VAULT and the loopback millfolio URLs) and execs privacy_box's
-    /// serve-web.sh, so the privacy_box web server comes up in VAULT mode pointed at
-    /// the vault dir. The vault tools the generated program calls reach the
-    /// combined inference server over loopback (:8000). Returns its path.
-    @discardableResult
-    public func writeMillfolioWebScript(vaultDir dir: String) throws -> URL {
-        let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
-        let script = support.appendingPathComponent("run-millfolio-web.sh")
-        let body = """
-        #!/bin/bash
-        cd '\(privacy_boxDir.path)'
-        export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
-        export MODULAR_HOME='\(modularHome)'
-        export PATH='\(mojoBin)':"$PATH"
-        [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
-        # VAULT mode: the privacy_box web server answers questions about the vault dir.
-        export PRIVACY_BOX_VAULT=1
-        export PRIVACY_BOX_VAULT_DIR='\(dir)'
-        export MILLFOLIO_VAULT='\(dir)'
-        # The vault tools (search/ask_local) hit the combined inference server over
-        # loopback — embeddings + chat on one port (:8000).
-        export MILLFOLIO_EMBED_URL='http://127.0.0.1:8000/v1'
-        export MILLFOLIO_LOCAL_URL='http://127.0.0.1:8000/v1'
-        # privacy_box compiles the generated vault program against the millfolio sources —
-        # point its -I resolution at the installed millfolio checkout.
-        export PRIVACY_BOX_MILLFOLIO='\(millfolioDir.path)'
-        exec bash scripts/serve-web.sh
-        """
-        try body.write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        return script
-    }
-
-    /// Cutover launcher (two local servers): millfolio-server serves the web UI on
+    /// Launcher (two local servers): millfolio-server serves the web UI on
     /// :10000, millfolio-ws streams on :10001 — flare can't do both on one port. Both
     /// run from the app bundle dir (so `./web/dist` resolves) with privacy_box's
     /// toolchain env (CONDA_PREFIX + flare shims) + the vault resolution env. Opens
@@ -1324,24 +1229,16 @@ public final class Bootstrapper: ObservableObject {
             refreshServerRunning()
             if !serverRunning { try startServer() }
         }
-        // Reap any stale servers holding :10000/:10001 (a prior `start`, or the
-        // legacy privacy_box web server) so the fresh ones can bind cleanly.
+        // Reap any stale servers holding :10000/:10001 (a prior `start`) so the
+        // fresh ones can bind cleanly.
         _ = stopAppServer()
-        _ = stopPrivacyBoxWeb()
-        // 2. Start the vault chat. With the app server, the launcher spawns both
-        //    servers detached in the background and opens the browser, then exits —
-        //    no Terminal window (clients are web/mobile). Fall back to the legacy
-        //    privacy_box web UI (still a Terminal) only when the app server is absent.
-        if isAppServerInstalled {
-            let script = try writeMillfolioAppScript(vaultDir: dir)
-            try run("/bin/bash", [script.path])
-        } else {
-            let script = try writeMillfolioWebScript(vaultDir: dir)
-            let cmd = "'\(script.path)'"
-            try run("/usr/bin/osascript",
-                    ["-e", "tell application \"Terminal\" to activate",
-                     "-e", "tell application \"Terminal\" to do script \"\(cmd)\""])
-        }
+        // 2. Build the millfolio app server if an older install predates it (self-heal
+        //    on upgrade), then start it: the launcher spawns both servers detached in
+        //    the background — static UI on :10000, streaming WS on :10001 — opens the
+        //    browser, and exits. No Terminal window (clients are web/mobile).
+        if !isAppServerInstalled { try await installAppServer() }
+        let script = try writeMillfolioAppScript(vaultDir: dir)
+        try run("/bin/bash", [script.path])
     }
 
     /// Ensure the combined inference server is running (idempotent). No-op if it
