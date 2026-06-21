@@ -117,9 +117,12 @@ def sha256_hex(data: List[UInt8]) -> String:
 
 
 def sha256_file_hex(path: String) raises -> String:
-    """SHA-256 of a file's raw bytes (lowercase hex). Reads the whole file."""
-    var bytes: List[UInt8]
+    """SHA-256 of a file's raw bytes (lowercase hex). Reads in BINARY mode
+    (`read_bytes`) — files may be non-UTF-8 (e.g. PDFs), so a text `read()` would
+    raise 'invalid UTF-8'."""
+    var data = List[UInt8]()
     with open(path, "r") as f:
-        var s = f.read()
-        bytes = List[UInt8](s.as_bytes())
-    return sha256_hex(bytes)
+        var b = f.read_bytes()
+        for i in range(len(b)):
+            data.append(b[i])
+    return sha256_hex(data)
