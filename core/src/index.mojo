@@ -414,10 +414,14 @@ def _embed_chunks(base_url: String, chunks: List[String]) raises -> List[Float32
 
 # ── build (incremental) ───────────────────────────────────────────────────────
 
-def build_index(data_dir: String, base_url: String) raises:
+def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     """Incrementally bring the index in sync with `data_dir`: embed only new and
     content-changed files, delete chunks for changed/removed files, and skip
     unchanged files. A no-op when nothing changed.
+
+    `force` rebuilds from scratch even when nothing changed — use it when the
+    extraction/chunking logic itself changed (e.g. an improved PDF extractor),
+    since file bytes (and thus the skip-hash) are unchanged in that case.
 
     Requires the inference-server embeddings endpoint live at `base_url`
     (e.g. http://127.0.0.1:8000/v1); a failed embed aborts with a clear error.
@@ -430,9 +434,10 @@ def build_index(data_dir: String, base_url: String) raises:
     var next_id = man.next_id
     var next_alias = man.next_alias
 
-    # No manifest (clean machine OR upgrade from the pre-manifest format), or the
-    # vault dir changed → start clean so ids/aliases can't collide with stale data.
-    var fresh = (not have_manifest) or (len(old) > 0 and man.source_dir != data_dir)
+    # Start clean when forced, or there's no manifest (clean machine / upgrade from
+    # the pre-manifest format), or the vault dir changed — so ids/aliases can't
+    # collide with stale data.
+    var fresh = force or (not have_manifest) or (len(old) > 0 and man.source_dir != data_dir)
     if fresh:
         _rmtree(_db_uri())
         if exists(_sidetable_path()):

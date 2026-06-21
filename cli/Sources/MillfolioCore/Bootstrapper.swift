@@ -1175,6 +1175,9 @@ public final class Bootstrapper: ObservableObject {
         let script = support.appendingPathComponent("run-millfolio-app.sh")
         let serverBin = appRoot.appendingPathComponent("build/millfolio-server").path
         let wsBin = appRoot.appendingPathComponent("build/millfolio-ws").path
+        // The engine runner the app server shells for /api/search (it keeps LanceDB
+        // out of the server). Ensure it exists + hand the server its path.
+        let runScript = try writeMillfolioScript()
         let body = """
         #!/bin/bash
         # Run from the privacy_box engine dir: the vault orchestrator reads its
@@ -1196,6 +1199,9 @@ public final class Bootstrapper: ObservableObject {
         export PRIVACY_BOX_MILLFOLIO='\(millfolioDir.path)'
         # Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
         export MILLFOLIO_WEB_DIR='\(appRoot.appendingPathComponent("web/dist").path)'
+        # The app server shells THIS script for /api/search (it runs the millfolio
+        # engine with its own toolchain env — LanceDB stays out of the web server).
+        export MILLFOLIO_RUN_SCRIPT='\(runScript.path)'
         # Run both servers detached in the BACKGROUND (no Terminal) — static UI on
         # :10000, streaming WS on :10001 — logging to the millfolio server log. nohup
         # so they survive this launcher (and the CLI) exiting; `mill stop` reaps
@@ -1205,6 +1211,12 @@ public final class Bootstrapper: ObservableObject {
         echo "=== millfolio app servers starting $(date) ===" >> "$LOG"
         nohup '\(serverBin)' >> "$LOG" 2>&1 &
         nohup '\(wsBin)'     >> "$LOG" 2>&1 &
+        # Expose the app on the tailnet (HTTPS) for the iOS client — best-effort,
+        # only when Tailscale is installed. Serves localhost:10000 (UI + /api/*);
+        # the server itself stays bound to 127.0.0.1, Tailscale proxies it.
+        if command -v tailscale >/dev/null 2>&1; then
+            tailscale serve --bg 10000 >/dev/null 2>&1 || true
+        fi
         ( sleep 1.5 && open 'http://localhost:10000' ) >/dev/null 2>&1 &
         """
         try body.write(to: script, atomically: true, encoding: .utf8)

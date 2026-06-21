@@ -126,8 +126,15 @@ def main() raises:
             return
         _embed(String(args[2]))
     elif cmd == "index":
-        var data_dir = String(args[2]) if len(args) >= 3 else _default_dir()
-        build_index(data_dir, _embed_url())
+        var data_dir = _default_dir()
+        var force = False
+        for i in range(2, len(args)):
+            var a = String(args[i])
+            if a == "--force":
+                force = True
+            else:
+                data_dir = a
+        build_index(data_dir, _embed_url(), force)
     elif cmd == "search":
         if len(args) < 3:
             print("usage: millfolio search \"<query>\" [k] [--json]")
