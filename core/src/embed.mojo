@@ -102,13 +102,14 @@ def embed_batch(base_url: String, texts: List[String]) raises -> List[List[Float
 
     var out = List[List[Float32]]()
     try:
-        var data = resp.json()["data"]
-        var n = data.array_count()
-        for i in range(n):
-            var arr = data[i]["embedding"]
-            var m = arr.array_count()
+        # Materialize each array ONCE via array_items() — O(n). Indexing the lazy
+        # value (`data[i]`, `arr[j]`) instead re-traverses per access, which is
+        # O(n^2) on a large batched response (358 KB for 28 chunks → 20s+ at 100% CPU).
+        var data = resp.json()["data"].array_items()
+        for i in range(len(data)):
+            var arr = data[i]["embedding"].array_items()
             var vec = List[Float32]()
-            for j in range(m):
+            for j in range(len(arr)):
                 vec.append(Float32(arr[j].float_value()))
             out.append(vec^)
     except err:
