@@ -135,14 +135,20 @@ def main() raises:
         var query = String(args[2])
         var k = 8
         var as_json = False
-        for i in range(3, len(args)):
+        var out_path = String("")
+        var i = 3
+        while i < len(args):
             var a = String(args[i])
             if a == "--json":
                 as_json = True
+            elif a == "--out" and i + 1 < len(args):
+                out_path = String(args[i + 1])
+                i += 1
             else:
                 k = Int(a)
+            i += 1
         if as_json:
-            _search_json(query, k)
+            _search_json(query, k, out_path)
         else:
             _search(query, k)
 
@@ -201,11 +207,12 @@ def _json_str(s: String) -> String:
     return out
 
 
-def _search_json(query: String, k: Int) raises:
-    """Machine-readable search for the app server / clients: prints a JSON array
-    of {alias, score, text}, nearest first. `alias` is the frontier-safe token;
-    real names stay server-side (resolve via /api/vault). One line, no extra
-    output, so a caller can capture stdout directly."""
+def _search_json(query: String, k: Int, out_path: String) raises:
+    """Machine-readable search for the app server / clients: a JSON array of
+    {alias, score, text}, nearest first. `alias` is the frontier-safe token; real
+    names stay server-side (resolve via /api/vault). With `--out <path>` the JSON
+    is written to that file (so a caller's captured stdout/stderr noise can't
+    corrupt it); otherwise it's printed to stdout."""
     var hits = search(query, k, _embed_url())
     var out = String("[")
     for i in range(len(hits)):
@@ -218,4 +225,8 @@ def _search_json(query: String, k: Int) raises:
         out += '"text":' + _json_str(h.text)
         out += "}"
     out += "]"
-    print(out)
+    if len(out_path) > 0:
+        with open(out_path, "w") as f:
+            f.write(out)
+    else:
+        print(out)
