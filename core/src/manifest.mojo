@@ -48,6 +48,8 @@ def _kind_for(ext: String) -> String:
         return String("pdf")
     if ext == "md" or ext == "markdown":
         return String("md")
+    if ext == "docx":
+        return String("docx")
     return String("")
 
 

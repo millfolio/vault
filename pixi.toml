@@ -22,7 +22,7 @@ libbrotlienc     = ">=1,<2"
 
 # Libraries are sibling repos under the millfolio org, consumed via `-I` (no path
 # deps): ../flare ../json ../lancedb.mojo ../pdftotext.mojo ../zlib.mojo ../csv.mojo
-# ../jinja2.mojo. The engine (../engine) is NOT a build dep — it's a runtime
+# ../docx.mojo ../jinja2.mojo. The engine (../engine) is NOT a build dep — it's a runtime
 # embedding server, vendored as a binary at install.
 
 [tasks]
@@ -32,7 +32,7 @@ libbrotlienc     = ">=1,<2"
 ffi = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh; bash ../lancedb.mojo/ffi/build.sh'"
 
 # core = the vault binary (indexer, embeddings, tool surface, ask loop).
-vault = { cmd = "mkdir -p build && mojo build core/src/millfolio.mojo -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -o build/vault", depends-on = ["ffi"] }
+vault = { cmd = "mkdir -p build && mojo build core/src/millfolio.mojo -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/vault", depends-on = ["ffi"] }
 
 # privacy-box = the privacy harness (frontier/local broker, codegen, egress guard).
 privacy-box = { cmd = "mkdir -p build && mojo build privacy-box/src/privacy_box.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -o build/privacy_box", depends-on = ["ffi"] }

@@ -39,6 +39,8 @@ jobs:
         with: { repository: millfolio/zlib.mojo, path: zlib.mojo }
       - uses: actions/checkout@v6
         with: { repository: millfolio/csv.mojo, path: csv.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/docx.mojo, path: docx.mojo }
 
       # ── caches: skip re-downloading the Mojo toolchain + recompiling the Rust shim ──
       - name: Cache pixi/conda packages (Mojo toolchain + deps)

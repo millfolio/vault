@@ -1,10 +1,11 @@
 """Readers — turn a vault file into text the indexer/tools can use.
 
-Three readers, one per vault kind:
+Four readers, one per vault kind:
   - `csv_rows(path)` -> rows of trimmed string fields (header row included; the
     caller decides whether to skip it).
   - `md_text(path)`  -> the file's text, verbatim.
   - `pdf_text(path)` -> extracted text via pdftotext.mojo (+ zlib for FlateDecode).
+  - `docx_text(path)`-> extracted text via docx.mojo (ZIP + OOXML, + zlib).
 
 These take REAL paths and live on the trusted side. The alias->path resolution
 happens in `vault.mojo`; nothing here knows about aliases.
@@ -12,6 +13,7 @@ happens in `vault.mojo`; nothing here knows about aliases.
 
 from pdf import read_file, extract_text
 from csv import read as csv_read
+import docx
 
 
 def csv_rows(path: String) raises -> List[List[String]]:
@@ -41,3 +43,11 @@ def pdf_text(path: String) raises -> String:
     """
     var data = read_file(path)
     return extract_text(data)
+
+
+def docx_text(path: String) raises -> String:
+    """Extract text from a Word .docx via docx.mojo (a ZIP of OOXML; the text
+    lives in word/document.xml). Uses the same zlib shim pdf_text does, for the
+    ZIP's DEFLATE entries. Returns raw extracted text (no control-char escaping),
+    matching pdf_text — it feeds embedding/ask_local, not a terminal."""
+    return docx.extract_text(docx.read_file(path))

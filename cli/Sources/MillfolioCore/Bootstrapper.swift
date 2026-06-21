@@ -942,14 +942,14 @@ public final class Bootstrapper: ObservableObject {
         }
 
         // 3. Build millfolio against its vendored siblings (flare/json + the LanceDB
-        //    binding + pdftotext/zlib readers), all bundled by package_millfolio.sh.
+        //    binding + pdftotext/zlib/docx readers), all bundled by package_millfolio.sh.
         let python = try findPython()
         set("Building millfolio (first run, ~1 min)…")
         let mojo = millfolioMojoPrefix.appendingPathComponent("bin/mojo").path
         try run(mojo, ["build", "src/millfolio.mojo",
                        "-I", "../flare", "-I", "../json", "-I", "../lancedb.mojo/src",
                        "-I", "../pdftotext.mojo/src", "-I", "../zlib.mojo/src",
-                       "-I", "../csv.mojo/src",
+                       "-I", "../csv.mojo/src", "-I", "../docx.mojo/src",
                        "-o", "build/millfolio"],
                 cwd: millfolioDir, env: millfolioMojoEnv(python: python))
 

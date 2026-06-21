@@ -27,7 +27,7 @@ ZIPS="$WORK/zips"; STAGE="$WORK/bundle"; mkdir -p "$ZIPS" "$STAGE"
 # point them at the umbrella-level checkouts so the consolidated layout resolves.
 export FLARE="$UMBRELLA/flare" JSON="$UMBRELLA/json" JINJA2="$UMBRELLA/jinja2.mojo"
 export LANCEDB="$UMBRELLA/lancedb.mojo" PDFTOTEXT="$UMBRELLA/pdftotext.mojo"
-export ZLIB="$UMBRELLA/zlib.mojo" CSV="$UMBRELLA/csv.mojo"
+export ZLIB="$UMBRELLA/zlib.mojo" CSV="$UMBRELLA/csv.mojo" DOCX="$UMBRELLA/docx.mojo"
 
 echo "==> [1/4] engine → runner.zip" >&2
 ( cd "$ENGINE" && pixi run flare-tls && pixi run bash scripts/package_engine.sh "$ZIPS/runner.zip" )

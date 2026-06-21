@@ -11,11 +11,14 @@ from std.os import getenv
 from manifest import build_manifest, FileInfo
 from readers import csv_rows, md_text, pdf_text
 from embed import embed
-from index import build_index, search, Chunk
+from index import build_index, search, Chunk, vault_files
 
 
 def _print_manifest(data_dir: String) raises:
-    var infos = build_manifest(data_dir)
+    # Prefer the persisted index manifest (what `mill index` actually indexed)
+    # over a live walk of `data_dir` — so the frontier model's view matches what
+    # search() can reach, even when the served dir differs from the indexed one.
+    var infos = vault_files(data_dir)
     print("vault:", data_dir)
     print(
         String(len(infos))
@@ -36,7 +39,7 @@ def _print_manifest(data_dir: String) raises:
 
 def _resolve_alias(file_id: String, data_dir: String) raises -> FileInfo:
     """Look up a file alias (file_0..) in the vault manifest. Raises if unknown."""
-    var infos = build_manifest(data_dir)
+    var infos = vault_files(data_dir)
     for i in range(len(infos)):
         if infos[i].id == file_id:
             return infos[i].copy()

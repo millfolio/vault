@@ -73,6 +73,7 @@ def vault_include_paths() raises -> List[String]:
     out.append(sib + "/pdftotext.mojo/src")
     out.append(sib + "/zlib.mojo/src")
     out.append(sib + "/csv.mojo/src")
+    out.append(sib + "/docx.mojo/src")
     return out^
 
 

@@ -28,8 +28,8 @@ from std.os import getenv, makedirs, remove, rmdir, listdir
 from std.os.path import exists, isfile
 
 from lancedb import Store
-from manifest import build_manifest, FileInfo
-from readers import csv_rows, md_text, pdf_text
+from manifest import build_manifest, FileInfo, _csv_columns
+from readers import csv_rows, md_text, pdf_text, docx_text
 from embed import embed, embed_batch, EMBED_DIM
 from sha256 import sha256_file_hex
 
@@ -177,6 +177,8 @@ def _file_text(path: String, kind: String) raises -> String:
         return md_text(path)
     elif kind == "pdf":
         return pdf_text(path)
+    elif kind == "docx":
+        return docx_text(path)
     return String("")
 
 
@@ -347,6 +349,45 @@ def _load_manifest() raises -> Manifest:
             )
         )
     return Manifest(entries^, next_id, next_alias, source_dir^)
+
+
+def index_manifest() raises -> List[FileInfo]:
+    """The aliased manifest derived from the PERSISTED index (manifest.tsv) instead
+    of a live directory walk — what `mill index` actually indexed.
+
+    Each file's real path is reconstructed as ``<source_dir>/<name>`` (the path
+    stays LOCAL-ONLY, exactly like ``build_manifest``), and the aliases are the
+    SAME persisted, monotonic ones that ``search()`` returns in ``Chunk.file_alias``
+    — so ``manifest()`` / ``csv_rows()`` / ``pdf_text()`` / ``md_text()`` line up
+    with search hits (a live walk re-numbers ``file_0..`` in sorted order and can
+    disagree after incremental add/delete). Returns an EMPTY list when nothing has
+    been indexed yet, so callers can fall back to a live walk."""
+    var m = _load_manifest()
+    var infos = List[FileInfo]()
+    for i in range(len(m.entries)):
+        ref e = m.entries[i]
+        var path = m.source_dir + "/" + e.name
+        var cols = List[String]()
+        if e.kind == "csv":
+            try:
+                cols = _csv_columns(path)
+            except:
+                cols = List[String]()  # unreadable header → no schema, still listed
+        infos.append(FileInfo(e.falias.copy(), path, e.kind.copy(), e.size, cols^))
+    return infos^
+
+
+def vault_files(fallback_dir: String) raises -> List[FileInfo]:
+    """The vault's aliased file set — the SINGLE source of truth used by every
+    tool. Prefer the persisted index manifest (what `mill index` indexed: its
+    source_dir + the SAME aliases `search()` returns); fall back to a live walk of
+    `fallback_dir` only when nothing has been indexed yet. This is what fixes the
+    vault-dir mismatch: `manifest()`/readers and `search()` now agree on one file
+    set regardless of which dir the app happens to serve."""
+    var idx = index_manifest()
+    if len(idx) > 0:
+        return idx^
+    return build_manifest(fallback_dir)
 
 
 def _write_manifest(m: Manifest) raises:

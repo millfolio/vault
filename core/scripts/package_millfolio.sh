@@ -33,6 +33,7 @@ LANCEDB="${LANCEDB:-$ROOT/../lancedb.mojo}"
 PDFTOTEXT="${PDFTOTEXT:-$ROOT/../pdftotext.mojo}"
 ZLIB="${ZLIB:-$ROOT/../zlib.mojo}"
 CSV="${CSV:-$ROOT/../csv.mojo}"
+DOCX="${DOCX:-$ROOT/../docx.mojo}"
 OUT="${1:-$ROOT/millfolio.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac   # zip runs from a temp dir — need absolute
 PREFIX="${CONDA_PREFIX:?run via pixi — need CONDA_PREFIX for the FFI shims + their deps}"
@@ -72,17 +73,18 @@ for f in "$D"/build/*.so "$D"/build/*.dylib; do
     codesign --force --sign - "$f" 2>/dev/null || true
 done
 
-echo "==> staging flare + json + lancedb.mojo + pdftotext.mojo + zlib.mojo + csv.mojo" >&2
-mkdir -p "$STAGE/flare" "$STAGE/json" "$STAGE/lancedb.mojo" "$STAGE/pdftotext.mojo" "$STAGE/zlib.mojo" "$STAGE/csv.mojo"
+echo "==> staging flare + json + lancedb.mojo + pdftotext.mojo + zlib.mojo + csv.mojo + docx.mojo" >&2
+mkdir -p "$STAGE/flare" "$STAGE/json" "$STAGE/lancedb.mojo" "$STAGE/pdftotext.mojo" "$STAGE/zlib.mojo" "$STAGE/csv.mojo" "$STAGE/docx.mojo"
 cp -R "$FLARE/flare" "$STAGE/flare/flare"
 cp -R "$JSON/json" "$STAGE/json/json"
 cp -R "$LANCEDB/src" "$STAGE/lancedb.mojo/src"
 cp -R "$PDFTOTEXT/src" "$STAGE/pdftotext.mojo/src"
 cp -R "$ZLIB/src" "$STAGE/zlib.mojo/src"
 cp -R "$CSV/src" "$STAGE/csv.mojo/src"
+cp -R "$DOCX/src" "$STAGE/docx.mojo/src"
 
 echo "==> zipping -> $OUT" >&2
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr -X "$OUT" millfolio flare json lancedb.mojo pdftotext.mojo zlib.mojo csv.mojo )
+( cd "$STAGE" && zip -qr -X "$OUT" millfolio flare json lancedb.mojo pdftotext.mojo zlib.mojo csv.mojo docx.mojo )
 echo "==> done" >&2
 ls -lh "$OUT" >&2

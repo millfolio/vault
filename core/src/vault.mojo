@@ -38,7 +38,7 @@ from flare.http import HttpClient, Request
 from manifest import build_manifest, FileInfo
 import readers
 import index
-from index import Chunk
+from index import Chunk, vault_files
 
 
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
@@ -84,7 +84,9 @@ def _local_model() raises -> String:
 # ── alias resolution (internal — real paths never leave this function) ────────
 
 def _resolve(file_id: String) raises -> FileInfo:
-    var infos = build_manifest(_vault_dir())
+    # vault_files() prefers the persisted index manifest (the same aliases search()
+    # returns), falling back to a live walk of the served dir only when unindexed.
+    var infos = vault_files(_vault_dir())
     for i in range(len(infos)):
         if infos[i].id == file_id:
             return infos[i].copy()
@@ -96,7 +98,7 @@ def _resolve(file_id: String) raises -> FileInfo:
 def manifest() raises -> List[VaultFile]:
     """The aliased, frontier-visible file list — aliases, kinds, sizes, and the
     aliased CSV column schema. No paths, names, or contents."""
-    var infos = build_manifest(_vault_dir())
+    var infos = vault_files(_vault_dir())
     var out = List[VaultFile]()
     for i in range(len(infos)):
         ref fi = infos[i]
@@ -135,6 +137,14 @@ def md_text(file_alias: String) raises -> String:
     if fi.kind != "md":
         raise Error("vault.md_text: " + file_alias + " is not a md file (it's " + fi.kind + ")")
     return readers.md_text(fi.path)
+
+
+def docx_text(file_alias: String) raises -> String:
+    """Extracted text of a Word .docx file (by alias)."""
+    var fi = _resolve(file_alias)
+    if fi.kind != "docx":
+        raise Error("vault.docx_text: " + file_alias + " is not a docx (it's " + fi.kind + ")")
+    return readers.docx_text(fi.path)
 
 
 def ask_local(instruction: String, content: String) raises -> String:

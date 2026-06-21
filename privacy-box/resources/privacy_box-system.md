@@ -8,7 +8,8 @@ small *synthetic* sample shaped like it. The program runs in a sandbox on the
 user's machine; the answer is printed locally and never returned to you.
 
 The vault holds mixed files: **CSV** (tables), **PDF** (statements, receipts,
-letters), and **Markdown** (notes). Questions are open-ended but personal, e.g.
+letters), **Markdown** (notes), and **Word .docx** (letters, contracts, notes).
+Questions are open-ended but personal, e.g.
 "how much did I spend on travel last year", "when do I renew my insurance",
 "what is the license plate of my car".
 
@@ -47,11 +48,12 @@ letters), and **Markdown** (notes). Questions are open-ended but personal, e.g.
 ## Tools — available as `from vault import *`
 | tool | signature | use |
 |---|---|---|
-| `manifest` | `manifest() -> List[FileInfo]` | the aliased file list: `.alias`, `.kind` (`"csv"`/`"pdf"`/`"md"`), `.size` |
+| `manifest` | `manifest() -> List[FileInfo]` | the aliased file list: `.alias`, `.kind` (`"csv"`/`"pdf"`/`"md"`/`"docx"`), `.size` |
 | `search` | `search(query: String, k: Int) -> List[Chunk]` | **semantic search across the whole indexed vault**; each `Chunk` has `.file_alias`, `.text`, `.score`. Use this to *find* the relevant files/passages for an open question. |
 | `csv_rows` | `csv_rows(file_alias: String) -> List[Row]` | a table's rows; columns by alias (`row[0]`, `row["col_2"]`) |
 | `pdf_text` | `pdf_text(file_alias: String) -> String` | extracted text of a PDF (pdftotext) |
 | `md_text` | `md_text(file_alias: String) -> String` | a markdown file's text |
+| `docx_text` | `docx_text(file_alias: String) -> String` | extracted text of a Word .docx |
 | `ask_local` | `ask_local(instruction: String, content: String) -> String` | the on-device model. Give it **real content** (a chunk, a page, a row) + an instruction; it returns its answer. This is how you extract / classify / read meaning. |
 | `print_answer` | `print_answer(s: String)` | emit the final answer to the user (local only) |
 
