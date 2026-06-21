@@ -1,16 +1,25 @@
 <script lang="ts">
   import ChatPanel from "$lib/components/ChatPanel.svelte";
-  import WorkflowPanel, { type Step } from "$lib/components/WorkflowPanel.svelte";
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
-  import type { ServerEvent, Session, MillfolioClient } from "$lib/protocol";
+  import type { ServerEvent, Session, MillfolioClient, StepState } from "$lib/protocol";
 
-  interface ChatMessage {
-    id: string;
-    role: "user" | "assistant";
-    text: string;
-  }
+  // One inline timeline: chat bubbles + the workflow events (status/debug/approval)
+  // rendered in place, instead of a separate workflow pane.
+  type ChatItem =
+    | { kind: "user" | "assistant"; id: string; text: string }
+    | { kind: "status"; id: string; stepId: string; label: string; state: StepState; detail?: string }
+    | { kind: "debug"; id: string; title: string; body: string; language?: string }
+    | {
+        kind: "approval";
+        id: string;
+        stepId: string;
+        title: string;
+        body: string;
+        language?: string;
+        resolved?: "approved" | "rejected";
+      };
 
   // Transport selection:
   //  - explicit ?server=ws://… wins (any host/port);
@@ -29,58 +38,58 @@
   }
   const client = pickClient();
 
-  let messages = $state<ChatMessage[]>([]);
-  let steps = $state<Step[]>([]);
+  let items = $state<ChatItem[]>([]);
   let busy = $state(false);
   let session: Session | undefined;
   let view = $state<"chat" | "vault">("chat");
 
-  function upsertStep(id: string, patch: Partial<Step>) {
-    const i = steps.findIndex((s) => s.id === id);
-    if (i === -1) {
-      steps.push({ id, label: patch.label ?? id, state: patch.state ?? "pending", debug: [], ...patch });
-    } else {
-      steps[i] = { ...steps[i], ...patch };
-    }
-  }
-
   function handle(e: ServerEvent) {
     switch (e.type) {
-      case "status":
-        upsertStep(e.stepId, { label: e.label, state: e.state, detail: e.detail });
+      case "status": {
+        // Update the status line in place (keyed by stepId), else append it inline.
+        const i = items.findIndex((x) => x.kind === "status" && x.stepId === e.stepId);
+        if (i === -1) {
+          items.push({ kind: "status", id: crypto.randomUUID(), stepId: e.stepId, label: e.label, state: e.state, detail: e.detail });
+        } else {
+          items[i] = { ...items[i], label: e.label, state: e.state, detail: e.detail };
+        }
         if (e.state === "awaiting-approval") busy = false; // hand control to the user
         break;
-      case "approval-request":
-        upsertStep(e.stepId, { approval: e.payload });
-        break;
-      case "debug": {
-        const s = steps.find((x) => x.id === e.stepId);
-        if (s) s.debug = [...s.debug, { title: e.title, body: e.body, language: e.language }];
-        break;
       }
+      case "approval-request":
+        items.push({ kind: "approval", id: crypto.randomUUID(), stepId: e.stepId, title: e.payload.title, body: e.payload.body, language: e.payload.language });
+        break;
+      case "debug":
+        items.push({ kind: "debug", id: crypto.randomUUID(), title: e.title, body: e.body, language: e.language });
+        break;
       case "message":
-        messages.push({ id: e.id, role: "assistant", text: e.text });
+        items.push({ kind: "assistant", id: e.id, text: e.text });
         busy = false;
         break;
       case "error":
-        messages.push({ id: crypto.randomUUID(), role: "assistant", text: `Error: ${e.message}` });
+        items.push({ kind: "assistant", id: crypto.randomUUID(), text: `Error: ${e.message}` });
         busy = false;
         break;
     }
   }
 
   function send(text: string) {
-    messages.push({ id: crypto.randomUUID(), role: "user", text });
-    steps = [];
+    items.push({ kind: "user", id: crypto.randomUUID(), text });
     busy = true;
     session = client.ask(text, handle);
   }
 
-  function approve(stepId: string) {
+  function resolve(id: string, decision: "approved" | "rejected") {
+    const i = items.findIndex((x) => x.id === id);
+    if (i !== -1 && items[i].kind === "approval") items[i] = { ...items[i], resolved: decision };
+  }
+  function approve(id: string, stepId: string) {
+    resolve(id, "approved");
     busy = true;
     session?.approve(stepId);
   }
-  function reject(stepId: string) {
+  function reject(id: string, stepId: string) {
+    resolve(id, "rejected");
     session?.reject(stepId, "rejected by user");
   }
 </script>
@@ -93,16 +102,13 @@
       <button class:active={view === "vault"} onclick={() => (view = "vault")}>Vault</button>
     </nav>
   </header>
-  {#if view === "chat"}
-    <div class="panes">
-      <ChatPanel {messages} {busy} onsend={send} />
-      <WorkflowPanel {steps} onapprove={approve} onreject={reject} />
-    </div>
-  {:else}
-    <div class="single">
+  <div class="single">
+    {#if view === "chat"}
+      <ChatPanel {items} {busy} onsend={send} onapprove={approve} onreject={reject} />
+    {:else}
       <VaultPanel />
-    </div>
-  {/if}
+    {/if}
+  </div>
 </main>
 
 <style>
@@ -144,21 +150,9 @@
     border-color: var(--border);
     color: var(--text);
   }
-  .panes {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
   .single {
     flex: 1;
     min-height: 0;
     display: grid;
-  }
-  @media (max-width: 800px) {
-    .panes {
-      grid-template-columns: 1fr;
-      grid-template-rows: 1fr 1fr;
-    }
   }
 </style>

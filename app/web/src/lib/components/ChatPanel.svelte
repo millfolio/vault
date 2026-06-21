@@ -1,51 +1,106 @@
 <script lang="ts">
-  interface ChatMessage {
+  import type { StepState } from "$lib/protocol";
+
+  // One inline timeline: chat bubbles (user/assistant), plus the workflow events
+  // rendered in place — status/debug small, approval at regular font. Mirrors the
+  // ChatItem union in routes/+page.svelte.
+  interface Item {
+    kind: "user" | "assistant" | "status" | "debug" | "approval";
     id: string;
-    role: "user" | "assistant";
-    text: string;
+    text?: string;
+    stepId?: string;
+    label?: string;
+    state?: StepState;
+    detail?: string;
+    title?: string;
+    body?: string;
+    language?: string;
+    resolved?: "approved" | "rejected";
   }
 
   let {
-    messages,
+    items,
     busy,
     onsend,
+    onapprove,
+    onreject,
   }: {
-    messages: ChatMessage[];
+    items: Item[];
     busy: boolean;
     onsend: (text: string) => void;
+    onapprove: (id: string, stepId: string) => void;
+    onreject: (id: string, stepId: string) => void;
   } = $props();
 
   let draft = $state("");
+  let stream = $state<HTMLDivElement>();
+
+  const icon: Record<StepState, string> = {
+    pending: "○",
+    running: "◐",
+    "awaiting-approval": "⏸",
+    done: "●",
+    error: "✕",
+  };
+
+  // Auto-scroll to the newest item.
+  $effect(() => {
+    void items.length;
+    if (stream) stream.scrollTop = stream.scrollHeight;
+  });
 
   function submit(e: SubmitEvent) {
     e.preventDefault();
-    const text = draft.trim();
-    if (!text || busy) return;
-    onsend(text);
+    const t = draft.trim();
+    if (!t || busy) return;
+    onsend(t);
     draft = "";
   }
 </script>
 
 <section class="chat">
-  <div class="messages">
-    {#if messages.length === 0}
+  <div class="stream" bind:this={stream}>
+    {#if items.length === 0}
       <p class="empty">Ask a question about your vault.</p>
     {/if}
-    {#each messages as m (m.id)}
-      <div class="msg {m.role}">
-        <span class="who">{m.role === "user" ? "you" : "millfolio"}</span>
-        <p>{m.text}</p>
-      </div>
+    {#each items as it (it.id)}
+      {#if it.kind === "user" || it.kind === "assistant"}
+        <div class="msg {it.kind}">
+          <span class="who">{it.kind === "user" ? "you" : "millfolio"}</span>
+          <p>{it.text}</p>
+        </div>
+      {:else if it.kind === "status"}
+        <div class="status {it.state}">
+          <span class="icon" aria-hidden="true">{icon[it.state ?? "pending"]}</span>
+          <span class="label">{it.label}</span>
+          {#if it.detail}<span class="detail">— {it.detail}</span>{/if}
+        </div>
+      {:else if it.kind === "debug"}
+        <details class="debug">
+          <summary>{it.title}</summary>
+          <pre><code>{it.body}</code></pre>
+        </details>
+      {:else if it.kind === "approval"}
+        <div class="approval">
+          <p class="atitle">{it.title}</p>
+          {#if it.body}<pre><code>{it.body}</code></pre>{/if}
+          {#if it.resolved}
+            <p class="decision {it.resolved}">
+              {it.resolved === "approved" ? "✓ Approved" : "✕ Rejected"}
+            </p>
+          {:else}
+            <div class="actions">
+              <button class="approve" onclick={() => onapprove(it.id, it.stepId ?? "")}>Approve</button>
+              <button class="reject" onclick={() => onreject(it.id, it.stepId ?? "")}>Reject</button>
+            </div>
+          {/if}
+        </div>
+      {/if}
     {/each}
   </div>
 
   <form onsubmit={submit}>
-    <input
-      type="text"
-      placeholder="Ask your vault…"
-      bind:value={draft}
-      disabled={busy}
-    />
+    <input type="text" placeholder="Ask your vault…" bind:value={draft} disabled={busy} />
     <button type="submit" disabled={busy || !draft.trim()}>Send</button>
   </form>
 </section>
@@ -57,18 +112,20 @@
     min-height: 0;
     background: var(--surface);
   }
-  .messages {
+  .stream {
     flex: 1;
     overflow-y: auto;
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
   }
   .empty {
     color: var(--text-dim);
     margin: auto;
   }
+
+  /* chat bubbles */
   .msg {
     max-width: 80%;
   }
@@ -87,10 +144,102 @@
     padding: 8px 12px;
     border-radius: var(--radius);
     background: var(--surface-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .msg.user p {
     background: var(--accent-dim);
   }
+
+  /* status — small, inline, dim */
+  .status {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    padding-left: 2px;
+  }
+  .status .icon {
+    width: 1em;
+    text-align: center;
+  }
+  .status.running .icon { color: var(--accent); }
+  .status.done .icon { color: var(--ok); }
+  .status.error .icon { color: var(--err); }
+  .status.awaiting-approval .icon { color: var(--warn); }
+  .status .detail {
+    opacity: 0.8;
+  }
+
+  /* debug — small, collapsible */
+  .debug {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+  }
+  .debug summary {
+    cursor: pointer;
+  }
+  .debug pre {
+    margin: 6px 0 0;
+    padding: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-x: auto;
+    font-size: 11px;
+  }
+
+  /* approval — regular font, inline block */
+  .approval {
+    border: 1px solid var(--warn);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  .atitle {
+    margin: 0 0 8px;
+    color: var(--warn);
+  }
+  .approval pre {
+    margin: 0 0 8px;
+    padding: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-x: auto;
+    font-size: 12.5px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+  }
+  .actions button {
+    padding: 6px 14px;
+    border-radius: var(--radius);
+    border: none;
+    font-weight: 600;
+  }
+  .approve {
+    background: var(--ok);
+    color: var(--on-ok, #06120a);
+  }
+  .reject {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border) !important;
+  }
+  .decision {
+    margin: 0;
+    font-size: 13px;
+  }
+  .decision.approved { color: var(--ok); }
+  .decision.rejected { color: var(--err); }
+
+  /* input */
   form {
     display: flex;
     gap: 8px;
@@ -109,7 +258,7 @@
     outline: none;
     border-color: var(--accent);
   }
-  button {
+  form button {
     padding: 9px 16px;
     border-radius: var(--radius);
     border: none;
@@ -117,7 +266,7 @@
     color: #06101f;
     font-weight: 600;
   }
-  button:disabled {
+  form button:disabled {
     opacity: 0.45;
     cursor: not-allowed;
   }
