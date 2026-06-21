@@ -42,3 +42,7 @@ build = { depends-on = ["vault", "privacy-box"] }
 
 # the Swift umbrella CLI (separate toolchain; install/start/stop/index/ask).
 cli = "swift build --package-path cli -c release"
+
+# Gate: pure-Mojo SHA-256 against FIPS known-answer vectors (used for the
+# incremental-reindex content hash). No FFI/-I beyond core/src.
+test-sha256 = { cmd = "mkdir -p build && mojo build core/src/sha256_test.mojo -I core/src -o build/sha256-test && ./build/sha256-test" }
