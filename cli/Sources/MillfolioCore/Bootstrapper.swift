@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Darwin  // execv for the re-exec-after-self-upgrade hardening
 
 /// Drives the local engine lifecycle, as three explicit steps:
 ///
@@ -1437,7 +1438,21 @@ public final class Bootstrapper: ObservableObject {
     /// and rebuilt. Progress streams through `onProgress`.
     public func selfUpdate(updateCLI: Bool = true) async throws {
         vlog("\n===== mill update — \(Self.stamp()) =====")
-        if updateCLI { updateHomebrewCLI() }
+        if updateCLI {
+            // Upgrade the CLI, then — if the binary actually changed — re-exec the
+            // NEW binary to finish the component refresh. Otherwise the OLD installer
+            // logic would run against the NEW bundle (their formats move together in
+            // a release), which can fail on a crossing update (e.g. a file the old
+            // installer expects that the new bundle dropped). Re-exec'ing pairs the
+            // new installer with the new bundle.
+            let before = brewCliVersion()
+            updateHomebrewCLI()
+            let after = brewCliVersion()
+            if !after.isEmpty, after != before {
+                set("Re-launching the updated CLI (\(after)) to finish…")
+                reexecToFinishUpdate()  // execv; returns only if it couldn't re-exec
+            }
+        }
 
         // First reference to each component introduces it with a gloss; the
         // granular install steps below then use the short product name.
@@ -1491,6 +1506,28 @@ public final class Bootstrapper: ObservableObject {
             vlog("brew upgrade (non-fatal): \(humanError(error))")
             set("• CLI not upgraded via Homebrew (already latest, or not a brew install)")
         }
+    }
+
+    /// Replace this process with the freshly-upgraded `mill` binary running
+    /// `update --skip-cli`, so the component refresh runs with the NEW installer
+    /// logic (paired with the NEW bundle). On success this never returns. Best-effort:
+    /// if the brew-managed binary can't be found or `execv` fails, it returns and the
+    /// caller finishes the refresh inline with the current binary.
+    private func reexecToFinishUpdate() {
+        let mill = ["/opt/homebrew/bin/mill", "/usr/local/bin/mill"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        guard let mill else {
+            vlog("re-exec: brew-managed mill not found; finishing with the current binary")
+            return
+        }
+        vlog("re-exec: \(mill) update --skip-cli")
+        let args: [String] = [mill, "update", "--skip-cli"]
+        var cargs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
+        cargs.append(nil)
+        execv(mill, &cargs)
+        // Only reached if execv failed — fall back to an inline refresh.
+        vlog("re-exec failed (execv): \(String(cString: strerror(errno))); finishing inline")
+        for p in cargs where p != nil { free(p) }
     }
 
     // ── component versions ──────────────────────────────────────────────────────
