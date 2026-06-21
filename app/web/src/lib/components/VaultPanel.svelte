@@ -53,10 +53,20 @@
     ],
   };
 
+  interface SearchHit {
+    alias: string;
+    score: number;
+    text: string;
+  }
+
   let info = $state<VaultInfo | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let mock = $state(false);
+  let query = $state("");
+  let hits = $state<SearchHit[] | null>(null);
+  let searching = $state(false);
+  let searchErr = $state<string | null>(null);
 
   async function load() {
     loading = true;
@@ -81,6 +91,52 @@
   }
 
   onMount(load);
+
+  // Map a hit's frontier-safe alias back to its real filename (from the manifest).
+  function nameFor(alias: string): string {
+    return info?.files.find((f) => f.alias === alias)?.name ?? alias;
+  }
+
+  async function runSearch(e: SubmitEvent) {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q) {
+      hits = null;
+      return;
+    }
+    searching = true;
+    searchErr = null;
+    const base = apiBase();
+    if (base === null) {
+      // dev / no backend → sample result
+      hits = [
+        { alias: "file_0", score: 0.74, text: "Sample hit — run via mill start to search your real vault." },
+      ];
+      searching = false;
+      return;
+    }
+    try {
+      const res = await fetch(`${base}/api/search`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: q, k: 8 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      hits = (data.hits ?? []) as SearchHit[];
+    } catch (err) {
+      searchErr = err instanceof Error ? err.message : String(err);
+      hits = null;
+    } finally {
+      searching = false;
+    }
+  }
+
+  function clearSearch() {
+    query = "";
+    hits = null;
+    searchErr = null;
+  }
 
   function fmtBytes(n: number): string {
     if (n < 1024) return `${n} B`;
@@ -116,6 +172,41 @@
         </p>
       {/if}
 
+      <form class="search" onsubmit={runSearch}>
+        <input
+          type="text"
+          placeholder="Search your vault…"
+          bind:value={query}
+          disabled={searching}
+        />
+        <button type="submit" disabled={searching || !query.trim()}>
+          {searching ? "…" : "Search"}
+        </button>
+        {#if hits !== null}
+          <button type="button" class="clear" onclick={clearSearch}>Clear</button>
+        {/if}
+      </form>
+      {#if searchErr}
+        <p class="banner warn">Search failed: {searchErr}</p>
+      {/if}
+      {#if hits !== null}
+        <div class="results">
+          {#if hits.length === 0}
+            <p class="muted">No matches.</p>
+          {:else}
+            {#each hits as h (h.alias + h.score)}
+              <div class="hit">
+                <div class="hmeta">
+                  <span class="hname">{nameFor(h.alias)}</span>
+                  <span class="hscore">{h.score.toFixed(3)}</span>
+                </div>
+                <p class="hsnip">{h.text}</p>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
+
       <div class="stats">
         <div class="stat">
           <span class="k">Files</span>
@@ -149,6 +240,7 @@
         </div>
       </div>
 
+      {#if hits === null}
       <dl class="paths">
         <dt>Indexed from</dt>
         <dd><code>{info.sourceDir || info.vaultDir}</code></dd>
@@ -189,6 +281,7 @@
         {#if !info.indexed}
           <p class="muted hint">Chunk counts appear after <code>mill index &lt;dir&gt;</code>.</p>
         {/if}
+      {/if}
       {/if}
     {/if}
   </div>
@@ -231,6 +324,77 @@
   }
   code.warn {
     color: var(--warn);
+  }
+  .search {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .search input {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .search input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .search button {
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: none;
+    background: var(--accent);
+    color: #06101f;
+    font-weight: 600;
+  }
+  .search button.clear {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .search button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .results {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .hit {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    background: var(--surface-2);
+  }
+  .hmeta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .hname {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .hscore {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .hsnip {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 7.5em;
+    overflow: hidden;
   }
   .error {
     color: var(--err);
