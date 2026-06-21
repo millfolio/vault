@@ -113,7 +113,8 @@
 
 <style>
   main {
-    height: 100vh;
+    height: 100vh; /* fallback for browsers without dvh */
+    height: 100dvh; /* dynamic viewport — excludes the iOS Safari URL bar */
     display: flex;
     flex-direction: column;
   }

@@ -244,6 +244,8 @@
     display: flex;
     gap: 8px;
     padding: 12px;
+    /* keep the input clear of the iOS home-indicator / URL bar inset */
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--border);
   }
   input {

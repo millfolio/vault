@@ -170,6 +170,8 @@ def _kind_for_name(name: String) -> String:
         return String("pdf")
     if ext == "md" or ext == "markdown":
         return String("md")
+    if ext == "docx":
+        return String("docx")
     return String("")
 
 
@@ -256,6 +258,10 @@ struct Api(Handler, Copyable, Movable):
             return self.handle_chat(req)
         if path == "/api/vault":
             return self.handle_vault()
+        # Document viewer: /api/doc?alias=file_N streams the raw indexed file
+        # (alias-gated via the manifest — no caller-supplied path, so no traversal).
+        if path == "/api/doc" or (path.find("/api/doc?") == 0):
+            return self.handle_doc(req)
         if req.method == Method.POST and path == "/api/search":
             return self.handle_search(req)
         if path == "/health":
@@ -356,6 +362,74 @@ struct Api(Handler, Copyable, Movable):
         out += '"files":' + files_json
         out += "}"
         return _cors(ok_json(out))
+
+    def handle_doc(self, req: Request) raises -> Response:
+        """Stream a single indexed document for the in-app viewer:
+        GET /api/doc?alias=file_N -> the raw file bytes, Content-Type by kind
+        (application/pdf / text/csv / text/markdown) so the browser renders it
+        inline. FRONTIER-SAFE: the caller passes only the manifest alias; we map
+        it to the real path from manifest.tsv (#meta source_dir + the file's
+        name). The caller never supplies a path, so there's no traversal — an
+        unknown alias is a 404, never a read outside the indexed dir."""
+        var want = req.query_param("alias")
+        if want == "":
+            return _cors(bad_request("missing alias"))
+        var manifest_path = _config_dir() + "/manifest.tsv"
+        if not isfile(manifest_path):
+            return _cors(not_found("no index"))
+        var text: String
+        with open(manifest_path, "r") as f:
+            text = f.read()
+        # Resolve alias -> (source_dir, name, kind) from the manifest.
+        var source_dir = String("")
+        var name = String("")
+        var kind = String("")
+        var lines = text.split("\n")
+        for i in range(len(lines)):
+            var line = String(lines[i])
+            if line.byte_length() == 0:
+                continue
+            var cols = line.split("\t")
+            if String(cols[0]) == "#meta":
+                if len(cols) >= 4:
+                    source_dir = _tsv_unescape(String(cols[3]))
+                continue
+            if len(cols) < 7:
+                continue
+            if String(cols[0]) == want:
+                name = _tsv_unescape(String(cols[1]))
+                kind = String(cols[2])
+        if name == "":
+            return _cors(not_found("unknown alias"))
+
+        var file_path = source_dir + "/" + name
+        var data: List[UInt8]
+        try:
+            with open(file_path, "r") as f:
+                data = f.read_bytes()
+        except:
+            return _cors(not_found(name))
+
+        var ctype = String("application/octet-stream")
+        if kind == "pdf":
+            ctype = String("application/pdf")
+        elif kind == "csv":
+            ctype = String("text/csv; charset=utf-8")
+        elif kind == "md":
+            ctype = String("text/markdown; charset=utf-8")
+        elif kind == "docx":
+            # Browsers can't render .docx inline — the viewer's "Open ↗" downloads it.
+            ctype = String(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+        var r = Response(status=200, reason="OK", body=data^)
+        try:
+            r.headers.set("Content-Type", ctype)
+            # inline -> render in the viewer rather than triggering a download.
+            r.headers.set("Content-Disposition", 'inline; filename="' + name + '"')
+        except:
+            pass
+        return _cors(r^)
 
     def handle_search(self, req: Request) raises -> Response:
         """Semantic vault search: POST {"query": ..., "k": N} -> {"hits":[{alias,

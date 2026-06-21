@@ -63,6 +63,22 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let mock = $state(false);
+  // The document currently open in the viewer (null = list view).
+  let viewing = $state<VaultFile | null>(null);
+
+  // URL the viewer points at — the server streams the raw indexed file by alias
+  // (frontier-safe: alias → real path resolved server-side from the manifest).
+  function docUrl(f: VaultFile): string {
+    const base = apiBase() ?? "";
+    return `${base}/api/doc?alias=${encodeURIComponent(f.alias)}`;
+  }
+  function openDoc(f: VaultFile) {
+    if (mock) return; // no backend in dev/sample mode
+    viewing = f;
+  }
+  function closeDoc() {
+    viewing = null;
+  }
   let query = $state("");
   let hits = $state<SearchHit[] | null>(null);
   let searching = $state(false);
@@ -152,7 +168,18 @@
 </script>
 
 <section class="vault">
-  <div class="body">
+  {#if viewing}
+    <div class="viewer">
+      <header class="vbar">
+        <button class="back" onclick={closeDoc} aria-label="Back to vault">←</button>
+        <span class="vtitle" title={viewing.name}>{viewing.name}</span>
+        <span class="kind {viewing.kind}">{viewing.kind}</span>
+        <a class="newtab" href={docUrl(viewing)} target="_blank" rel="noopener">Open ↗</a>
+      </header>
+      <iframe class="frame" src={docUrl(viewing)} title={viewing.name}></iframe>
+    </div>
+  {/if}
+  <div class="body" class:hidden={viewing}>
     {#if loading && !info}
       <p class="muted">Loading…</p>
     {:else if error}
@@ -267,8 +294,10 @@
           </thead>
           <tbody>
             {#each info.files as f (f.alias)}
-              <tr>
-                <td class="name" title={f.alias}>{f.name}</td>
+              <tr class:clickable={!mock} onclick={() => openDoc(f)}>
+                <td class="name" title={mock ? f.alias : "View document"}>
+                  {#if !mock}<span class="open" aria-hidden="true">↗</span>{/if}{f.name}
+                </td>
                 <td class="num"><span class="kind {f.kind}">{f.kind}</span></td>
                 <td class="num">{fmtBytes(f.sizeBytes)}</td>
                 <td class="num">
@@ -298,6 +327,70 @@
     flex: 1;
     overflow-y: auto;
     padding: 16px;
+  }
+  .body.hidden {
+    display: none;
+  }
+
+  /* document viewer */
+  .viewer {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .vbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .vbar .back {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    border-radius: var(--radius);
+    width: 30px;
+    height: 30px;
+    font-size: 16px;
+    flex: none;
+  }
+  .vtitle {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .vbar .newtab {
+    flex: none;
+    font-size: 12.5px;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .frame {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+    background: var(--bg);
+  }
+  tr.clickable {
+    cursor: pointer;
+  }
+  tr.clickable:hover td {
+    background: var(--surface-2);
+  }
+  .open {
+    color: var(--text-dim);
+    margin-right: 6px;
+    font-size: 11px;
   }
   .muted {
     color: var(--text-dim);
