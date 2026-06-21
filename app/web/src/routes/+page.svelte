@@ -14,15 +14,16 @@
 
   // Transport selection:
   //  - explicit ?server=ws://… wins (any host/port);
-  //  - else when served locally by millfolio-server (:10000), use the WS stream on
-  //    :10001 (same host, so http→ws avoids browser mixed-content);
+  //  - else when served locally by millfolio-server (:10000), open the WS on the
+  //    SAME origin (one port now serves HTTP + WS; flare upgrades the request);
   //  - else (e.g. `npm run dev` on :5173) fall back to the in-browser mock.
   function pickClient(): MillfolioClient {
     if (typeof location === "undefined") return createMockClient();
     const explicit = new URLSearchParams(location.search).get("server");
     if (explicit) return createWsClient(explicit);
     if (location.port === "10000") {
-      return createWsClient(`ws://${location.hostname}:10001/chat`);
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      return createWsClient(`${scheme}://${location.host}/chat`);
     }
     return createMockClient();
   }

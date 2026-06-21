@@ -5,10 +5,12 @@ server imports them as a library via `-I ../../headgate/src` (build wired in
 pixi.toml + ../../.github/workflows/server.yml). Runs the SAME vault orchestrator
 the CLI does, on localhost:10000, behind:
 
-    POST /chat       { "message": <question> }  ->  { "reply": <answer> }
-    GET  /api/vault  ->  { vaultDir, indexed, stats, files[] }  (the vault view)
+    POST /chat        { "message": <question> }  ->  { "reply": <answer> }
+    POST /api/search  { "query": ..., "k": N }   ->  { "hits": [...] }
+    GET  /api/vault   ->  { vaultDir, indexed, stats, files[] }  (the vault view)
     GET  /health
-    OPTIONS *        (CORS preflight, so a web app on another port can call us)
+    WS   (Upgrade)    ->  streaming chat (status/approval/debug/message events)
+    OPTIONS *         (CORS preflight, so a web app on another port can call us)
 
 Single-threaded reactor — one task in flight at a time. The orchestrator lives
 in a heap `MillfolioState` reached through a pointer so the borrowed-self handler
@@ -17,10 +19,11 @@ can still run `mut` codegen.
 VAULT-ONLY: `/chat` always runs the private-vault codegen loop (`run_vault_task`)
 over the resolved vault dir.
 
-PHASE 1 (this file): behavior-preserving lift of the headgate server. The
-streaming millfolio protocol (status / approval-request / debug / message events,
-see ../../protocol) is the next phase — it needs an event hook in the orchestrator
-and a streaming/duplex transport, so it's intentionally NOT here yet.
+ONE PORT: the unary HTTP `Api` handler AND the streaming WebSocket chat (`on_connect`)
+share a single :10000 listener — flare's `HttpServer.serve(handler, ws_handler)`
+upgrades requests carrying the WebSocket headers and routes everything else to the
+HTTP handler. (Previously the WS stream needed a second port; flare couldn't
+multiplex them.)
 
     pixi run build   # -> build/millfolio-server, listens on 127.0.0.1:10000
 """
@@ -31,12 +34,14 @@ from std.os.path import isfile, isdir, getsize
 
 from flare.prelude import *
 from flare.http import Handler
+from flare.ws import WsConnection, WsOpcode, WsCloseCode
 
 from settings import load_config
 from wiring import build_vault_orchestrator
 from orchestrator import Orchestrator
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
+from events import field, status, debug_event, approval, message, error_event
 from json import loads
 
 comptime PORT = 10000
@@ -401,6 +406,57 @@ struct Api(Handler, Copyable, Movable):
         return _cors(ok_json('{"hits":' + hits + "}"))
 
 
+def on_connect(mut conn: WsConnection) raises:
+    """Streaming chat over the SAME :10000 listener — flare upgrades the WebSocket
+    request; every other request stays on the unary HTTP path (the `Api` handler).
+    One WS connection = one chat session: stream a status/debug event per stage and
+    gate the sandbox run on the user's approval (the blocking `recv()` IS the pause).
+
+    flare's WS handler is THIN (non-capturing), so it builds the orchestrator per
+    connection — fine for a local single-user server. Events are ServerEvent JSON,
+    one per text frame (see ../../protocol/events.ts / events.mojo)."""
+    var frame = conn.recv()
+    if frame.opcode == WsOpcode.CLOSE:
+        return
+    var question = field(frame.text_payload(), "text")
+    if question == "":
+        conn.send_text(error_event("empty or malformed ask"))
+        conn.close(WsCloseCode.NORMAL)
+        return
+    try:
+        var cfg = load_config()
+        var vault_dir = resolve_vault_dir()
+        var orch = build_vault_orchestrator(cfg, vault_dir)
+
+        conn.send_text(status("manifest", "Aliasing vault manifest", "running"))
+        var manifest = orch.vault_manifest(vault_dir)
+        conn.send_text(debug_event("manifest", "Frontier-safe manifest (aliases only)", manifest, "text"))
+        conn.send_text(status("manifest", "Aliasing vault manifest", "done"))
+
+        conn.send_text(status("codegen", "Writing the program", "running"))
+        var code = orch.vault_codegen(question, manifest)
+        conn.send_text(debug_event("codegen", "Generated program", code, "mojo"))
+        conn.send_text(status("codegen", "Writing the program", "done"))
+
+        conn.send_text(status("run", "Run the generated program over your vault?", "awaiting-approval"))
+        conn.send_text(approval("run", "Run the generated program over your vault?", code))
+        var decision = conn.recv()
+        if decision.opcode == WsOpcode.CLOSE or field(decision.text_payload(), "type") != "approve":
+            conn.send_text(status("run", "Run rejected", "error"))
+            conn.send_text(message("Okay — I won't run that. Tell me how you'd like to adjust it."))
+            conn.close(WsCloseCode.NORMAL)
+            return
+
+        conn.send_text(status("run", "Compiling & running in sandbox", "running"))
+        orch.vault_build(code)
+        var reply = orch.vault_run(vault_dir)
+        conn.send_text(status("run", "Compiling & running in sandbox", "done"))
+        conn.send_text(message(reply))
+    except e:
+        conn.send_text(error_event(String(e)))
+    conn.close(WsCloseCode.NORMAL)
+
+
 def main() raises:
     var cfg = load_config()
 
@@ -419,5 +475,12 @@ def main() raises:
     print("millfolio server on http://127.0.0.1:", PORT, "  (flare)", sep="")
     print('  POST /chat   { "message": ... } -> { "reply": ... }')
     print("  GET  /api/vault  -> vault files + index stats")
+    print("  POST /api/search { query, k } -> ranked hits")
+    print("  WS   (Upgrade)   -> streaming chat (status/approval/message events)")
+    # One listener serves both: the unary HTTP `Api` handler AND, for requests with
+    # the WebSocket Upgrade headers, the streaming `on_connect` chat — no second port.
+    # (The 2-arg serve overload is plain-function-only; we use a stateful Handler
+    # struct, so set the WS handler on the config and use the Handler-typed serve.)
     var srv = HttpServer.bind(SocketAddr.localhost(UInt16(PORT)))
+    srv.config.ws_handler = on_connect
     srv.serve(api^)

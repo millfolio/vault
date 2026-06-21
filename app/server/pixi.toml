@@ -29,16 +29,13 @@ libbrotlienc     = ">=1,<2"
 # privacy_box's `flare-ffi` task.
 flare-ffi = "bash -c 'source ../../flare/flare/tls/ffi/build.sh; source ../../flare/flare/http/ffi/build.sh'"
 
-# Compile the server. Imports the privacy_box orchestrator (wiring/orchestrator/
-# settings/vaultcfg) via -I ../../vault/privacy-box/src, plus flare/json/jinja2 — the same
-# -I set as privacy_box's `build-server`, plus privacy_box/src. The vault gen program's
-# extra shims (zlib/lancedb) are NOT needed here: that program is compiled + run
-# as a separate subprocess at request time, not linked into this binary.
-build = { cmd = "mkdir -p build && mojo build src/server.mojo -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
-
-# The streaming WebSocket endpoint (flare.ws). `-I src` resolves the sibling
-# events.mojo module. Same external -I set as `build`. See ws_server.mojo + STREAMING.md.
-build-ws = { cmd = "mkdir -p build && mojo build src/ws_server.mojo -I src -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -o build/millfolio-ws", depends-on = ["flare-ffi"] }
+# Compile the server. Serves BOTH the unary HTTP API and the streaming WebSocket
+# chat on one :10000 listener (flare's serve(handler, ws_handler)). `-I src`
+# resolves the sibling events.mojo (WS event serialization); imports the privacy_box
+# orchestrator (wiring/orchestrator/settings/vaultcfg) via -I ../../vault/privacy-box/src,
+# plus flare/json/jinja2. The vault gen program's extra shims (zlib/lancedb) are NOT
+# needed here: it's compiled + run as a separate subprocess at request time.
+build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
 
 # Unit-test the protocol wire helpers (events.mojo) — no flare/privacy_box, only json.
 test = { cmd = "mkdir -p build && mojo build src/events_test.mojo -I src -I ../../json -o build/events-test && ./build/events-test" }
