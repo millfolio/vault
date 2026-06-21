@@ -144,7 +144,12 @@ struct Index: AsyncParsableCommand {
     var force = false
 
     @MainActor func run() async throws {
-        let boot = Bootstrapper()
+        let boot = streaming()   // stream progress to the console
+        // Indexing embeds every chunk via the inference server — make sure it's up,
+        // else `index` blocks on a dead endpoint (or stalls waiting for embeddings)
+        // with no feedback. First start also loads the embedding model (~tens of s).
+        try boot.ensureInferenceServer()
+        print("Indexing — progress below (first run loads the embedding model):")
         // Run the millfolio launcher (`index <folder> [--force]`) as a logged child
         // so its output — and any failure — is captured in the millfolio log.
         let code = try boot.runVaultIndex(folder: folder, force: force)

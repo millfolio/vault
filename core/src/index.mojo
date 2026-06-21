@@ -450,6 +450,7 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
 
     # Current files (sorted, csv/pdf/md only) + their content hashes.
     var infos = build_manifest(data_dir)
+    print("scanning " + String(len(infos)) + " file(s) in " + data_dir + " for changes…")
     var cur_paths = List[String]()
     var cur_names = List[String]()
     var cur_kinds = List[String]()
@@ -514,12 +515,23 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     var st = _load_sidetable()
     st = _drop_ranges(st, del_starts, del_counts)
 
+    print(
+        "embedding " + String(len(emb_idx)) + " new/changed file(s)"
+        + (" (the embedding model loads on first use — this can take a bit)…"
+           if len(old) == 0 else "…")
+    )
+
     # Embed only new + changed files; append to LanceDB + the side-table.
     for t in range(len(emb_idx)):
         var i = emb_idx[t]
         var falias = emb_alias[t].copy()
         var body = _file_text(cur_paths[i], cur_kinds[i])
         var chunks = _chunk_text(body)
+        # Print BEFORE the (slow) embed so a multi-page file isn't a silent stall.
+        print(
+            "  " + falias + " [" + cur_kinds[i] + "] " + cur_names[i] + " — "
+            + String(len(chunks)) + " chunk(s), embedding…"
+        )
         var id_start = next_id
         var ids = List[Int64]()
         for c in range(len(chunks)):
@@ -536,10 +548,6 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
                 falias.copy(), cur_names[i].copy(), cur_kinds[i].copy(),
                 cur_sizes[i], cur_shas[i].copy(), id_start, len(chunks),
             )
-        )
-        print(
-            "  " + falias + " [" + cur_kinds[i] + "] " + cur_names[i] + " -> "
-            + String(len(chunks)) + " chunk(s) embedded"
         )
 
     # Deletes are soft tombstones; compact so storage/scan cost stay bounded.
