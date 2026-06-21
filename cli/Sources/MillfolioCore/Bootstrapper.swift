@@ -1349,10 +1349,11 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// Run the millfolio engine `index <folder>`. See runLoggedScript.
-    public func runVaultIndex(folder: String) throws -> Int32 {
+    public func runVaultIndex(folder: String, force: Bool = false) throws -> Int32 {
         refreshServerRunning()
         let script = try writeMillfolioScript()
-        let args = ["index", folder]
+        var args = ["index", folder]
+        if force { args.append("--force") }
         logRunDiagnostics(label: "index", launcher: script, args: args, probes: [
             ("millfolio launcher", script.path),
             ("millfolio dir (cwd)", millfolioDir.path),

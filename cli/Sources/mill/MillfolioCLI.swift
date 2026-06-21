@@ -132,16 +132,22 @@ struct Index: AsyncParsableCommand {
         discussion: """
         Forwards to the millfolio binary's `index` command, which embeds every file's \
         chunks via the combined inference server's /v1/embeddings and stores them in \
-        the on-device LanceDB index. Needs the server running (`mill start`).
+        the on-device LanceDB index. Needs the server running (`mill start`). \
+        Re-indexing is incremental (only changed files re-embed); pass --force to \
+        rebuild from scratch — needed after an extractor/chunking change (e.g. the \
+        PDF fix), where file bytes (and the skip-hash) don't change.
         """)
     @Argument(help: "The folder to index (your vault dir).")
     var folder: String
 
+    @Flag(name: .long, help: "Rebuild the whole index even if no files changed.")
+    var force = false
+
     @MainActor func run() async throws {
         let boot = Bootstrapper()
-        // Run the millfolio launcher (`index <folder>`) as a logged child so its
-        // output — and any failure — is captured in the millfolio log.
-        let code = try boot.runVaultIndex(folder: folder)
+        // Run the millfolio launcher (`index <folder> [--force]`) as a logged child
+        // so its output — and any failure — is captured in the millfolio log.
+        let code = try boot.runVaultIndex(folder: folder, force: force)
         try finish(code, boot, "mill index")
     }
 }
