@@ -92,11 +92,6 @@
 </script>
 
 <section class="vault">
-  <header>
-    <span>Vault</span>
-    <button class="refresh" onclick={load} disabled={loading} title="Refresh">↻</button>
-  </header>
-
   <div class="body">
     {#if loading && !info}
       <p class="muted">Loading…</p>
@@ -192,36 +187,6 @@
     flex-direction: column;
     min-height: 0;
     background: var(--surface);
-  }
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    font-weight: 600;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 11px;
-  }
-  .refresh {
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text-dim);
-    border-radius: var(--radius);
-    width: 26px;
-    height: 26px;
-    line-height: 1;
-    font-size: 14px;
-  }
-  .refresh:hover:not(:disabled) {
-    color: var(--text);
-    border-color: var(--accent);
-  }
-  .refresh:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
   }
   .body {
     flex: 1;

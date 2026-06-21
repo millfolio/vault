@@ -27,8 +27,6 @@
 </script>
 
 <section class="chat">
-  <header>Chat</header>
-
   <div class="messages">
     {#if messages.length === 0}
       <p class="empty">Ask a question about your vault.</p>
@@ -58,15 +56,6 @@
     flex-direction: column;
     min-height: 0;
     background: var(--surface);
-  }
-  header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    font-weight: 600;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 11px;
   }
   .messages {
     flex: 1;

@@ -35,8 +35,6 @@
 </script>
 
 <section class="workflow">
-  <header>Workflow</header>
-
   <div class="steps">
     {#if steps.length === 0}
       <p class="empty">Steps, approvals, and debug detail appear here as millfolio works.</p>
@@ -79,15 +77,6 @@
     min-height: 0;
     background: var(--bg);
     border-left: 1px solid var(--border);
-  }
-  header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    font-weight: 600;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 11px;
   }
   .steps {
     flex: 1;
