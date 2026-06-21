@@ -1,18 +1,27 @@
-"""Index — chunk + embed the vault into an on-device LanceDB vector store.
+"""Index — chunk + embed the vault into an on-device LanceDB vector store, with
+INCREMENTAL re-indexing (only changed/new files are re-embedded).
 
-Pipeline (`build_index`): walk the manifest, read each file's text (csv -> joined
-rows, md -> text, pdf -> extracted text), CHUNK it (~512-char windows on
-paragraph/line boundaries), embed each chunk via the local inference-server, and
-`Store.add` (chunk_id Int64, 1024-d vector) into a LanceDB table.
+`build_index` walks the data dir, content-hashes (SHA-256) each file, and diffs
+against a persisted manifest:
+  • unchanged file (same name + same hash) → skipped entirely (no embedding);
+  • changed file → its old chunk-id range is deleted from LanceDB and it's
+    re-embedded into a fresh id range (keeping its stable alias);
+  • new file → embedded into a fresh id range under a freshly-minted alias;
+  • removed file → its id range is deleted.
+After deletes the table is `optimize()`d (deletes are soft tombstones). If
+nothing changed, it's a no-op.
 
 Only ids + vectors cross into LanceDB. The chunk text + its file alias live in a
-side-table persisted as TSV next to the db, so `search()` can resolve a returned
-chunk_id back to its alias + text. Real paths NEVER enter the side-table — only
-aliases — so search results are alias-safe.
+side-table (chunks.tsv), and the per-file manifest (real name, kind, size, hash,
+id range) lives in manifest.tsv. Both are LOCAL-ONLY: real names/text/hashes
+never reach the frontier model — search results expose only aliases.
 
 Layout (under ~/.config/millfolio):
   index.db/      — the LanceDB database (table "chunks", dim 1024)
-  chunks.tsv     — chunk_id <TAB> file_alias <TAB> escaped_text
+  chunks.tsv     — chunk_id <TAB> file_alias <TAB> escaped_text   (ids are SPARSE)
+  manifest.tsv   — #meta <next_id> <next_alias> <source_dir>, then one row per
+                   file: alias <TAB> name <TAB> kind <TAB> size <TAB> sha256
+                   <TAB> id_start <TAB> chunk_count
 """
 
 from std.os import getenv, makedirs, remove, rmdir, listdir
@@ -22,11 +31,13 @@ from lancedb import Store
 from manifest import build_manifest, FileInfo
 from readers import csv_rows, md_text, pdf_text
 from embed import embed, embed_batch, EMBED_DIM
+from sha256 import sha256_file_hex
 
 
 comptime CHUNK_SIZE = 512      # ~codepoints per chunk
 comptime CHUNK_OVERLAP = 64    # codepoints carried into the next chunk for context
 comptime TABLE = "chunks"
+comptime EMBED_BATCH = 64      # chunks per /v1/embeddings request
 
 
 @fieldwise_init
@@ -36,6 +47,37 @@ struct Chunk(Copyable, Movable):
     var file_alias: String
     var text: String
     var score: Float32
+
+
+@fieldwise_init
+struct FileEntry(Copyable, Movable):
+    """One indexed file in the manifest. `name` is the real basename (LOCAL-ONLY);
+    `alias` is the stable, frontier-safe token. `[id_start, id_start+chunk_count)`
+    is this file's contiguous chunk-id range in LanceDB."""
+    var falias: String
+    var name: String
+    var kind: String
+    var size: Int
+    var sha: String
+    var id_start: Int
+    var chunk_count: Int
+
+
+@fieldwise_init
+struct Manifest(Copyable, Movable):
+    var entries: List[FileEntry]
+    var next_id: Int       # next free chunk id (monotonic; ids are never reused)
+    var next_alias: Int    # next free alias number (monotonic)
+    var source_dir: String
+
+
+@fieldwise_init
+struct SideTable(Copyable, Movable):
+    """chunk_id -> (alias, text), as parallel lists. ids are sparse (deletes leave
+    gaps), so lookups scan rather than index by position."""
+    var ids: List[Int]
+    var aliases: List[String]
+    var texts: List[String]
 
 
 # ── paths ─────────────────────────────────────────────────────────────────────
@@ -52,7 +94,11 @@ def _sidetable_path() raises -> String:
     return _config_dir() + "/chunks.tsv"
 
 
-# ── TSV escaping for the side-table ───────────────────────────────────────────
+def _manifest_path() raises -> String:
+    return _config_dir() + "/manifest.tsv"
+
+
+# ── small helpers ─────────────────────────────────────────────────────────────
 
 def _replace_all(s: String, old: String, new: String) raises -> String:
     var parts = s.split(old)
@@ -95,13 +141,29 @@ def _tsv_unescape(s: String) raises -> String:
     return out^
 
 
+def _atoi(s: String) -> Int:
+    """Parse a non-negative integer (digits only; other chars ignored)."""
+    var n = 0
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c >= 48 and c <= 57:
+            n = n * 10 + (c - 48)
+    return n
+
+
+def _basename(path: String) raises -> String:
+    var parts = path.split("/")
+    return String(parts[len(parts) - 1])
+
+
 # ── chunking ──────────────────────────────────────────────────────────────────
 
-def _file_text(fi: FileInfo) raises -> String:
+def _file_text(path: String, kind: String) raises -> String:
     """Read a file to plain text per its kind. CSV rows are joined back with
     commas/newlines so semantically-related cells stay together in a chunk."""
-    if fi.kind == "csv":
-        var rows = csv_rows(fi.path)
+    if kind == "csv":
+        var rows = csv_rows(path)
         var out = String("")
         for i in range(len(rows)):
             if i > 0:
@@ -111,10 +173,10 @@ def _file_text(fi: FileInfo) raises -> String:
                     out += ", "
                 out += rows[i][j]
         return out^
-    elif fi.kind == "md":
-        return md_text(fi.path)
-    elif fi.kind == "pdf":
-        return pdf_text(fi.path)
+    elif kind == "md":
+        return md_text(path)
+    elif kind == "pdf":
+        return pdf_text(path)
     return String("")
 
 
@@ -192,23 +254,14 @@ def _rmtree(path: String) raises:
     rmdir(path)
 
 
-# ── side-table persistence ────────────────────────────────────────────────────
+# ── side-table persistence (id-keyed; ids are sparse) ─────────────────────────
 
-def _write_sidetable(aliases: List[String], texts: List[String]) raises:
-    """Persist chunk_id -> (file_alias, text). chunk_id is the row index."""
-    var out = String("")
-    for i in range(len(aliases)):
-        out += String(i) + "\t" + _tsv_escape(aliases[i]) + "\t" + _tsv_escape(texts[i]) + "\n"
-    with open(_sidetable_path(), "w") as f:
-        f.write(out)
-
-
-def _load_sidetable() raises -> Tuple[List[String], List[String]]:
-    """Load the side-table -> (aliases, texts) indexed by chunk_id."""
+def _load_sidetable() raises -> SideTable:
+    var ids = List[Int]()
     var aliases = List[String]()
     var texts = List[String]()
     if not exists(_sidetable_path()):
-        raise Error("no index side-table at " + _sidetable_path() + " — run `mill index` first")
+        return SideTable(ids^, aliases^, texts^)
     var text: String
     with open(_sidetable_path(), "r") as f:
         text = f.read()
@@ -220,55 +273,124 @@ def _load_sidetable() raises -> Tuple[List[String], List[String]]:
         var cols = line.split("\t")
         if len(cols) < 3:
             continue
-        # cols[0] is the chunk_id == row index; rows are written in order.
+        ids.append(_atoi(String(cols[0])))
         aliases.append(_tsv_unescape(String(cols[1])))
         texts.append(_tsv_unescape(String(cols[2])))
-    return (aliases^, texts^)
+    return SideTable(ids^, aliases^, texts^)
 
 
-# ── build ─────────────────────────────────────────────────────────────────────
+def _write_sidetable(st: SideTable) raises:
+    var out = String("")
+    for i in range(len(st.ids)):
+        out += String(st.ids[i]) + "\t" + _tsv_escape(st.aliases[i]) + "\t" + _tsv_escape(st.texts[i]) + "\n"
+    with open(_sidetable_path(), "w") as f:
+        f.write(out)
 
-def build_index(data_dir: String, base_url: String) raises:
-    """Chunk + embed every file in `data_dir`'s manifest into the LanceDB store.
 
-    Requires the inference-server embeddings endpoint to be live at `base_url`
-    (e.g. http://127.0.0.1:8000/v1); a failed embed aborts with a clear error.
-    """
-    makedirs(_config_dir(), exist_ok=True)
-    # Clean rebuild: LanceDB add() APPENDS, so re-indexing without clearing would
-    # duplicate every chunk and collide ids with the freshly-reset side-table.
-    _rmtree(_db_uri())
-    if exists(_sidetable_path()):
-        remove(_sidetable_path())
-    var infos = build_manifest(data_dir)
-
-    # Phase 1: chunk every file up front, collecting (alias, text) per chunk. The
-    # chunk's position here is its id (aligned with `aliases`/`texts`/`vectors`).
+def _drop_ranges(
+    st: SideTable, starts: List[Int], counts: List[Int]
+) raises -> SideTable:
+    """Return a copy of `st` with every chunk whose id falls in any
+    `[start, start+count)` removed."""
+    var ids = List[Int]()
     var aliases = List[String]()
     var texts = List[String]()
-    for i in range(len(infos)):
-        ref fi = infos[i]
-        var body = _file_text(fi)
-        var chunks = _chunk_text(body)
-        print("  " + fi.id + " [" + fi.kind + "] -> " + String(len(chunks)) + " chunk(s)")
-        for c in range(len(chunks)):
-            aliases.append(fi.id.copy())
-            texts.append(chunks[c].copy())
+    for i in range(len(st.ids)):
+        var cid = st.ids[i]
+        var drop = False
+        for r in range(len(starts)):
+            if cid >= starts[r] and cid < starts[r] + counts[r]:
+                drop = True
+                break
+        if not drop:
+            ids.append(cid)
+            aliases.append(st.aliases[i].copy())
+            texts.append(st.texts[i].copy())
+    return SideTable(ids^, aliases^, texts^)
 
-    # Phase 2: embed in batches — ONE request (one connection) per `batch_size`
-    # chunks instead of one per chunk. Collapses N round-trips into N/batch_size,
-    # the dominant indexing cost on the single-GPU server.
-    var batch_size = 64
-    var ids = List[Int64]()
+
+# ── manifest persistence ──────────────────────────────────────────────────────
+
+def _load_manifest() raises -> Manifest:
+    var entries = List[FileEntry]()
+    if not exists(_manifest_path()):
+        return Manifest(entries^, 0, 0, String(""))
+    var text: String
+    with open(_manifest_path(), "r") as f:
+        text = f.read()
+    var next_id = 0
+    var next_alias = 0
+    var source_dir = String("")
+    var lines = text.split("\n")
+    for i in range(len(lines)):
+        var line = String(lines[i])
+        if line.byte_length() == 0:
+            continue
+        var cols = line.split("\t")
+        if String(cols[0]) == "#meta":
+            if len(cols) >= 4:
+                next_id = _atoi(String(cols[1]))
+                next_alias = _atoi(String(cols[2]))
+                source_dir = _tsv_unescape(String(cols[3]))
+            continue
+        if len(cols) < 7:
+            continue
+        entries.append(
+            FileEntry(
+                String(cols[0]),
+                _tsv_unescape(String(cols[1])),
+                String(cols[2]),
+                _atoi(String(cols[3])),
+                String(cols[4]),
+                _atoi(String(cols[5])),
+                _atoi(String(cols[6])),
+            )
+        )
+    return Manifest(entries^, next_id, next_alias, source_dir^)
+
+
+def _write_manifest(m: Manifest) raises:
+    var out = (
+        String("#meta\t") + String(m.next_id) + "\t" + String(m.next_alias)
+        + "\t" + _tsv_escape(m.source_dir) + "\n"
+    )
+    for i in range(len(m.entries)):
+        ref e = m.entries[i]
+        out += (
+            e.falias + "\t" + _tsv_escape(e.name) + "\t" + e.kind + "\t"
+            + String(e.size) + "\t" + e.sha + "\t" + String(e.id_start) + "\t"
+            + String(e.chunk_count) + "\n"
+        )
+    with open(_manifest_path(), "w") as f:
+        f.write(out)
+
+
+def _find_by_name(entries: List[FileEntry], name: String) -> Int:
+    for i in range(len(entries)):
+        if entries[i].name == name:
+            return i
+    return -1
+
+
+def _total_chunks(entries: List[FileEntry]) -> Int:
+    var n = 0
+    for i in range(len(entries)):
+        n += entries[i].chunk_count
+    return n
+
+
+def _embed_chunks(base_url: String, chunks: List[String]) raises -> List[Float32]:
+    """Embed `chunks` in batches of EMBED_BATCH; return the flat row-major vectors
+    (len == len(chunks) * EMBED_DIM)."""
     var vectors = List[Float32]()
     var start = 0
-    while start < len(texts):
-        var stop = start + batch_size
-        if stop > len(texts):
-            stop = len(texts)
+    while start < len(chunks):
+        var stop = start + EMBED_BATCH
+        if stop > len(chunks):
+            stop = len(chunks)
         var batch = List[String]()
         for j in range(start, stop):
-            batch.append(texts[j].copy())
+            batch.append(chunks[j].copy())
         var vecs: List[List[Float32]]
         try:
             vecs = embed_batch(base_url, batch)
@@ -284,25 +406,161 @@ def build_index(data_dir: String, base_url: String) raises:
                     "build_index: embedding dim " + String(len(vecs[k]))
                     + " != expected " + String(EMBED_DIM)
                 )
-            ids.append(Int64(start + k))
             for d in range(len(vecs[k])):
                 vectors.append(vecs[k][d])
         start = stop
+    return vectors^
 
-    # Phase 3: bulk-write to the LanceDB store + the sidetable.
+
+# ── build (incremental) ───────────────────────────────────────────────────────
+
+def build_index(data_dir: String, base_url: String) raises:
+    """Incrementally bring the index in sync with `data_dir`: embed only new and
+    content-changed files, delete chunks for changed/removed files, and skip
+    unchanged files. A no-op when nothing changed.
+
+    Requires the inference-server embeddings endpoint live at `base_url`
+    (e.g. http://127.0.0.1:8000/v1); a failed embed aborts with a clear error.
+    """
+    makedirs(_config_dir(), exist_ok=True)
+
+    var have_manifest = exists(_manifest_path())
+    var man = _load_manifest()
+    var old = man.entries.copy()
+    var next_id = man.next_id
+    var next_alias = man.next_alias
+
+    # No manifest (clean machine OR upgrade from the pre-manifest format), or the
+    # vault dir changed → start clean so ids/aliases can't collide with stale data.
+    var fresh = (not have_manifest) or (len(old) > 0 and man.source_dir != data_dir)
+    if fresh:
+        _rmtree(_db_uri())
+        if exists(_sidetable_path()):
+            remove(_sidetable_path())
+        if exists(_manifest_path()):
+            remove(_manifest_path())
+        old = List[FileEntry]()
+        next_id = 0
+        next_alias = 0
+
+    # Current files (sorted, csv/pdf/md only) + their content hashes.
+    var infos = build_manifest(data_dir)
+    var cur_paths = List[String]()
+    var cur_names = List[String]()
+    var cur_kinds = List[String]()
+    var cur_sizes = List[Int]()
+    var cur_shas = List[String]()
+    for i in range(len(infos)):
+        ref fi = infos[i]
+        cur_paths.append(fi.path.copy())
+        cur_names.append(_basename(fi.path))
+        cur_kinds.append(fi.kind.copy())
+        cur_sizes.append(fi.size)
+        cur_shas.append(sha256_file_hex(fi.path))
+
+    # Diff current vs old (by name + hash).
+    var new_entries = List[FileEntry]()   # unchanged carried over; embedded added below
+    var emb_idx = List[Int]()             # indices into cur_* needing embedding
+    var emb_alias = List[String]()        # the alias to assign each embedded file
+    var del_starts = List[Int]()
+    var del_counts = List[Int]()
+    var matched = List[Bool]()
+    for _ in range(len(old)):
+        matched.append(False)
+
+    for i in range(len(cur_names)):
+        var oi = _find_by_name(old, cur_names[i])
+        if oi >= 0:
+            matched[oi] = True
+            if old[oi].sha == cur_shas[i]:
+                new_entries.append(old[oi].copy())          # unchanged: keep as-is
+            else:
+                del_starts.append(old[oi].id_start)         # changed: drop old range,
+                del_counts.append(old[oi].chunk_count)      # re-embed under same alias
+                emb_idx.append(i)
+                emb_alias.append(old[oi].falias.copy())
+        else:
+            emb_idx.append(i)                               # new: fresh alias
+            emb_alias.append(String("file_") + String(next_alias))
+            next_alias += 1
+
+    for oi in range(len(old)):
+        if not matched[oi]:                                 # removed: drop its range
+            del_starts.append(old[oi].id_start)
+            del_counts.append(old[oi].chunk_count)
+
+    if len(emb_idx) == 0 and len(del_starts) == 0:
+        print(
+            "index up to date — " + String(len(new_entries)) + " file(s), "
+            + String(_total_chunks(new_entries)) + " chunk(s); nothing changed"
+        )
+        return
+
     var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
-    store.add(ids, vectors)
-    _write_sidetable(aliases, texts)
-    print("indexed " + String(len(ids)) + " chunk(s) into " + _db_uri())
 
+    # Delete changed/removed chunk ranges (by id predicate; cheaper than IN-lists).
+    for r in range(len(del_starts)):
+        if del_counts[r] > 0:
+            store.delete(
+                String("id >= ") + String(del_starts[r])
+                + " AND id < " + String(del_starts[r] + del_counts[r])
+            )
+
+    var st = _load_sidetable()
+    st = _drop_ranges(st, del_starts, del_counts)
+
+    # Embed only new + changed files; append to LanceDB + the side-table.
+    for t in range(len(emb_idx)):
+        var i = emb_idx[t]
+        var falias = emb_alias[t].copy()
+        var body = _file_text(cur_paths[i], cur_kinds[i])
+        var chunks = _chunk_text(body)
+        var id_start = next_id
+        var ids = List[Int64]()
+        for c in range(len(chunks)):
+            var cid = next_id + c
+            ids.append(Int64(cid))
+            st.ids.append(cid)
+            st.aliases.append(falias.copy())
+            st.texts.append(chunks[c].copy())
+        var vectors = _embed_chunks(base_url, chunks)
+        store.add(ids, vectors)
+        next_id += len(chunks)
+        new_entries.append(
+            FileEntry(
+                falias.copy(), cur_names[i].copy(), cur_kinds[i].copy(),
+                cur_sizes[i], cur_shas[i].copy(), id_start, len(chunks),
+            )
+        )
+        print(
+            "  " + falias + " [" + cur_kinds[i] + "] " + cur_names[i] + " -> "
+            + String(len(chunks)) + " chunk(s) embedded"
+        )
+
+    # Deletes are soft tombstones; compact so storage/scan cost stay bounded.
+    if len(del_starts) > 0:
+        store.optimize()
+
+    _write_sidetable(st)
+    _write_manifest(Manifest(new_entries^, next_id, next_alias, data_dir))
+    print(
+        "index updated — " + String(len(emb_idx)) + " file(s) embedded, "
+        + String(len(del_starts)) + " range(s) removed; "
+        + String(len(st.ids)) + " chunk(s) total"
+    )
+
+
+# ── search ────────────────────────────────────────────────────────────────────
 
 def search(query: String, k: Int, base_url: String) raises -> List[Chunk]:
     """Semantic search: embed `query`, k-NN over the LanceDB store, resolve each
     returned chunk_id back to (file_alias, text) via the side-table. Nearest
     first. Requires the index to exist and the embedding endpoint to be live."""
-    var sidetable = _load_sidetable()
-    var aliases = sidetable[0].copy()
-    var texts = sidetable[1].copy()
+    if not exists(_sidetable_path()):
+        raise Error(
+            "no index side-table at " + _sidetable_path() + " — run `mill index` first"
+        )
+    var st = _load_sidetable()
 
     # Qwen3-Embedding is instruction-tuned: QUERIES get an instruction prefix,
     # documents (the indexed chunks) stay raw. This materially improves ranking.
@@ -319,7 +577,9 @@ def search(query: String, k: Int, base_url: String) raises -> List[Chunk]:
     var hits = List[Chunk]()
     for i in range(len(ids)):
         var cid = Int(ids[i])
-        if cid < 0 or cid >= len(aliases):
-            continue
-        hits.append(Chunk(aliases[cid].copy(), texts[cid].copy(), dists[i]))
+        # ids are sparse — scan the side-table for this chunk id.
+        for j in range(len(st.ids)):
+            if st.ids[j] == cid:
+                hits.append(Chunk(st.aliases[j].copy(), st.texts[j].copy(), dists[i]))
+                break
     return hits^
