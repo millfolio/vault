@@ -11,7 +11,9 @@
     chunks: number;
   }
   interface VaultInfo {
-    vaultDir: string;
+    vaultDir: string; // the dir the server serves (chat/ask read this)
+    sourceDir: string; // the dir the index was actually built from
+    dirMismatch: boolean; // sourceDir != vaultDir → chat/ask point at the wrong files
     configDir: string;
     indexed: boolean;
     embeddingDim: number;
@@ -35,6 +37,8 @@
 
   const MOCK: VaultInfo = {
     vaultDir: "~/.config/millfolio/vault",
+    sourceDir: "~/.config/millfolio/vault",
+    dirMismatch: false,
     configDir: "~/.config/millfolio",
     indexed: true,
     embeddingDim: 1024,
@@ -104,6 +108,13 @@
       {#if mock}
         <p class="banner">Sample data — open this from <code>mill start</code> (:10000) to see your real vault.</p>
       {/if}
+      {#if info.dirMismatch}
+        <p class="banner warn">
+          ⚠ The index was built from <code>{info.sourceDir}</code>, but the app is serving
+          <code>{info.vaultDir}</code>. Chat &amp; Ask read the served folder — re-index that one,
+          or start the app pointed at the indexed folder.
+        </p>
+      {/if}
 
       <div class="stats">
         <div class="stat">
@@ -139,8 +150,10 @@
       </div>
 
       <dl class="paths">
-        <dt>Vault dir</dt>
-        <dd><code>{info.vaultDir}</code></dd>
+        <dt>Indexed from</dt>
+        <dd><code>{info.sourceDir || info.vaultDir}</code></dd>
+        <dt>Serving</dt>
+        <dd><code class:warn={info.dirMismatch}>{info.vaultDir}</code></dd>
         <dt>Index</dt>
         <dd><code>{info.configDir}/index.db</code></dd>
       </dl>
@@ -210,6 +223,14 @@
     background: var(--surface-2);
     color: var(--text-dim);
     font-size: 12.5px;
+  }
+  .banner.warn {
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    background: transparent;
+  }
+  code.warn {
+    color: var(--warn);
   }
   .error {
     color: var(--err);

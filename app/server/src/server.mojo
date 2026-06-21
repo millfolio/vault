@@ -106,6 +106,39 @@ def _config_dir() -> String:
     return getenv("HOME", ".") + "/.config/millfolio"
 
 
+def _atoi(s: String) -> Int:
+    """Parse a non-negative integer (digits only)."""
+    var n = 0
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c >= 48 and c <= 57:
+            n = n * 10 + (c - 48)
+    return n
+
+
+def _tsv_unescape(s: String) raises -> String:
+    """Inverse of vault/core's TSV escaping (manifest stores escaped name/dir)."""
+    var out = String("")
+    var bytes = s.as_bytes()
+    var i = 0
+    while i < len(bytes):
+        var c = Int(bytes[i])
+        if c == 92 and i + 1 < len(bytes):  # backslash
+            var n = Int(bytes[i + 1])
+            if n == 116:
+                out += "\t"; i += 2; continue
+            elif n == 110:
+                out += "\n"; i += 2; continue
+            elif n == 114:
+                out += "\r"; i += 2; continue
+            elif n == 92:
+                out += "\\"; i += 2; continue
+        out += chr(c)
+        i += 1
+    return out^
+
+
 def _lower_ascii(s: String) -> String:
     """ASCII-lowercase (enough for file extensions)."""
     var out = String("")
@@ -246,24 +279,25 @@ struct Api(Handler, Copyable, Movable):
         return _cors(ok_json('{"reply":' + _json_escape(reply) + "}"))
 
     def handle_vault(self) raises -> Response:
-        """The vault view: the vault dir's indexable files + index stats, as JSON.
-
-        Read-only. Per-file chunk counts come from the index side-table
-        (chunks.tsv, written by `mill index`); files with no index entry report
-        0 chunks. db size is the on-disk LanceDB dir."""
+        """The vault view: the INDEXED files + index stats, read from the engine's
+        manifest.tsv (written by `mill index`). Reflects what was actually indexed
+        — not a live walk of the served dir — so it's correct even when the indexed
+        folder differs from the served vault dir (both are surfaced, plus a
+        `dirMismatch` flag the UI can warn on). Read-only."""
         ref s = self.st[]
-        var vault_dir = s.vault_dir.copy()
+        var served_dir = s.vault_dir.copy()
         var config_dir = _config_dir()
-        var tsv_path = config_dir + "/chunks.tsv"
+        var manifest_path = config_dir + "/manifest.tsv"
         var db_path = config_dir + "/index.db"
 
-        # Per-alias chunk counts from the index side-table (alias is column 1).
-        var counts = Dict[String, Int]()
+        var indexed = isfile(manifest_path)
+        var source_dir = String("")
+        var files_json = String("[")
+        var file_count = 0
         var total_chunks = 0
-        var indexed = isfile(tsv_path)
         if indexed:
             var text: String
-            with open(tsv_path, "r") as f:
+            with open(manifest_path, "r") as f:
                 text = f.read()
             var lines = text.split("\n")
             for i in range(len(lines)):
@@ -271,64 +305,44 @@ struct Api(Handler, Copyable, Movable):
                 if line.byte_length() == 0:
                     continue
                 var cols = line.split("\t")
-                if len(cols) < 3:
+                # Meta row: #meta <next_id> <next_alias> <source_dir>.
+                if String(cols[0]) == "#meta":
+                    if len(cols) >= 4:
+                        source_dir = _tsv_unescape(String(cols[3]))
                     continue
-                var falias = String(cols[1])
-                total_chunks += 1
-                if falias in counts:
-                    counts[falias] = counts[falias] + 1
-                else:
-                    counts[falias] = 1
-
-        # Current vault files, aliased exactly like vault/core's manifest
-        # (sorted-name order; csv/pdf/md only) so chunk counts line up.
-        makedirs(vault_dir, exist_ok=True)
-        var raw = listdir(vault_dir)
-        var names = List[String]()
-        for i in range(len(raw)):
-            names.append(String(raw[i]))
-        _sort_names(names)
-
-        var files_json = String("[")
-        var file_count = 0
-        var idx = 0
-        for i in range(len(names)):
-            var name = names[i].copy()
-            var path = vault_dir + "/" + name
-            if not isfile(path):
-                continue
-            var kind = _kind_for_name(name)
-            if kind == "":
-                continue
-            var falias = String("file_") + String(idx)
-            var sz: Int
-            try:
-                sz = getsize(path)
-            except:
-                sz = 0
-            var chunks = 0
-            if falias in counts:
-                chunks = counts[falias]
-            if file_count > 0:
-                files_json += ","
-            files_json += "{"
-            files_json += '"alias":' + _json_escape(falias) + ","
-            files_json += '"name":' + _json_escape(name) + ","
-            files_json += '"kind":' + _json_escape(kind) + ","
-            files_json += '"sizeBytes":' + String(sz) + ","
-            files_json += '"chunks":' + String(chunks)
-            files_json += "}"
-            file_count += 1
-            idx += 1
+                # File row: alias name kind size sha256 id_start chunk_count.
+                if len(cols) < 7:
+                    continue
+                var falias = String(cols[0])
+                var name = _tsv_unescape(String(cols[1]))
+                var kind = String(cols[2])
+                var sz = _atoi(String(cols[3]))
+                var chunks = _atoi(String(cols[6]))
+                total_chunks += chunks
+                if file_count > 0:
+                    files_json += ","
+                files_json += "{"
+                files_json += '"alias":' + _json_escape(falias) + ","
+                files_json += '"name":' + _json_escape(name) + ","
+                files_json += '"kind":' + _json_escape(kind) + ","
+                files_json += '"sizeBytes":' + String(sz) + ","
+                files_json += '"chunks":' + String(chunks)
+                files_json += "}"
+                file_count += 1
         files_json += "]"
 
+        var has_index = indexed and file_count > 0
+        var mismatch = has_index and source_dir != "" and source_dir != served_dir
+
         var out = String("{")
-        out += '"vaultDir":' + _json_escape(vault_dir) + ","
+        out += '"vaultDir":' + _json_escape(served_dir) + ","
+        out += '"sourceDir":' + _json_escape(source_dir) + ","
+        out += '"dirMismatch":' + ("true" if mismatch else "false") + ","
         out += '"configDir":' + _json_escape(config_dir) + ","
-        out += '"indexed":' + ("true" if indexed else "false") + ","
+        out += '"indexed":' + ("true" if has_index else "false") + ","
         out += '"embeddingDim":' + String(EMBED_DIM) + ","
         out += '"fileCount":' + String(file_count) + ","
-        out += '"indexedFileCount":' + String(len(counts)) + ","
+        out += '"indexedFileCount":' + String(file_count) + ","
         out += '"chunkCount":' + String(total_chunks) + ","
         out += '"dbSizeBytes":' + String(_dir_size(db_path)) + ","
         out += '"files":' + files_json
