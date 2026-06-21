@@ -6,13 +6,29 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var model = ChatViewModel()
+    @State private var vaultModel = VaultViewModel()
+    @State private var tab = 0
     @State private var showSettings = false
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         VStack(spacing: 0) {
             brandBar
-            panes
+            Picker("View", selection: $tab) {
+                Text("Chat").tag(0)
+                Text("Vault").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Theme.surface)
+            .overlay(Rectangle().frame(height: 1).foregroundStyle(Theme.border), alignment: .bottom)
+
+            if tab == 0 {
+                panes
+            } else {
+                VaultView(model: vaultModel)
+            }
         }
         .background(Theme.bg)
         .preferredColorScheme(.dark)
@@ -72,7 +88,7 @@ struct SettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("ws://100.x.y.z:10001/chat", text: $serverURL)
+                    TextField("ws://100.x.y.z:10000/chat", text: $serverURL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -80,7 +96,8 @@ struct SettingsSheet: View {
                 } header: {
                     Text("Vault server")
                 } footer: {
-                    Text("Your vault `server/` over Tailscale. Leave blank to run against the in-app mock workflow.")
+                    Text("Your vault app server over Tailscale (one port — chat, vault, and search). "
+                         + "Use wss:// for the Tailscale HTTPS name. Leave blank for the in-app mock.")
                 }
             }
             .navigationTitle("Connection")
