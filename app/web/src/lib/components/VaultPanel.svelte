@@ -191,14 +191,6 @@
       {#if mock}
         <p class="banner">Sample data — open this from <code>mill start</code> (:10000) to see your real vault.</p>
       {/if}
-      {#if info.dirMismatch}
-        <p class="banner warn">
-          ⚠ The index was built from <code>{info.sourceDir}</code>, but the app is serving
-          <code>{info.vaultDir}</code>. Chat &amp; Ask read the served folder — re-index that one,
-          or start the app pointed at the indexed folder.
-        </p>
-      {/if}
-
       <form class="search" onsubmit={runSearch}>
         <input
           type="text"
@@ -272,7 +264,7 @@
         <dt>Indexed from</dt>
         <dd><code>{info.sourceDir || info.vaultDir}</code></dd>
         <dt>Serving</dt>
-        <dd><code class:warn={info.dirMismatch}>{info.vaultDir}</code></dd>
+        <dd><code>{info.vaultDir}</code></dd>
         <dt>Index</dt>
         <dd><code>{info.configDir}/index.db</code></dd>
       </dl>
