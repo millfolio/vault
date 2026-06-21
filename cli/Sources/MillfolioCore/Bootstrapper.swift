@@ -438,7 +438,6 @@ public final class Bootstrapper: ObservableObject {
         }
 
         ensureConfig(at: engineConfigURL, Self.engineConfigDefault)
-        await recordLatest("engine", repo: "millfolio/engine")
     }
 
     // ── step 2: start / stop server (launchd LaunchAgent) ────────────────────────
@@ -813,7 +812,6 @@ public final class Bootstrapper: ObservableObject {
         //    unlike the always-serving server.
         try installPrivacyBoxShims()
         ensureConfig(at: privacy_boxConfigURL, Self.privacy_boxConfigDefault)
-        await recordLatest("privacy_box", repo: "millfolio/privacy_box")
     }
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the privacy_box
@@ -959,7 +957,6 @@ public final class Bootstrapper: ObservableObject {
         //    `$CONDA_PREFIX/lib` lookup finds them at runtime (millfolio runs WITH
         //    CONDA_PREFIX set via run-millfolio.sh).
         try installMillfolioShims()
-        await recordLatest("millfolio", repo: "millfolio/millfolio")
     }
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the millfolio
@@ -1069,7 +1066,6 @@ public final class Bootstrapper: ObservableObject {
                 cwd: appRoot, env: env)
         try run(mojo, ["build", "src/server.mojo"] + inc + ["-o", "build/millfolio-server"],
                 cwd: appRoot, env: env)
-        await recordLatest("app", repo: "millfolio/app")
     }
 
     // ── millfolio: start (open a ready-to-use Terminal) ───────────────────────────
@@ -1489,40 +1485,11 @@ public final class Bootstrapper: ObservableObject {
     }
 
     // ── component versions ──────────────────────────────────────────────────────
-    // Each downloadable component records its installed release tag under
-    // support/versions/ at install time (resolved from the repo's releases/latest);
-    // `mill version` and `mill update` read them back. The CLI's own version
-    // comes from Homebrew.
-    private var versionsDir: URL { support.appendingPathComponent("versions", isDirectory: true) }
-
-    /// Resolve a repo's latest release tag from the GitHub API ("" on failure).
-    private func latestTag(_ repo: String) async -> String {
-        guard let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")
-        else { return "" }
-        var req = URLRequest(url: url)
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.timeoutInterval = 8
-        guard let pair = try? await URLSession.shared.data(for: req),
-              (pair.1 as? HTTPURLResponse)?.statusCode == 200,
-              let s = String(data: pair.0, encoding: .utf8),
-              let r = s.range(of: "\"tag_name\":\"") else { return "" }
-        let rest = s[r.upperBound...]
-        guard let end = rest.firstIndex(of: "\"") else { return "" }
-        return String(rest[..<end])
-    }
-
-    /// Record `name`'s installed version (the repo's latest tag). Best-effort.
-    func recordLatest(_ name: String, repo: String) async {
-        let tag = await latestTag(repo)
-        guard !tag.isEmpty else { return }
-        try? FileManager.default.createDirectory(at: versionsDir, withIntermediateDirectories: true)
-        try? tag.write(to: versionsDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
-    }
-
-    private func readVersion(_ name: String) -> String {
-        (try? String(contentsOf: versionsDir.appendingPathComponent(name), encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
+    // millfolio ships as ONE bundle (millfolio.zip) cut from a single release tag,
+    // alongside the `mill` CLI built from the same tag. So there are no independent
+    // per-component versions: an installed component is, by construction, at the
+    // CLI's version. `mill version` shows that version per installed component (and
+    // "—" for anything not installed yet). The CLI version comes from Homebrew.
 
     /// The CLI's own version, from Homebrew ("" if not a brew install).
     private func brewCliVersion() -> String {
@@ -1534,14 +1501,19 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// Installed versions of millfolio + its components (label, version) for display.
+    /// Every installed component is at the release/bundle version (the CLI's), so we
+    /// show that; components not yet installed show "—". A non-Homebrew (dev) install
+    /// has no tag, so installed components read "installed" instead of a version.
     public func componentVersions() -> [(String, String)] {
-        func shown(_ s: String) -> String { s.isEmpty ? "—" : s }
+        let cli = brewCliVersion()
+        let ver = cli.isEmpty ? "installed" : cli
+        func v(_ installed: Bool) -> String { installed ? ver : "—" }
         return [
-            ("cli (millfolio)", shown(brewCliVersion())),
-            ("inference server", shown(readVersion("inference-server"))),
-            ("privacy_box", shown(readVersion("privacy_box"))),
-            ("vault engine", shown(readVersion("millfolio"))),
-            ("app web server", shown(readVersion("app"))),
+            ("cli (millfolio)", cli.isEmpty ? "—" : cli),
+            ("inference server", v(isServerInstalled)),
+            ("privacy_box", v(isPrivacyBoxInstalled)),
+            ("vault engine", v(isMillfolioInstalled)),
+            ("app web server", v(isAppServerInstalled)),
         ]
     }
 
