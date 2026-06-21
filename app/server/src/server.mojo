@@ -36,6 +36,7 @@ from settings import load_config
 from wiring import build_vault_orchestrator
 from orchestrator import Orchestrator
 from vaultcfg import vault_dir as resolve_vault_dir
+from sandbox import _spawn_capture
 from json import loads
 
 comptime PORT = 10000
@@ -250,6 +251,8 @@ struct Api(Handler, Copyable, Movable):
             return self.handle_chat(req)
         if path == "/api/vault":
             return self.handle_vault()
+        if req.method == Method.POST and path == "/api/search":
+            return self.handle_search(req)
         if path == "/health":
             return _cors(ok("millfolio ok"))
         # Static web UI — same-origin in production (Vite serves it in dev).
@@ -348,6 +351,54 @@ struct Api(Handler, Copyable, Movable):
         out += '"files":' + files_json
         out += "}"
         return _cors(ok_json(out))
+
+    def handle_search(self, req: Request) raises -> Response:
+        """Semantic vault search: POST {"query": ..., "k": N} -> {"hits":[{alias,
+        score,text}]}. The LanceDB/embedding work stays OUT of this server — we
+        shell the `millfolio` engine binary via its run-script (MILLFOLIO_RUN_SCRIPT,
+        set by the launcher) and have it write the JSON to a file (so captured
+        stderr noise can't corrupt it), then return that file's contents."""
+        var query = String("")
+        var k = 5
+        try:
+            var j = loads(req.text())
+            query = j["query"].string_value()
+            try:
+                k = Int(j["k"].int_value())
+            except:
+                k = 5
+        except:
+            query = String("")
+        if query == "":
+            return _cors(bad_request('{"error":"empty query","hits":[]}'))
+        var run_script = getenv("MILLFOLIO_RUN_SCRIPT", "")
+        if run_script == "":
+            return _cors(ok_json('{"error":"search unavailable — engine runner not configured","hits":[]}'))
+
+        var cfg = _config_dir()
+        var out_json = cfg + "/.search_out.json"
+        var cap = cfg + "/.search_cap.txt"
+        var argv = List[String]()
+        argv.append(String("/bin/bash"))
+        argv.append(run_script)
+        argv.append(String("search"))
+        argv.append(query)
+        argv.append(String(k))
+        argv.append(String("--json"))
+        argv.append(String("--out"))
+        argv.append(out_json)
+        var rc = _spawn_capture(argv, cap)
+        if rc != 0:
+            return _cors(ok_json(
+                '{"error":"search failed (exit ' + String(rc) + ')","hits":[]}'
+            ))
+        var hits = String("[]")
+        try:
+            with open(out_json, "r") as f:
+                hits = f.read()
+        except:
+            hits = String("[]")
+        return _cors(ok_json('{"hits":' + hits + "}"))
 
 
 def main() raises:
