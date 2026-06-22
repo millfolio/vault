@@ -82,6 +82,18 @@ Use this shape only when the answer lives *inside* the files:
 4. Combine the structured results in Mojo (sum / filter by date / pick one).
 5. `print_answer(result)`.
 
+### ask_local must never invent (anti-hallucination)
+`ask_local` reads possibly-noisy extracted text (a PDF table can come through
+jumbled). Every extraction instruction you give it MUST say, in these words:
+"Use ONLY the text provided. If it does not clearly contain the answer, reply
+exactly `none`. Do not guess or invent." Then in your Mojo glue, **discard** any
+reply that is empty, equals `none`, or still contains your format placeholders
+(e.g. literal `DATE`, `DESCRIPTION`, `AMOUNT`, `|`) — treat those as "not found",
+never as data. If after all chunks nothing valid was extracted, say you couldn't
+find it ("I couldn't find any dated transactions in your vault.") rather than
+emitting a fabricated value. A wrong-but-confident answer is worse than "not
+found".
+
 ## Examples
 
 **"How many documents / records / files are in my vault?"** (meta — `manifest()`, no search)
@@ -116,9 +128,12 @@ def main() raises:
     var have = False
     var oldest = String("")          # sentinel, not None
     for c in hits:
-        var d = ask_local("Reply ONLY with the transaction date (YYYY-MM-DD), or 'none'.", c.text)
+        var d = ask_local(
+            "Use ONLY the text provided. If it clearly contains a transaction, reply"
+            " with just its date (YYYY-MM-DD). Otherwise reply exactly 'none'. Do not"
+            " guess or invent.", c.text)
         var ds = String(d.strip())
-        if ds == "none":
+        if ds == "none" or ds == "":
             continue
         if not have or ds < oldest:  # YYYY-MM-DD compares lexicographically
             have = True
