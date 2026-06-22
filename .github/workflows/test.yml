@@ -1,0 +1,23 @@
+name: test
+
+# Pure-Mojo unit-test suite: SHA-256 KATs, M/D date folding (iso_date), the
+# VAULT run-sandbox source_dir grant, the EgressGuard, and budget accounting.
+# These need only the Mojo toolchain (via pixi) — no sibling repos and no FFI
+# shims — so this job is fast and hermetic. `pixi run test` is the same target a
+# developer runs locally.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          manifest-path: pixi.toml
+      - name: Run the pure-Mojo test suite
+        run: pixi run test

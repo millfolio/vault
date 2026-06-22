@@ -186,6 +186,52 @@ def _write(path: String, s: String) raises:
         f.write(s)
 
 
+def _tsv_unescape(s: String) raises -> String:
+    """Inverse of the indexer's TSV escaping (\\t \\n \\r \\\\) — mirrors
+    core/src/index.mojo so manifest paths round-trip."""
+    var out = String("")
+    var b = s.as_bytes()
+    var i = 0
+    while i < len(b):
+        var c = Int(b[i])
+        if c == 92 and i + 1 < len(b):  # backslash
+            var n = Int(b[i + 1])
+            if n == 116:
+                out += "\t"; i += 2; continue
+            elif n == 110:
+                out += "\n"; i += 2; continue
+            elif n == 114:
+                out += "\r"; i += 2; continue
+            elif n == 92:
+                out += "\\"; i += 2; continue
+        out += chr(c)
+        i += 1
+    return out^
+
+
+def _index_source_dir(index_dir: String) -> String:
+    """The dir the index was built from — manifest.tsv's `#meta <next_id>
+    <next_alias> <source_dir>` (4th tab field). The vault readers open files by
+    their REAL path under this dir, so the run sandbox must grant read there.
+    Returns "" when there's no index / no meta row (caller falls back to the
+    served vault dir, so the granted subpath is never empty)."""
+    try:
+        var text: String
+        with open(index_dir + "/manifest.tsv", "r") as f:
+            text = f.read()
+        var lines = text.split("\n")
+        for i in range(len(lines)):
+            var line = String(lines[i])
+            if line.byte_length() == 0:
+                continue
+            var cols = line.split("\t")
+            if String(cols[0]) == "#meta" and len(cols) >= 4:
+                return _tsv_unescape(String(cols[3]))
+        return String("")
+    except:
+        return String("")
+
+
 def _replace_all(s: String, old: String, new: String) raises -> String:
     """Substitute every occurrence of `old` with `new`. (String has no slice
     syntax in current Mojo — split on `old` and rejoin with `new`.)"""
@@ -295,10 +341,23 @@ struct Sandbox(Movable):
             # The index dir (~/.config/millfolio) lives under $HOME; canonicalize it
             # so the vault profile can re-allow reads of the vector store + the
             # chunks.tsv side-table that search() resolves hits through.
-            var index_c = _canonical(
+            var index_raw = (
                 self.policy.index_dir if self.policy.index_dir != ""
                 else (getenv("HOME", "/") + "/.config/millfolio"))
+            var index_c = _canonical(index_raw)
             rendered = _replace_all(rendered, String("@INDEX_DIR@"), index_c)
+            # Grant read to the dir the index was actually built from — the vault
+            # readers open files by their real path there (which may differ from
+            # the served @DATA_DIR@). Fall back to the served vault dir when there's
+            # no index, so @SOURCE_DIR@ is NEVER an empty string or "/".
+            var src = _index_source_dir(index_raw)
+            var source_c = data_c
+            if src != "":
+                try:
+                    source_c = _canonical(src)
+                except:
+                    source_c = data_c  # indexed dir gone → safe fallback
+            rendered = _replace_all(rendered, String("@SOURCE_DIR@"), source_c)
         var path = scratch_c + ("/privacy_box-vault.sb" if is_vault else "/privacy_box.sb")
         _write(path, rendered)
         return path

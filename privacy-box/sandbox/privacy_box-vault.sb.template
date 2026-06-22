@@ -83,3 +83,10 @@
 (allow file-read* (subpath "@INDEX_DIR@"))
 ;; ... and allow the scoped vault dir, read-only (the real files the tools read).
 (allow file-read* (subpath "@DATA_DIR@"))
+;; ... and the dir the index was actually built from (manifest.tsv's source_dir).
+;; The vault readers (pdf_text / csv_rows / md_text / docx_text) open files by
+;; their REAL path, which lives under the indexed folder — and that may differ
+;; from @DATA_DIR@ when you `mill index` a folder outside the served vault dir.
+;; Read-only; the runner falls back to @DATA_DIR@ when there's no index, so this
+;; is never an empty string or "/" (which would defeat the read-scoping).
+(allow file-read* (subpath "@SOURCE_DIR@"))

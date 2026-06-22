@@ -56,6 +56,7 @@ Questions are open-ended but personal, e.g.
 | `docx_text` | `docx_text(file_alias: String) -> String` | extracted text of a Word .docx |
 | `ask_local` | `ask_local(instruction: String, content: String) -> String` | the on-device model. Give it **real content** (a chunk, a page, a row) + an instruction; it returns its answer. This is how you extract / classify / read meaning. |
 | `print_answer` | `print_answer(s: String)` | emit the final answer to the user (local only) |
+| `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
 
 You may use plain Mojo for the glue (loops, sums, date math, filtering the
 *structured* values `ask_local` returns). Keep prose understanding inside
@@ -120,24 +121,39 @@ def main() raises:
     print_answer("You spent about $" + String(total) + " on travel in 2025.")
 ```
 
-**"What is my oldest transaction?"** (running min — no None)
+**"What is my oldest transaction?"** (statement dates are M/D — fold in the year)
+Statement transaction lines show the **month/day only** (`4/6`); the **year** is
+in the header / statement period, not on the line. So read the year ONCE, then
+fold each transaction's M/D with `iso_date(year, md)` (returns sortable
+`YYYY-MM-DD`, or `""` when it isn't a date). Compare with `<`.
 ```mojo
 from vault import *
 def main() raises:
-    var hits = search("transactions purchases dates amounts", 40)
+    var hits = search("statement period transactions purchases dates amounts", 40)
+    # 1) the statement year (first one clearly stated wins).
+    var year = 0
+    for c in hits:
+        var y = ask_local(
+            "Use ONLY the text. If it states the statement's year (e.g. the"
+            " statement period or a header date), reply with just that 4-digit"
+            " year. Otherwise reply 'none'. Do not guess.", c.text)
+        var ys = String(y.strip())
+        if ys != "none" and ys != "":
+            year = Int(atof(ys)); break
+    # 2) running min over real transaction dates, M/D folded with the year.
     var have = False
     var oldest = String("")          # sentinel, not None
     for c in hits:
-        var d = ask_local(
-            "Use ONLY the text provided. If it clearly contains a transaction, reply"
-            " with just its date (YYYY-MM-DD). Otherwise reply exactly 'none'. Do not"
+        var md = ask_local(
+            "Use ONLY the text. If it clearly contains a transaction, reply with"
+            " just its month/day as M/D (e.g. 4/6). Otherwise reply 'none'. Do not"
             " guess or invent.", c.text)
-        var ds = String(d.strip())
-        if ds == "none" or ds == "":
+        var iso = iso_date(year, String(md.strip()))   # "" when not a date
+        if iso == "":
             continue
-        if not have or ds < oldest:  # YYYY-MM-DD compares lexicographically
+        if not have or iso < oldest:
             have = True
-            oldest = ds
+            oldest = iso
     if have:
         print_answer("Your oldest transaction is from " + oldest + ".")
     else:

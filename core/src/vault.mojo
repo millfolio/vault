@@ -39,6 +39,7 @@ from manifest import build_manifest, FileInfo
 import readers
 import index
 from index import Chunk, vault_files
+from dates import iso_date as _iso_date
 
 
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
@@ -169,6 +170,15 @@ def ask_local(instruction: String, content: String) raises -> String:
 def print_answer(s: String):
     """Emit the final answer to the user (local only)."""
     print(s)
+
+
+def iso_date(year: Int, md: String) raises -> String:
+    """Fold a bank-statement `M/D` (or `MM/DD`, `M/D/YY`) date together with the
+    statement's `year` into a sortable `"YYYY-MM-DD"` string; `""` if it isn't a
+    date. Statement lines show month/day only — the year is in the header — so a
+    program reads the year once, then folds each transaction's M/D with it.
+    Compare/sort the results with plain `<`."""
+    return _iso_date(year, md)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
