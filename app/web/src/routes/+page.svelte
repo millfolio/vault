@@ -30,11 +30,14 @@
     if (typeof location === "undefined") return createMockClient();
     const explicit = new URLSearchParams(location.search).get("server");
     if (explicit) return createWsClient(explicit);
-    if (location.port === "10000") {
-      const scheme = location.protocol === "https:" ? "wss" : "ws";
-      return createWsClient(`${scheme}://${location.host}/chat`);
-    }
-    return createMockClient();
+    // The Vite dev server (`npm run dev`, :5173) has no backend → in-browser mock.
+    // EVERY other origin is the app served BY millfolio-server and is same-origin
+    // with the WS endpoint — whether that's http://localhost:10000 OR an https
+    // Tailscale/reverse-proxy host (port 443, MagicDNS). Keying off port===10000
+    // wrongly fell back to the mock over Tailscale, so we invert: real WS unless dev.
+    if (location.port === "5173") return createMockClient();
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    return createWsClient(`${scheme}://${location.host}/chat`);
   }
   const client = pickClient();
 

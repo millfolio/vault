@@ -247,7 +247,7 @@ def _cors(var resp: Response) -> Response:
 
 @fieldwise_init
 struct Api(Handler, Copyable, Movable):
-    var st: UnsafePointer[MillfolioState, MutExternalOrigin]
+    var st: UnsafePointer[MillfolioState, MutUntrackedOrigin]
 
     def serve(self, req: Request) raises -> Response:
         var path = req.url

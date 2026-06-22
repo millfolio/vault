@@ -31,8 +31,11 @@
     if (typeof location === "undefined") return null;
     const explicit = new URLSearchParams(location.search).get("api");
     if (explicit) return explicit.replace(/\/$/, "");
-    if (location.port === "10000") return "";
-    return null;
+    // Vite dev (:5173) has no backend → sample data. Every other origin is served
+    // by millfolio-server (localhost:10000 OR an https Tailscale/proxy host), so
+    // the API is same-origin. (port===10000 alone missed the Tailscale HTTPS case.)
+    if (location.port === "5173") return null;
+    return "";
   }
 
   const MOCK: VaultInfo = {
