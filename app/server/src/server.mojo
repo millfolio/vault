@@ -36,9 +36,11 @@ from flare.prelude import *
 from flare.http import Handler
 from flare.ws import WsConnection, WsOpcode, WsCloseCode
 
+from std.ffi import external_call
+
 from settings import load_config
 from wiring import build_vault_orchestrator
-from orchestrator import Orchestrator
+from orchestrator import Orchestrator, PROGRESS_SENTINEL
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
 from events import field, status, debug_event, approval, message, error_event
@@ -480,6 +482,18 @@ struct Api(Handler, Copyable, Movable):
         return _cors(ok_json('{"hits":' + hits + "}"))
 
 
+def _usleep(usec: Int):
+    """Sleep `usec` microseconds (libc usleep) — the gap between run-output polls
+    in the streaming loop, so we don't busy-spin while the sandboxed child runs."""
+    _ = external_call["usleep", Int](Int(usec))
+
+
+def _progress_label(line: String) raises -> String:
+    """Strip the progress sentinel off a captured stdout line, leaving the message
+    the generated program passed to `progress(...)`."""
+    return String(line.removeprefix(PROGRESS_SENTINEL))
+
+
 def on_connect(mut conn: WsConnection) raises:
     """Streaming chat over the SAME :10000 listener — flare upgrades the WebSocket
     request; every other request stays on the unary HTTP path (the `Api` handler).
@@ -523,19 +537,38 @@ def on_connect(mut conn: WsConnection) raises:
 
         # Approved — surface the two real phases SEPARATELY so the wait isn't one
         # opaque "working": first compile the generated Mojo, then run it over the
-        # vault (the read + ask_local loop — the long part). The run is a blocking
-        # sandboxed subprocess, so we can't yet stream per-step progress from inside
-        # it (see TODO: instrument generated programs); the labels at least say what
-        # it's doing and how far along the pipeline it is.
+        # vault (the read + ask_local loop — the long part). The run is now spawned
+        # NON-BLOCKING and we poll its captured stdout, streaming each `progress(…)`
+        # line the generated program emits as a live "execute" status update (same
+        # stepId, so the UI updates ONE line in place) instead of a frozen spinner.
         conn.send_text(status("run", "Approved — running", "done"))
         conn.send_text(status("compile", "Compiling the generated program", "running"))
         orch.vault_build(code)
         conn.send_text(status("compile", "Compiling the generated program", "done"))
         conn.send_text(status("execute",
-            "Running it locally over your vault — reading your files and asking the on-device model (this can take a bit)…",
+            "Running it locally over your vault…",
             "running"))
-        var reply = orch.vault_run(vault_dir)
+        var h = orch.vault_run_start(vault_dir)
+        while True:
+            var lines = orch.vault_run_poll(h)
+            for i in range(len(lines)):
+                var ln = lines[i].copy()
+                if ln.startswith(PROGRESS_SENTINEL):
+                    conn.send_text(status("execute", _progress_label(ln), "running"))
+            var code2 = orch.vault_run_reap(h)
+            if code2 != -1:   # -1 = still running; anything else = exited (or error)
+                break
+            _usleep(120_000)  # 120 ms between polls
+
+        # Drain any progress lines written between the last poll and exit.
+        var tail = orch.vault_run_poll(h)
+        for i in range(len(tail)):
+            var ln = tail[i].copy()
+            if ln.startswith(PROGRESS_SENTINEL):
+                conn.send_text(status("execute", _progress_label(ln), "running"))
+
         conn.send_text(status("execute", "Running it locally over your vault", "done"))
+        var reply = orch.vault_run_finish(h)
         conn.send_text(message(reply))
     except e:
         conn.send_text(error_event(String(e)))
