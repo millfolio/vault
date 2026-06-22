@@ -1254,13 +1254,23 @@ public final class Bootstrapper: ObservableObject {
             env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
         }
         let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
+        // Timestamp every log line. launchd's StandardOutPath redirect writes the
+        // fd verbatim — no timestamps — so instead run the server through a tiny
+        // perl strftime filter that prefixes each line with a local
+        // "YYYY-MM-DD HH:MM:SS ". This catches BOTH the server's own output and any
+        // inherited subprocess progress (the privacy_box "• …" lines), uniformly,
+        // with no Mojo changes. `2>&1` folds stderr into the same stream; `$|=1`
+        // keeps the filter unbuffered so lines land as they arrive. StandardErrorPath
+        // still captures the wrapper's own failures (e.g. a missing perl).
+        let tsFilter = "/usr/bin/perl -pe 'BEGIN{$|=1} use POSIX qw(strftime);"
+            + " print strftime(\"%Y-%m-%d %H:%M:%S \", localtime)'"
+        let serverCmd = "\"\(appServerBin.path)\" 2>&1 | \(tsFilter) >> \"\(serverLog)\""
         let plist: [String: Any] = [
             "Label": Self.appServerLabel,
-            "ProgramArguments": [appServerBin.path],
+            "ProgramArguments": ["/bin/sh", "-c", serverCmd],
             "WorkingDirectory": privacy_boxDir.path,   // sandbox/*.sb.template resolve here
             "EnvironmentVariables": env,
-            "StandardOutPath": serverLog,
-            "StandardErrorPath": serverLog,
+            "StandardErrorPath": serverLog,            // wrapper (sh/perl) errors only
             "RunAtLoad": true,
             "ProcessType": "Interactive",
         ]
