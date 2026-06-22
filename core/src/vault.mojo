@@ -40,6 +40,7 @@ import readers
 import index
 from index import Chunk, vault_files
 from dates import iso_date as _iso_date
+from amounts import parse_amount as _parse_amount
 
 
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
@@ -179,6 +180,14 @@ def iso_date(year: Int, md: String) raises -> String:
     program reads the year once, then folds each transaction's M/D with it.
     Compare/sort the results with plain `<`."""
     return _iso_date(year, md)
+
+
+def parse_amount(s: String) raises -> Float64:
+    """Parse a statement money string (`$4,000.00`, `1,234.56`, `-31.00`, `(42.10)`)
+    into a Float64 — ignores `$`/commas/spaces/currency words, treats a leading `-`
+    or surrounding `()` as negative, and returns `0.0` for a non-number. Use this
+    instead of `atof` when summing amounts; `atof` crashes on the comma."""
+    return _parse_amount(s)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

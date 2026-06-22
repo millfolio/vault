@@ -57,6 +57,7 @@ Questions are open-ended but personal, e.g.
 | `ask_local` | `ask_local(instruction: String, content: String) -> String` | the on-device model. Give it **real content** (a chunk, a page, a row) + an instruction; it returns its answer. This is how you extract / classify / read meaning. |
 | `print_answer` | `print_answer(s: String)` | emit the final answer to the user (local only) |
 | `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
+| `parse_amount` | `parse_amount(s: String) -> Float64` | parse a money string (`$4,000.00`, `(42.10)`, `-31.00`) to a number — handles `$`/commas/parens. **Use instead of `atof`** when summing; `atof` crashes on the comma. |
 
 You may use plain Mojo for the glue (loops, sums, date math, filtering the
 *structured* values `ask_local` returns). Keep prose understanding inside
@@ -112,12 +113,14 @@ def main() raises:
     var hits = search("travel transportation flights hotels expenses", 40)
     var total = 0.0
     for c in hits:
-        # ask_local reads the real chunk; returns "amount|yes" or "0|no"
+        # ask_local reads the real chunk; returns "amount|yes" or "0|no". Use ONLY
+        # the text; reply "0|no" if it isn't a travel expense — never invent.
         var verdict = ask_local(
-            "If this is a 2025 travel expense, reply '<amount>|yes', else '0|no'.", c.text)
+            "Use ONLY the text. If it is a 2025 travel expense, reply '<amount>|yes'"
+            " (amount exactly as written). Otherwise reply '0|no'. Do not invent.", c.text)
         var parts = verdict.split("|")
         if len(parts) == 2 and String(parts[1]) == "yes":
-            total += atof(String(parts[0]))
+            total += parse_amount(String(parts[0]))   # parse_amount, NOT atof ('$1,234.00')
     print_answer("You spent about $" + String(total) + " on travel in 2025.")
 ```
 

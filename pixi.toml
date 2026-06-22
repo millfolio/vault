@@ -52,9 +52,11 @@ test-sha256 = { cmd = "mkdir -p build && mojo build core/src/sha256_test.mojo -I
 test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/src/sandbox_test.mojo -I privacy-box/src -o build/sandbox-test && ./build/sandbox-test" }
 # Gate: M/D statement dates fold with the statement's year into sortable ISO.
 test-dates = { cmd = "mkdir -p build && mojo build core/src/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
+# Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
+test-amounts = { cmd = "mkdir -p build && mojo build core/src/amounts_test.mojo -I core/src -o build/amounts-test && ./build/amounts-test" }
 # Gate: the EgressGuard blocks real-value fingerprints + canary tokens.
 test-egress = { cmd = "mkdir -p build && mojo build privacy-box/src/egress_test.mojo -I privacy-box/src -o build/egress-test && ./build/egress-test" }
 # Gate: budget directive parsing/accounting.
 test-budget = { cmd = "mkdir -p build && mojo build privacy-box/src/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-dates", "test-sandbox", "test-egress", "test-budget"] }
+test = { depends-on = ["test-sha256", "test-dates", "test-amounts", "test-sandbox", "test-egress", "test-budget"] }
