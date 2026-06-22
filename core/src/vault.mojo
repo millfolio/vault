@@ -16,6 +16,7 @@ privacy_box-system.md exactly:
   md_text(alias)                   -> String
   ask_local(instruction, content)  -> String           (trusted on-device reader)
   print_answer(s)                  -> None
+  progress(msg)                    -> None               (live progress line — fd 1, unbuffered)
 
 The vault dir + the local model URLs come from the environment so the generated
 program needs no configuration. One inference-server process now serves BOTH a
@@ -32,6 +33,8 @@ so nothing the generated program does can leave the machine.
 """
 
 from std.os import getenv
+from std.ffi import external_call, c_char
+from std.memory import UnsafePointer
 
 from flare.http import HttpClient, Request
 
@@ -41,6 +44,15 @@ import index
 from index import Chunk, vault_files
 from dates import iso_date as _iso_date
 from amounts import parse_amount as _parse_amount
+
+
+# The SENTINEL that prefixes a progress line on stdout. A `progress(msg)` call
+# writes `PROGRESS_SENTINEL + msg + "\n"` to fd 1; the server recognizes lines
+# with this prefix and streams them to the chat as live status, stripping them
+# from the final reply. \x1f (US, "unit separator") can't appear in a normal
+# answer, so it can't be spoofed by ordinary print_answer text. The orchestrator
+# + server hold a matching copy of this exact string — keep them in lockstep.
+comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
 
 
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
@@ -182,6 +194,24 @@ def ask_local(instruction: String, content: String) raises -> String:
 def print_answer(s: String):
     """Emit the final answer to the user (local only)."""
     print(s)
+
+
+def progress(msg: String):
+    """Report a one-line progress update to the user while the program runs (e.g.
+    its scan position). Call it at loop boundaries — it's free and never sees data.
+
+    Writes `PROGRESS_SENTINEL + msg + "\\n"` straight to fd 1 with the raw libc
+    `write(2)` syscall — NOT `print()`. This is deliberate: the run sandbox
+    redirects stdout to a capture file, and over a file Mojo/libc stdio is
+    FULL-buffered, so a `print()` here would sit in the buffer until the program
+    exits — defeating LIVE streaming. `write(2)` is unbuffered and lands in the
+    file immediately, so the server's poller sees each progress line as it's
+    emitted. `print_answer` stays a normal `print`: its buffer flushes at exit,
+    AFTER every raw progress write, so the answer still comes last."""
+    var line = String(PROGRESS_SENTINEL) + msg + "\n"
+    var n = line.byte_length()
+    var p = line.unsafe_ptr().bitcast[c_char]()
+    _ = external_call["write", Int](Int(1), p, Int(n))
 
 
 def iso_date(year: Int, md: String) raises -> String:

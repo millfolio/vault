@@ -18,9 +18,34 @@ from std.os import getenv, setenv
 
 from budget import Budget
 from transport import LocalClient, RemoteClient, ChatMessage, _codegen_system
-from sandbox import Sandbox
+from sandbox import Sandbox, RunHandle
 from broker import CapabilityBroker
 from vaultcfg import millfolio_bin, vault_include_paths
+
+
+# The progress-line sentinel — MUST match `vault.progress` in vault/core/src/vault.mojo
+# (which can't be imported here: vault is only on the *generated* program's include
+# path, not privacy-box's). The server imports THIS constant so it can't drift from
+# the orchestrator. Keep all three copies of the literal in lockstep.
+comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
+
+
+def _strip_progress(out_text: String) raises -> String:
+    """Drop any progress-sentinel lines from captured stdout, leaving only the
+    program's real answer text. Used by `vault_run_finish` so the streamed
+    progress (already sent live) doesn't pollute the final reply."""
+    var lines = out_text.split("\n")
+    var kept = String("")
+    var first = True
+    for i in range(len(lines)):
+        var ln = String(lines[i])
+        if ln.startswith(String(PROGRESS_SENTINEL)):
+            continue
+        if not first:
+            kept += "\n"
+        kept += ln
+        first = False
+    return kept^
 
 
 def _session_append(text: String):
@@ -154,6 +179,37 @@ struct Orchestrator(Movable):
         var out = self.sandbox.run(bin, List[String]()).output.copy()
         _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")
         return out
+
+    # ── streaming run (steps 4a–4d) ──────────────────────────────────────────────
+    # The blocking `vault_run` above stays for the CLI / run_vault_task. The WS
+    # server drives the run NON-BLOCKING via these four so it can stream each
+    # `progress(...)` line the generated program emits, live, while the child runs.
+    # Confinement is unchanged — `run_start` renders the SAME vault profile.
+
+    def vault_run_start(mut self, vault_dir: String) raises -> RunHandle:
+        """Step 4a — point the tools at the vault dir and SPAWN the compiled binary
+        in the loopback sandbox without blocking. Returns a handle to poll/reap."""
+        print("• running it locally over your vault…")
+        _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
+        var bin = self.sandbox.scratch_bin()
+        return self.sandbox.run_start(bin, List[String]())
+
+    def vault_run_poll(mut self, mut h: RunHandle) raises -> List[String]:
+        """Step 4b — the complete stdout lines emitted since the last poll (progress
+        sentinels still attached; the caller filters)."""
+        return self.sandbox.run_poll(h)
+
+    def vault_run_reap(self, h: RunHandle) -> Int:
+        """Step 4c — non-blocking reap: -1 still running, -2 error, else exit code."""
+        return self.sandbox.run_reap(h)
+
+    def vault_run_finish(self, h: RunHandle) raises -> String:
+        """Step 4d — the full captured stdout, with progress lines stripped, as the
+        reply. Mirrors `vault_run`'s session-log side effect (the FULL output,
+        including progress, goes to the transcript for inspection)."""
+        var out = self.sandbox.run_finish(h)
+        _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")
+        return _strip_progress(out)
 
     def run_vault_task(mut self, question: String, vault_dir: String) raises -> String:
         """Answer a question about the private vault by writing ONE Mojo program

@@ -36,6 +36,7 @@ comptime _O_WRONLY: c_int = 0x0001
 comptime _O_CREAT: c_int = 0x0200
 comptime _O_TRUNC: c_int = 0x0400
 comptime _OUT_MODE: c_int = 0o644  # rw-r--r-- for the capture file
+comptime _WNOHANG: c_int = 1       # waitpid(2) flag — return immediately if no child has exited (macOS)
 
 # A NULL `char*` / `void*` — argv terminator, attrp, etc.
 comptime _NULL_CHARP = UnsafePointer[c_char, MutUntrackedOrigin](
@@ -158,6 +159,95 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
     if rc != 0:
         raise Error("posix_spawn failed (rc=" + String(rc) + ")")
     return exit_code
+
+
+def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
+    """Like `_spawn_capture` but NON-BLOCKING: posix_spawn the child with stdout +
+    stderr redirected to `out_path` and return its PID WITHOUT waitpid'ing. The
+    caller drives the run by polling the capture file and reaping with
+    `_reap_nohang(pid)`. The spawn setup (cargv / _cstr / file_actions / _environ)
+    is IDENTICAL to `_spawn_capture` — only the wait is dropped.
+
+    All C resources (argv array + strings, the file_actions) are freed before
+    returning; the child has its own copy after the spawn, so this is safe.
+
+    Returns the child PID (> 0). Raises if argv is empty or any libc step fails."""
+    var n = len(argv)
+    if n == 0:
+        raise Error("_spawn_async: empty argv")
+
+    var cargv = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
+    for i in range(n):
+        (cargv + i).init_pointee_copy(_cstr(argv[i]))
+    (cargv + n).init_pointee_copy(_NULL_CHARP)
+
+    var fa = stack_allocation[64, UInt8]()
+    for i in range(64):
+        fa[i] = 0
+    var path_c = _cstr(out_path)
+
+    var rc = external_call["posix_spawn_file_actions_init", c_int](
+        fa.bitcast[NoneType]()
+    )
+    if rc == 0:
+        rc = external_call["posix_spawn_file_actions_addopen", c_int](
+            fa.bitcast[NoneType](),
+            c_int(1),
+            path_c,
+            _O_WRONLY | _O_CREAT | _O_TRUNC,
+            _OUT_MODE,
+        )
+    if rc == 0:
+        rc = external_call["posix_spawn_file_actions_adddup2", c_int](
+            fa.bitcast[NoneType](), c_int(1), c_int(2)
+        )
+
+    var pid: c_int = -1
+    if rc == 0:
+        var pid_slot = stack_allocation[1, c_int]()
+        pid_slot[0] = 0
+        var src = external_call["posix_spawn", c_int](
+            pid_slot.bitcast[NoneType](),
+            cargv[0],  # path == argv[0] (absolute)
+            fa.bitcast[NoneType](),
+            _NULL_VOIDP,  # attrp
+            cargv,
+            _environ(),
+        )
+        if src == 0:
+            pid = pid_slot[0]  # capture the PID; DON'T waitpid — the caller reaps
+        else:
+            rc = src
+
+    # Tear down C resources — the child holds its own copy of argv/env now.
+    _ = external_call["posix_spawn_file_actions_destroy", c_int](
+        fa.bitcast[NoneType]()
+    )
+    path_c.free()
+    for i in range(n):
+        cargv[i].free()
+    cargv.free()
+
+    if rc != 0:
+        raise Error("posix_spawn (async) failed (rc=" + String(rc) + ")")
+    return pid
+
+
+def _reap_nohang(pid: c_int) -> Int:
+    """Non-blocking `waitpid(pid, &status, WNOHANG)`. Returns:
+      -1  the child is still running (waitpid returned 0),
+      -2  waitpid errored (returned -1),
+      otherwise the child's exit code `(status>>8)&0xFF` — matching `_spawn_capture`."""
+    var status_slot = stack_allocation[1, c_int]()
+    status_slot[0] = 0
+    var r = external_call["waitpid", c_int](
+        pid, status_slot.bitcast[NoneType](), _WNOHANG
+    )
+    if Int(r) == 0:
+        return -1  # still running
+    if Int(r) < 0:
+        return -2  # error
+    return (Int(status_slot[0]) >> 8) & 0xFF
 
 
 def _canonical(var path: String) raises -> String:
@@ -302,6 +392,23 @@ struct RunResult(Movable):
         self.output = output^
 
 
+struct RunHandle(Movable):
+    """Live handle to a non-blocking sandboxed run (the streaming counterpart of
+    a `RunResult`). `run_start` returns one; the caller loops `run_poll` (new
+    complete lines since the last poll) + `run_reap` (still-running? exited?) and
+    finishes with `run_finish` (the full captured stdout)."""
+    var pid: c_int          # the sandbox-exec child PID (reaped by run_reap)
+    var out_path: String    # the capture file (scratch/run.out)
+    var cursor: Int         # bytes of out_path already consumed by run_poll
+    var pending: String     # a trailing partial line (no '\n' yet) carried to the next poll
+
+    def __init__(out self, pid: c_int, var out_path: String, cursor: Int, var pending: String):
+        self.pid = pid
+        self.out_path = out_path^
+        self.cursor = cursor
+        self.pending = pending^
+
+
 # ── the runner ───────────────────────────────────────────────────────────────
 
 struct Sandbox(Movable):
@@ -391,6 +498,77 @@ struct Sandbox(Movable):
         except:
             out = String("")
         return RunResult(code, out^)
+
+    def run_start(self, binary: String, args: List[String]) raises -> RunHandle:
+        """Non-blocking counterpart of `run`: render the SAME vault profile, build
+        the SAME `sandbox-exec -f <profile> <binary> <args…>` argv, spawn it
+        WITHOUT waiting, and return a RunHandle the caller polls. The confinement
+        is BYTE-IDENTICAL to `run` — only the wait is deferred to run_reap."""
+        var scratch_c = _canonical(self.policy.scratch_dir)
+        var profile = self._render_profile(scratch_c)
+        var outfile = scratch_c + "/run.out"
+
+        var argv: List[String] = [
+            String("/usr/bin/sandbox-exec"),
+            String("-f"),
+            profile,
+            binary,
+        ]
+        for i in range(len(args)):
+            argv.append(args[i])
+
+        var pid = _spawn_async(argv, outfile)
+        return RunHandle(pid, outfile^, 0, String(""))
+
+    def run_poll(self, mut h: RunHandle) raises -> List[String]:
+        """Return the COMPLETE lines written to the capture file since the last
+        poll. Reads from `h.cursor` to EOF, advances the cursor by the bytes read,
+        prepends `h.pending` (a partial line left over last time), and splits on
+        '\\n'. The final element (no trailing newline yet) is stashed back into
+        `h.pending` for the next poll — so a line split across two polls surfaces
+        exactly once, whole. Lines still carry their progress sentinel (if any);
+        the caller decides what to do with them."""
+        var full: String
+        try:
+            with open(h.out_path, "r") as f:
+                full = f.read()
+        except:
+            return List[String]()  # file not created yet — nothing to read
+        var total = full.byte_length()
+        if total <= h.cursor:
+            return List[String]()  # no new bytes
+        # New bytes are [cursor, total). split() then drop the already-consumed
+        # prefix by byte count: re-split the whole file and reconstruct the tail
+        # is awkward, so read the new slice via a fresh String of the trailing bytes.
+        var b = full.as_bytes()
+        var chunk = String("")
+        for i in range(h.cursor, total):
+            chunk += chr(Int(b[i]))
+        h.cursor = total
+
+        var buf = h.pending + chunk
+        var parts = buf.split("\n")
+        var out = List[String]()
+        # Every element except the last is a complete line. The last is the new
+        # partial tail (empty if buf ended in '\n').
+        for i in range(len(parts) - 1):
+            out.append(String(parts[i]))
+        h.pending = String(parts[len(parts) - 1])
+        return out^
+
+    def run_reap(self, h: RunHandle) -> Int:
+        """Non-blocking reap: -1 still running, -2 error, else the exit code."""
+        return _reap_nohang(h.pid)
+
+    def run_finish(self, h: RunHandle) raises -> String:
+        """The full captured stdout (for building the reply), read fresh after the
+        child has exited. (Includes any progress-sentinel lines — the caller strips
+        them.)"""
+        try:
+            with open(h.out_path, "r") as f:
+                return f.read()
+        except:
+            return String("")
 
     def write_scratch(self, name: String, content: String) raises -> String:
         """Write `content` to `name` in the scratch dir; return its canonical path.

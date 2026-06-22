@@ -56,6 +56,7 @@ Questions are open-ended but personal, e.g.
 | `docx_text` | `docx_text(file_alias: String) -> String` | extracted text of a Word .docx |
 | `ask_local` | `ask_local(instruction: String, content: String) -> String` | the on-device model. Give it **real content** (a chunk, a page, a row) + an instruction; it returns its answer. This is how you extract / classify / read meaning. |
 | `print_answer` | `print_answer(s: String)` | emit the final answer to the user (local only) |
+| `progress` | `progress(msg: String)` | report a one-line progress update to the user while your program runs (e.g. its scan position); call it at loop boundaries — it's free and never sees data |
 | `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
 | `parse_amount` | `parse_amount(s: String) -> Float64` | parse a money string (`$4,000.00`, `(42.10)`, `-31.00`) to a number — handles `$`/commas/parens. **Use instead of `atof`** when summing; `atof` crashes on the comma. |
 
@@ -83,6 +84,11 @@ Use this shape only when the answer lives *inside* the files:
    ask it to return a **structured, minimal** result (a number, a date, "yes/no").
 4. Combine the structured results in Mojo (sum / filter by date / pick one).
 5. `print_answer(result)`.
+
+When you loop over many chunks/files (a sum, a scan, a max), call `progress("…")`
+at the top of the loop with your position (e.g.
+`progress("scanning " + String(i+1) + "/" + String(len(hits)))`) so the user sees
+live progress instead of a frozen spinner. It's free and never sees data.
 
 ### ask_local must never invent (anti-hallucination)
 `ask_local` reads possibly-noisy extracted text (a PDF table can come through
@@ -112,7 +118,9 @@ from vault import *
 def main() raises:
     var hits = search("travel transportation flights hotels expenses", 40)
     var total = 0.0
-    for c in hits:
+    for i in range(len(hits)):
+        progress("scanning " + String(i + 1) + "/" + String(len(hits)))
+        ref c = hits[i]
         # ask_local reads the real chunk; returns "amount|yes" or "0|no". Use ONLY
         # the text; reply "0|no" if it isn't a travel expense — never invent.
         var verdict = ask_local(
@@ -146,7 +154,9 @@ def main() raises:
     # 2) running min over real transaction dates, M/D folded with the year.
     var have = False
     var oldest = String("")          # sentinel, not None
-    for c in hits:
+    for i in range(len(hits)):
+        progress("scanning " + String(i + 1) + "/" + String(len(hits)))
+        ref c = hits[i]
         var md = ask_local(
             "Use ONLY the text. If it clearly contains a transaction, reply with"
             " just its month/day as M/D (e.g. 4/6). Otherwise reply 'none'. Do not"
