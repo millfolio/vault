@@ -1294,9 +1294,26 @@ public final class Bootstrapper: ObservableObject {
         return appServerLaunchAgentURL
     }
 
+    /// Self-heal the vault FFI shims: the app server runs generated `from vault
+    /// import *` programs that `dlopen` liblancedbmojo.dylib / libzlibmojo.so from
+    /// $CONDA_PREFIX/lib (= the toolchain prefix). A full install copies them
+    /// (installMillfolioShims), but a present-binary-but-missing-shim state (e.g. a
+    /// partial/older install) would otherwise crash search() at runtime with a
+    /// dlopen error. Re-run the (idempotent) shim copy if the marquee shim is
+    /// missing, so `mill start` always leaves them in place.
+    private func ensureVaultShims() {
+        let lance = mojoPrefix.appendingPathComponent("lib/liblancedbmojo.dylib")
+        let bundled = millfolioDir.appendingPathComponent("build/liblancedbmojo.dylib")
+        if !FileManager.default.fileExists(atPath: lance.path)
+            && FileManager.default.fileExists(atPath: bundled.path) {
+            try? installMillfolioShims()
+        }
+    }
+
     /// Start the app server under launchd, wait until :10000 answers, then expose it
     /// on the tailnet + open the browser (one-shot — not part of the daemon).
     public func startAppServer(vaultDir dir: String) throws {
+        ensureVaultShims()   // guard search()'s dlopen before the server runs programs
         let url = try writeAppServerLaunchAgent(vaultDir: dir)
         _ = try? runStatus("/bin/launchctl", ["bootout", "\(guiDomain)/\(Self.appServerLabel)"])
         killStaleOnPort(10000); killStaleOnPort(10001)   // reap any legacy nohup instance
