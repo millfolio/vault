@@ -47,6 +47,20 @@ MOJO="$MOJO" bash "$ROOT/scripts/precompile_pkgs.sh" "$D/pkgs"
 echo "==> building the prebuilt millfolio binary against the .mojopkg set" >&2
 "$MOJO" build "$ROOT/src/millfolio.mojo" -I "$D/pkgs" -o "$D/build/millfolio"
 
+# Relocate the binary's rpath. `mojo build` bakes in the BUILD machine's toolchain
+# lib (e.g. the CI runner's $CONDA_PREFIX/lib = /Users/runner/work/...), which
+# doesn't exist on the user's machine — so the Mojo runtime libs it links via
+# @rpath (libKGENCompilerRTShared.dylib, libMSupportGlobals.dylib, …) fail to load
+# with a dyld error. Unlike privacy_box/engine (built ON-DEVICE → local rpath),
+# millfolio ships PREBUILT (its source isn't bundled), so we must make it
+# relocatable here. The on-device layout is fixed: the binary lands at
+# <root>/bundle/millfolio/millfolio/build/millfolio and the toolchain at
+# <root>/mojo/lib, so a @loader_path-relative rpath (4 dirs up to <root>, then
+# mojo/lib) resolves on any machine. Drop the stale build rpath (avoids dyld warns).
+install_name_tool -delete_rpath "$PREFIX/lib" "$D/build/millfolio" 2>/dev/null || true
+install_name_tool -add_rpath "@loader_path/../../../../mojo/lib" "$D/build/millfolio" 2>/dev/null || true
+codesign --force --sign - "$D/build/millfolio" 2>/dev/null || true
+
 echo "==> bundling FFI shims + deps (relocatable)" >&2
 # The shims millfolio dlopens at runtime + the conda dylibs they link (otool -L,
 # non-system). liblancedbmojo is a self-contained Rust cdylib (system libs only).

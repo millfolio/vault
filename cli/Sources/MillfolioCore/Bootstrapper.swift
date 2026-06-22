@@ -1269,20 +1269,29 @@ public final class Bootstrapper: ObservableObject {
             }
         }
         let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
-        // Timestamp every log line. launchd's StandardOutPath redirect writes the
-        // fd verbatim — no timestamps — so instead run the server through a tiny
-        // perl strftime filter that prefixes each line with a local
-        // "YYYY-MM-DD HH:MM:SS ". This catches BOTH the server's own output and any
-        // inherited subprocess progress (the privacy_box "• …" lines), uniformly,
-        // with no Mojo changes. `2>&1` folds stderr into the same stream; `$|=1`
-        // keeps the filter unbuffered so lines land as they arrive. StandardErrorPath
-        // still captures the wrapper's own failures (e.g. a missing perl).
-        let tsFilter = "/usr/bin/perl -pe 'BEGIN{$|=1} use POSIX qw(strftime);"
-            + " print strftime(\"%Y-%m-%d %H:%M:%S \", localtime)'"
-        let serverCmd = "\"\(appServerBin.path)\" 2>&1 | \(tsFilter) >> \"\(serverLog)\""
+        // Run the server through a millfolio-NAMED wrapper script rather than a bare
+        // `/bin/sh -c …`. Two reasons:
+        //  1. Naming — macOS's "… can run in the background" notification (and the
+        //     Login Items list) names the item after ProgramArguments[0]'s basename.
+        //     A bare interpreter shows the generic "sh"; pointing it at a script named
+        //     `millfolio-appserver` brands it as ours.
+        //  2. Timestamps — launchd's StandardOutPath redirect writes the fd verbatim
+        //     (no timestamps), so the wrapper pipes the server through a perl strftime
+        //     filter that prefixes each line with a local "YYYY-MM-DD HH:MM:SS ". It
+        //     catches BOTH the server's own output and the inherited privacy_box
+        //     progress ("• …") lines, unbuffered ($|=1) so lines land as they arrive.
+        //     StandardErrorPath still captures the wrapper's own failures (missing perl).
+        let wrapper = support.appendingPathComponent("millfolio-appserver")
+        let wrapperBody = """
+        #!/bin/sh
+        # millfolio app server (launchd background item). Timestamps every log line.
+        "\(appServerBin.path)" 2>&1 | /usr/bin/perl -pe 'BEGIN{$|=1} use POSIX qw(strftime); print strftime("%Y-%m-%d %H:%M:%S ", localtime)' >> "\(serverLog)"
+        """
+        try wrapperBody.write(to: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
         let plist: [String: Any] = [
             "Label": Self.appServerLabel,
-            "ProgramArguments": ["/bin/sh", "-c", serverCmd],
+            "ProgramArguments": [wrapper.path],
             "WorkingDirectory": privacy_boxDir.path,   // sandbox/*.sb.template resolve here
             "EnvironmentVariables": env,
             "StandardErrorPath": serverLog,            // wrapper (sh/perl) errors only
