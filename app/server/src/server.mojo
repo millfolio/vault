@@ -521,10 +521,21 @@ def on_connect(mut conn: WsConnection) raises:
             conn.close(WsCloseCode.NORMAL)
             return
 
-        conn.send_text(status("run", "Compiling & running in sandbox", "running"))
+        # Approved — surface the two real phases SEPARATELY so the wait isn't one
+        # opaque "working": first compile the generated Mojo, then run it over the
+        # vault (the read + ask_local loop — the long part). The run is a blocking
+        # sandboxed subprocess, so we can't yet stream per-step progress from inside
+        # it (see TODO: instrument generated programs); the labels at least say what
+        # it's doing and how far along the pipeline it is.
+        conn.send_text(status("run", "Approved — running", "done"))
+        conn.send_text(status("compile", "Compiling the generated program", "running"))
         orch.vault_build(code)
+        conn.send_text(status("compile", "Compiling the generated program", "done"))
+        conn.send_text(status("execute",
+            "Running it locally over your vault — reading your files and asking the on-device model (this can take a bit)…",
+            "running"))
         var reply = orch.vault_run(vault_dir)
-        conn.send_text(status("run", "Compiling & running in sandbox", "done"))
+        conn.send_text(status("execute", "Running it locally over your vault", "done"))
         conn.send_text(message(reply))
     except e:
         conn.send_text(error_event(String(e)))
