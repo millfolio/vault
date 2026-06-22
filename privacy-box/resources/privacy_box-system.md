@@ -55,6 +55,7 @@ Questions are open-ended but personal, e.g.
 | `md_text` | `md_text(file_alias: String) -> String` | a markdown file's text |
 | `docx_text` | `docx_text(file_alias: String) -> String` | extracted text of a Word .docx |
 | `ask_local` | `ask_local(instruction: String, content: String) -> String` | the on-device model. Give it **real content** (a chunk, a page, a row) + an instruction; it returns its answer. This is how you extract / classify / read meaning. |
+| `ask_local_batch` | `ask_local_batch(instruction: String, items: List[String]) -> List[String]` | **like `ask_local` but for MANY snippets at once** — one answer per item, aligned by index (missing → `"none"`). Pass ALL candidate texts; it batches them internally (~10 per call) so it's ~10× fewer engine calls. **Strongly prefer this in sum/scan/max loops** (each `ask_local` is slow). |
 | `print_answer` | `print_answer(s: String)` | emit the final answer to the user (local only) |
 | `progress` | `progress(msg: String)` | report a one-line progress update to the user while your program runs (e.g. its scan position); call it at loop boundaries — it's free and never sees data |
 | `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
@@ -90,6 +91,25 @@ at the top of the loop with your position (e.g.
 `progress("scanning " + String(i+1) + "/" + String(len(hits)))`) so the user sees
 live progress instead of a frozen spinner. It's free and never sees data.
 
+### Aggregations ("how much total…", "biggest…", "how many…") — be FAST
+Each `ask_local` is a slow on-device model call; a per-chunk loop over 40 chunks
+is ~40 calls and takes nearly a minute. For **sum / max / count / average / group**
+questions, follow this shape — it cuts dozens of calls to a few:
+
+1. **`search` a generous `k`** (e.g. 40–60) so you don't miss data.
+2. **Pre-filter in plain Mojo, for free** — drop chunks that clearly can't match
+   before any model call. For a money question keep only chunks that contain a `.`
+   (an amount) and, for a date-scoped one, the year/month token; e.g.
+   `if c.text.find(".") != -1 and c.text.find("2026") != -1:`.
+3. **Extract with `ask_local_batch`, NOT per-chunk `ask_local`** — collect the
+   surviving chunk texts into a `List[String]` and call `ask_local_batch` ONCE; it
+   batches internally (~10/call) and returns one answer per item. Ask for a
+   **minimal** per-item answer (just the amount, or `none`).
+4. **Aggregate in Mojo** over the returned answers (`parse_amount` + `+`, or a
+   running `max`, or a count). The arithmetic is free — never ask the model to sum.
+
+This keeps the engine-call count (shown to the user) at a handful instead of dozens.
+
 ### ask_local must never invent (anti-hallucination)
 `ask_local` reads possibly-noisy extracted text (a PDF table can come through
 jumbled). Every extraction instruction you give it MUST say, in these words:
@@ -112,23 +132,25 @@ def main() raises:
     print_answer("There are " + String(len(files)) + " documents in your vault.")
 ```
 
-**"How much did I spend on travel last year?"**
+**"How much did I spend on travel last year?"** (the FAST aggregation shape)
 ```mojo
 from vault import *
 def main() raises:
     var hits = search("travel transportation flights hotels expenses", 40)
-    var total = 0.0
+    # 1) cheap Mojo pre-filter (free): keep only chunks that could hold a 2025 amount.
+    var cand = List[String]()
     for i in range(len(hits)):
-        progress("scanning " + String(i + 1) + "/" + String(len(hits)))
         ref c = hits[i]
-        # ask_local reads the real chunk; returns "amount|yes" or "0|no". Use ONLY
-        # the text; reply "0|no" if it isn't a travel expense — never invent.
-        var verdict = ask_local(
-            "Use ONLY the text. If it is a 2025 travel expense, reply '<amount>|yes'"
-            " (amount exactly as written). Otherwise reply '0|no'. Do not invent.", c.text)
-        var parts = verdict.split("|")
-        if len(parts) == 2 and String(parts[1]) == "yes":
-            total += parse_amount(String(parts[0]))   # parse_amount, NOT atof ('$1,234.00')
+        if c.text.find(".") != -1 and c.text.find("2025") != -1:
+            cand.append(c.text)
+    # 2) extract ALL of them in one call — ask_local_batch batches internally (~10/call).
+    var ans = ask_local_batch(
+        "Use ONLY the text. If it is a 2025 travel expense, reply with just the amount"
+        " (e.g. 1234.56). Otherwise reply 'none'. Do not guess or invent.", cand)
+    # 3) aggregate in Mojo — parse_amount('none')==0, so just add.
+    var total = 0.0
+    for a in range(len(ans)):
+        total += parse_amount(String(ans[a]))
     print_answer("You spent about $" + String(total) + " on travel in 2025.")
 ```
 

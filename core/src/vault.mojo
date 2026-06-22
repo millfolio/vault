@@ -215,6 +215,109 @@ def ask_local(instruction: String, content: String) raises -> String:
     return String("")
 
 
+def _lead_int(s: String) -> Int:
+    """Leading integer of `s` (after optional spaces); -1 if none — for parsing the
+    `<n>:` prefix of a batched answer line."""
+    var b = s.as_bytes()
+    var i = 0
+    while i < len(b) and Int(b[i]) == 32:
+        i += 1
+    var n = 0
+    var any = False
+    while i < len(b) and Int(b[i]) >= 48 and Int(b[i]) <= 57:
+        n = n * 10 + (Int(b[i]) - 48)
+        any = True
+        i += 1
+    return n if any else -1
+
+
+def _batch_call(instruction: String, items: List[String]) raises -> List[String]:
+    """One on-device model call for a SMALL group (≤ _BATCH) of snippets — returns
+    one answer per item, aligned by index. Internal; callers use `ask_local_batch`."""
+    var n = len(items)
+    var out = List[String]()
+    var k = 0
+    while k < n:
+        out.append(String("none"))
+        k += 1
+    if n == 0:
+        return out^
+    # One numbered prompt: the model answers each snippet on its own `<n>: <answer>` line.
+    var prompt = instruction
+    prompt += "\n\nApply the instruction to EACH numbered snippet below. Reply with"
+    prompt += " EXACTLY one line per snippet, formatted `<n>: <answer>` (use 'none'"
+    prompt += " when it does not apply). Output nothing else.\n\n"
+    for i in range(n):
+        prompt += String(i + 1) + ": " + _replace_all(items[i], "\n", " ") + "\n"
+
+    var t0 = perf_counter_ns()
+    var body = String('{"model":"') + _local_model() + '","messages":[{"role":"user","content":"'
+    body += _json_escape(prompt) + '"}]}'
+    var reply = String("")
+    var attempt = 0
+    while attempt < 2:
+        try:
+            var req = Request(
+                method="POST",
+                url=_local_url() + "/chat/completions",
+                body=List[UInt8](body.as_bytes()),
+            )
+            req.headers.set("content-type", "application/json")
+            var client = HttpClient()
+            var resp = client.send(req)
+            reply = resp.json()["choices"][0]["message"]["content"].string_value()
+            break
+        except:
+            attempt += 1
+    _stat("ask_local", Float64(perf_counter_ns() - t0) / 1.0e6)
+
+    # Parse "<n>: <answer>" lines into the aligned result (split on the FIRST ':',
+    # rejoining the rest so an answer that contains ':' survives).
+    var lines = reply.split("\n")
+    for li in range(len(lines)):
+        var ln = String(lines[li])
+        var idx = _lead_int(ln)
+        if idx < 1 or idx > n:
+            continue
+        var parts = ln.split(":")
+        if len(parts) < 2:
+            continue
+        var ans = String("")
+        for pi in range(1, len(parts)):
+            if pi > 1:
+                ans += ":"
+            ans += String(parts[pi])
+        out[idx - 1] = String(ans.strip())
+    return out^
+
+
+comptime _BATCH = 10   # snippets per on-device model call
+
+
+def ask_local_batch(instruction: String, items: List[String]) raises -> List[String]:
+    """Apply `instruction` to MANY snippets and return one answer per item, aligned by
+    index — but in just ⌈len(items)/10⌉ on-device model calls instead of one per item
+    (each `ask_local` is slow). Pass ALL your candidate texts; this batches them
+    internally (~10 per call), reports live progress, and concatenates the answers.
+    A missing/garbled item is "none". This is the FAST way to do sum / scan / max:
+        var ans = ask_local_batch("... reply the amount or none ...", texts)
+        for a in range(len(ans)): total += parse_amount(String(ans[a]))"""
+    var out = List[String]()
+    var i = 0
+    while i < len(items):
+        var group = List[String]()
+        var j = i
+        while j < len(items) and j < i + _BATCH:
+            group.append(items[j].copy())
+            j += 1
+        progress("reading " + String(j) + "/" + String(len(items)))
+        var res = _batch_call(instruction, group)
+        for r in range(len(res)):
+            out.append(res[r].copy())
+        i = j
+    return out^
+
+
 def print_answer(s: String):
     """Emit the final answer to the user (local only)."""
     print(s)
