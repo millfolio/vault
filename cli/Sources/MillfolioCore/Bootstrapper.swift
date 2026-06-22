@@ -1006,6 +1006,57 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
+    /// Prime privacy_box's Mojo build cache so the FIRST vault query is warm.
+    ///
+    /// Every vault question compiles a ~20-line `from vault import *` program in
+    /// the sandbox (privacy_box's CONDA_PREFIX). Cold, that recompiles the whole
+    /// tool surface + its deps; warm (cache populated), it's a fraction of a
+    /// second. Without this, the first query pays the full cold cost. We compile a
+    /// throwaway program with the EXACT include set the orchestrator uses
+    /// (vaultcfg.vault_include_paths → millfolio/src + the vendored siblings),
+    /// under privacy_box's toolchain env, which fills privacy_box-mojo's
+    /// .mojo_cache. Best-effort + idempotent: a failure here just means the first
+    /// real query warms it instead (no install failure).
+    public func primeVaultCompile() {
+        let fm = FileManager.default
+        guard isPrivacyBoxInstalled, isMillfolioInstalled,
+              let python = try? findPython() else { return }
+        let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
+        // The orchestrator's include set (mirror of vaultcfg.vault_include_paths):
+        // millfolio/src + flare/json/lancedb/pdftotext/zlib/csv/docx as siblings.
+        let sib = millfolioDir.deletingLastPathComponent()  // …/millfolio (the bundle root)
+        let inc = [
+            "-I", millfolioDir.appendingPathComponent("src").path,
+            "-I", sib.appendingPathComponent("flare").path,
+            "-I", sib.appendingPathComponent("json").path,
+            "-I", sib.appendingPathComponent("lancedb.mojo/src").path,
+            "-I", sib.appendingPathComponent("pdftotext.mojo/src").path,
+            "-I", sib.appendingPathComponent("zlib.mojo/src").path,
+            "-I", sib.appendingPathComponent("csv.mojo/src").path,
+            "-I", sib.appendingPathComponent("docx.mojo/src").path,
+        ]
+        let tmp = fm.temporaryDirectory.appendingPathComponent("millfolio-prime-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+        do {
+            try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+            let gen = tmp.appendingPathComponent("gen.mojo")
+            try """
+            from vault import *
+            def main() raises:
+                print_answer("primed " + String(len(manifest())))
+            """.write(to: gen, atomically: true, encoding: .utf8)
+            set("Warming the vault compile cache…")
+            // Same toolchain env the sandboxed per-query compile uses. Not
+            // sandboxed here (trusted, our own stub), but it fills the SAME
+            // privacy_box-mojo/.mojo_cache the sandboxed compile reads.
+            try run(mojo, ["build", gen.path] + inc + ["-o", tmp.appendingPathComponent("gen").path],
+                    cwd: privacy_boxDir, env: privacy_boxMojoEnv(python: python))
+        } catch {
+            // Best-effort: log and move on — the first real query will warm it.
+            set("Vault compile-cache prime skipped (\(humanError(error)))")
+        }
+    }
+
     /// A fresh per-ask transcript path: /tmp/millfolio/sessions/<timestamp>-<slug>.log.
     public func newSessionLog(for question: String) -> URL {
         let dir = URL(fileURLWithPath: "/tmp/millfolio/sessions", isDirectory: true)
@@ -1158,6 +1209,7 @@ public final class Bootstrapper: ObservableObject {
         try await installMillfolioEngine()    // the vault tools + indexer
         try await installAppServer()        // the millfolio web app (UI on :10000, WS on :10001)
         linkVaultShims()                    // millfolio FFI shims → privacy_box-mojo/lib (vault-run dlopen)
+        primeVaultCompile()                 // warm privacy_box-mojo's .mojo_cache so query #1 is fast
         ensureVaultDir()                    // leave the default vault dir ready
     }
 
@@ -1542,6 +1594,7 @@ public final class Bootstrapper: ObservableObject {
         set("Refreshing millfolio, the vault engine…")
         try await installMillfolioEngine()
         linkVaultShims()   // millfolio FFI shims → the shared toolchain lib (vault-run dlopen)
+        primeVaultCompile()  // re-warm the vault compile cache (the nightly may have bumped)
 
         // The streaming app server (built on-device against privacy_box). A real build
         // error must fail the update, not be swallowed (else `mill update` falsely

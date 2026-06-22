@@ -603,17 +603,53 @@ struct Sandbox(Movable):
 
     def _render_compile_profile(self, scratch_c: String, prefix: String) raises -> String:
         """Render compile.sb.template (sibling of the run template) with canonical
-        paths; write to scratch; return its path."""
+        paths; write to scratch; return its path.
+
+        EVERY substituted path is canonicalized (realpath) — Seatbelt matches the
+        canonical path, NOT the one we were handed. This matters for
+        @RUNTIME_PREFIX@: the Mojo build cache lives at
+        $RUNTIME_PREFIX/share/max/cache/.mojo_cache, and the compiler writes to it
+        via the cache's REAL path. If CONDA_PREFIX carries a symlinked component
+        (e.g. the installed toolchain under ~/Library/Application Support, or any
+        symlinked home), a verbatim @RUNTIME_PREFIX@ allow rule would NOT match
+        that real path, so the cache write is silently DENIED — and then EVERY
+        per-query compile is cold (the ~20-line `from vault import *` program +
+        its deps recompile from scratch each time). Canonicalizing here makes the
+        write rule match the real cache path, so the cache PERSISTS across queries
+        and warm compiles drop from tens of seconds to a fraction of a second."""
         var tmpl_path = _replace_all(
             self.template_path, String("privacy_box.sb.template"), String("compile.sb.template"))
         var tmpl = _read(tmpl_path)
         var home_c = _canonical(getenv("HOME", "/"))
         var tmp_c = _canonical(getenv("TMPDIR", "/tmp"))
-        var runtime = prefix if prefix != "" else String("/nonexistent-runtime")
+        # Canonicalize the runtime prefix too (it exists whenever CONDA_PREFIX is
+        # set). Fall back to a non-existent sentinel when unset/unresolvable so the
+        # rule is inert rather than accidentally broad.
+        var runtime = String("/nonexistent-runtime")
+        if prefix != "":
+            try:
+                runtime = _canonical(prefix)
+            except:
+                runtime = prefix  # can't resolve (gone?) — keep verbatim, rule is harmless
+
+        # The Mojo build cache: $MODULAR_HOME/cache/.mojo_cache (MODULAR_HOME is
+        # set to $prefix/share/max by the launcher). The cache dir itself may not
+        # exist before the FIRST compile, so canonicalize the deepest existing
+        # ancestor (MODULAR_HOME) and append the rest — a subpath rule still covers
+        # the not-yet-created leaf. Falls back to the runtime prefix's share/max.
+        var modular_home = getenv("MODULAR_HOME", "")
+        var cache_dir = runtime + "/share/max/cache/.mojo_cache"
+        if modular_home != "":
+            try:
+                cache_dir = _canonical(modular_home) + "/cache/.mojo_cache"
+            except:
+                cache_dir = modular_home + "/cache/.mojo_cache"
+
         var r = _replace_all(tmpl, String("@SCRATCH_DIR@"), scratch_c)
         r = _replace_all(r, String("@HOME@"), home_c)
         r = _replace_all(r, String("@TMPDIR@"), tmp_c)
         r = _replace_all(r, String("@RUNTIME_PREFIX@"), runtime)
+        r = _replace_all(r, String("@MOJO_CACHE_DIR@"), cache_dir)
         var path = scratch_c + "/compile.sb"
         _write(path, r)
         return path
