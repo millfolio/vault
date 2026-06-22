@@ -9,7 +9,7 @@ channels = [
 platforms = ["osx-arm64"]
 
 [dependencies]
-mojo = "==1.0.0b3.dev2026061206"
+mojo = "==1.0.0b3.dev2026062206"
 # FFI runtime deps shared by both binaries (flare TLS/HTTP, zlib FlateDecode for
 # PDFs, brotli for Content-Encoding). The shims are built into $CONDA_PREFIX/lib
 # by the `ffi` task below.
