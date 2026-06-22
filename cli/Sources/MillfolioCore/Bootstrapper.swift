@@ -1229,14 +1229,15 @@ public final class Bootstrapper: ObservableObject {
         //    over it (a clean machine has no vault dir yet).
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true)
-        // 1. Ensure the combined inference server is up (idempotent).
-        if isServerInstalled && weightsPresent {
-            refreshServerRunning()
-            if !serverRunning { try startServer() }
-        }
+        // 1. Ensure the combined inference server is up AND READY (waits for :8000
+        //    to answer, so the app/UI never races the weight load).
+        try ensureInferenceServer()
         // Reap any stale servers holding :10000/:10001 (a prior `start`) so the
-        // fresh ones can bind cleanly.
+        // fresh ones can bind cleanly — pkill by name, then by port for anything it
+        // missed (avoids the AddressInUse a rapid restart used to hit).
         _ = stopAppServer()
+        killStaleOnPort(10000)
+        killStaleOnPort(10001)
         // 2. Build the millfolio app server if an older install predates it (self-heal
         //    on upgrade), then start it: the launcher spawns both servers detached in
         //    the background — static UI on :10000, streaming WS on :10001 — opens the
@@ -1251,11 +1252,19 @@ public final class Bootstrapper: ObservableObject {
     /// `ask`/the vault loop blocks on a dead model endpoint with no clue why.
     public func ensureInferenceServer() throws {
         guard isServerInstalled && weightsPresent else { return }
-        refreshServerRunning()
-        if !serverRunning {
-            set("Starting the inference server (loading model weights can take a bit)…")
-            try startServer()
+        // Probe the PORT, not just launchd state — a "loaded" agent can be dead or
+        // still loading weights. If it's already serving, we're done.
+        if inferenceListening() { serverRunning = true; return }
+        set("Starting the inference server (loading model weights can take a bit)…")
+        killStaleOnPort(8000)        // reap a half-dead instance holding the port
+        try startServer()            // bootout + bootstrap (RunAtLoad)
+        // WAIT until it actually answers, so callers (mill start / ask / index)
+        // never race the ~10s weight load and hit ConnectionRefused.
+        if !waitForInference(timeout: 90) {
+            throw BootstrapError.step("start server",
+                "the inference server didn't become ready on :8000 within 90s — see \(logFileURL.path)")
         }
+        serverRunning = true
     }
 
     /// Stop the background app servers (millfolio-server + millfolio-ws). Returns true
@@ -1264,6 +1273,43 @@ public final class Bootstrapper: ObservableObject {
         let ws = (try? runStatus("/usr/bin/pkill", ["-f", "build/millfolio-ws"])) == 0
         let srv = (try? runStatus("/usr/bin/pkill", ["-f", "build/millfolio-server"])) == 0
         return ws || srv
+    }
+
+    // ── server readiness / port hygiene ──────────────────────────────────────
+    /// A REAL listening check: does the inference server answer on :8000? (A
+    /// launchd-"loaded" agent can still be mid-load or dead, so we probe the port,
+    /// not just launchctl state.) Returns the reported build version, or nil if it
+    /// isn't answering yet.
+    public func inferenceVersion() -> String? {
+        guard let out = try? run("/bin/bash", ["-c",
+            "curl -s --max-time 2 http://127.0.0.1:8000/v1/version 2>/dev/null"]),
+            out.contains("\"version\"") else { return nil }
+        // Pull the version string out of {"engine":"millfolio","version":"…"}.
+        guard let r = out.range(of: "\"version\"") ,
+              let q1 = out.range(of: "\"", range: r.upperBound..<out.endIndex),
+              let q2 = out.range(of: "\"", range: q1.upperBound..<out.endIndex)
+        else { return "" }
+        return String(out[q1.upperBound..<q2.lowerBound])
+    }
+
+    public func inferenceListening() -> Bool { inferenceVersion() != nil }
+
+    /// Poll until the inference server answers on :8000, or `timeout` s elapse.
+    @discardableResult
+    public func waitForInference(timeout: Double = 60) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if inferenceListening() { return true }
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+        return inferenceListening()
+    }
+
+    /// Reap any process LISTENING on `port` that launchd/pkill missed, so a fresh
+    /// server binds without AddressInUse. Best-effort; never throws.
+    public func killStaleOnPort(_ port: Int) {
+        _ = try? runStatus("/bin/bash", ["-c",
+            "p=$(lsof -ti tcp:\(port) -sTCP:LISTEN 2>/dev/null); [ -n \"$p\" ] && kill $p 2>/dev/null; true"])
     }
 
     /// Menu-app entry point: open the vault chat (fire-and-forget).

@@ -108,6 +108,9 @@ struct Stop: AsyncParsableCommand {
         print(wasRunning ? "✓ inference server stopped" : "• inference server was not running")
         let stoppedApp = boot.stopAppServer()
         print(stoppedApp ? "✓ millfolio app stopped" : "• millfolio app was not running")
+        // Belt-and-suspenders: reap anything still LISTENING on our ports that
+        // bootout/pkill missed, so the next `start` never hits AddressInUse.
+        for port in [8000, 10000, 10001] { boot.killStaleOnPort(port) }
     }
 }
 
@@ -122,6 +125,13 @@ struct Status: AsyncParsableCommand {
         print("privacy_box:   \(mark(boot.isPrivacyBoxInstalled))")
         print("millfolio:    \(mark(boot.isMillfolioInstalled))")
         print("app web server: \(mark(boot.isAppServerInstalled))")
+        // Live health (probe the port, not just "installed"): is the inference
+        // server actually answering on :8000, and at what build version?
+        if let v = boot.inferenceVersion() {
+            print("inference:  ✓ running on :8000" + (v.isEmpty ? "" : " (engine v\(v))"))
+        } else {
+            print("inference:  ✗ not responding on :8000 (run `mill start`)")
+        }
     }
 }
 
