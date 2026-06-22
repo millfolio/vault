@@ -1,52 +1,51 @@
 #!/usr/bin/env bash
 #
-# Build millfolio.zip — the millfolio source bundle the Millfolio app downloads, then
-# `mojo build`s on-device against a separately-fetched Mojo compiler (see
-# millfolio/app Bootstrapper). Mirrors privacy_box/scripts/package_privacy_box.sh.
+# Build millfolio.zip — the PRECOMPILED millfolio bundle the Millfolio app downloads.
+# For commercial IP protection this bundle ships NO `.mojo` source for the vault
+# tool surface or its Mojo libs: only precompiled `.mojopkg`s, the prebuilt
+# `millfolio` binary, and the prebuilt FFI shims (`.so`/`.dylib`).
 #
-# millfolio links the whole toolbox, so the bundle unzips to six siblings:
+# The bundle unzips to a single self-contained `millfolio/` dir:
 #
-#   millfolio/         src + pixi.toml + build/{libzlibmojo, liblancedbmojo,
-#                    libflare_{tls,zlib,brotli,fs} + their OpenSSL/zlib/brotli
-#                    deps, all rpath-fixed to @loader_path}
-#   flare/flare/     vendored flare package (HTTP client + TLS)
-#   json/json/       vendored json package (response parsing)
-#   lancedb.mojo/src vendored LanceDB binding (the vector store)
-#   pdftotext.mojo/src + zlib.mojo/src   PDF text extraction (+ FlateDecode)
+#   millfolio/
+#     pkgs/      vault.mojopkg + flare/json/lancedb/pdf/docx/csv/zlib .mojopkg
+#                (precompiled by scripts/precompile_pkgs.sh — the ONLY way the
+#                 vault surface + libs reach the install; no source)
+#     build/     millfolio                              (prebuilt vault CLI binary)
+#                libzlibmojo.so / liblancedbmojo.dylib / libflare_{tls,zlib,brotli,fs}.so
+#                + their OpenSSL/zlib/brotli dep dylibs (rpath-fixed to @loader_path)
 #
-# so the app can run:
-#   (cd millfolio && mojo build src/millfolio.mojo \
-#      -I ../flare -I ../json -I ../lancedb.mojo/src \
-#      -I ../pdftotext.mojo/src -I ../zlib.mojo/src -o build/millfolio)
+# The app then:
+#   - places build/millfolio directly (no on-device source build), and
+#   - copies build/*.{so,dylib} into the toolchain's lib/ so the FFI shims resolve
+#     via $CONDA_PREFIX/lib at runtime (Bootstrapper.installMillfolioShims), and
+#   - compiles generated `from vault import *` programs with `-I millfolio/pkgs`.
 #
-# The app then copies build/*.{so,dylib} into the toolchain's lib/ so the FFI
-# shims resolve via $CONDA_PREFIX/lib at runtime (Bootstrapper.installMillfolioShims).
-# We ship the prebuilt shims (building them needs clang + cargo + OpenSSL/zlib)
-# made relocatable via @loader_path. Run via pixi (needs CONDA_PREFIX) AFTER
-# `pixi run ffi`. Usage: scripts/package_millfolio.sh [out.zip]
+# Building the shims needs clang + cargo + OpenSSL/zlib, so we ship them prebuilt
+# + made relocatable via @loader_path. The `.mojopkg`s are tied to the exact
+# compiler nightly — CI rebuilds them on every nightly bump (never hand-ship a
+# stale set). Run via pixi (needs CONDA_PREFIX) AFTER `pixi run ffi`.
+# Usage: scripts/package_millfolio.sh [out.zip]
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FLARE="${FLARE:-$ROOT/../flare}"
-JSON="${JSON:-$ROOT/../json}"
-LANCEDB="${LANCEDB:-$ROOT/../lancedb.mojo}"
-PDFTOTEXT="${PDFTOTEXT:-$ROOT/../pdftotext.mojo}"
-ZLIB="${ZLIB:-$ROOT/../zlib.mojo}"
-CSV="${CSV:-$ROOT/../csv.mojo}"
-DOCX="${DOCX:-$ROOT/../docx.mojo}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"             # vault/core
 OUT="${1:-$ROOT/millfolio.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac   # zip runs from a temp dir — need absolute
 PREFIX="${CONDA_PREFIX:?run via pixi — need CONDA_PREFIX for the FFI shims + their deps}"
 [[ -f "$PREFIX/lib/liblancedbmojo.dylib" ]] || { echo "error: FFI shims missing — run 'pixi run ffi' first" >&2; exit 1; }
 
+MOJO="${MOJO:-mojo}"
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 D="$STAGE/millfolio"
+mkdir -p "$D/build" "$D/pkgs"
 
-echo "==> staging millfolio source" >&2
-mkdir -p "$D/build"
-cp -R "$ROOT/src" "$D/src"
-cp "$ROOT/../pixi.toml" "$D/pixi.toml"
-[[ -f "$ROOT/../pixi.lock" ]] && cp "$ROOT/../pixi.lock" "$D/pixi.lock"
+echo "==> precompiling the vault tool surface + libs into pkgs/" >&2
+# scripts/precompile_pkgs.sh inherits the lib path overrides (FLARE/JSON/…) that
+# package_bundle.sh exports; standalone it defaults to the umbrella sibling layout.
+MOJO="$MOJO" bash "$ROOT/scripts/precompile_pkgs.sh" "$D/pkgs"
+
+echo "==> building the prebuilt millfolio binary against the .mojopkg set" >&2
+"$MOJO" build "$ROOT/src/millfolio.mojo" -I "$D/pkgs" -o "$D/build/millfolio"
 
 echo "==> bundling FFI shims + deps (relocatable)" >&2
 # The shims millfolio dlopens at runtime + the conda dylibs they link (otool -L,
@@ -73,18 +72,8 @@ for f in "$D"/build/*.so "$D"/build/*.dylib; do
     codesign --force --sign - "$f" 2>/dev/null || true
 done
 
-echo "==> staging flare + json + lancedb.mojo + pdftotext.mojo + zlib.mojo + csv.mojo + docx.mojo" >&2
-mkdir -p "$STAGE/flare" "$STAGE/json" "$STAGE/lancedb.mojo" "$STAGE/pdftotext.mojo" "$STAGE/zlib.mojo" "$STAGE/csv.mojo" "$STAGE/docx.mojo"
-cp -R "$FLARE/flare" "$STAGE/flare/flare"
-cp -R "$JSON/json" "$STAGE/json/json"
-cp -R "$LANCEDB/src" "$STAGE/lancedb.mojo/src"
-cp -R "$PDFTOTEXT/src" "$STAGE/pdftotext.mojo/src"
-cp -R "$ZLIB/src" "$STAGE/zlib.mojo/src"
-cp -R "$CSV/src" "$STAGE/csv.mojo/src"
-cp -R "$DOCX/src" "$STAGE/docx.mojo/src"
-
 echo "==> zipping -> $OUT" >&2
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr -X "$OUT" millfolio flare json lancedb.mojo pdftotext.mojo zlib.mojo csv.mojo docx.mojo )
-echo "==> done" >&2
+( cd "$STAGE" && zip -qr -X "$OUT" millfolio )
+echo "==> done — bundle contains ONLY .mojopkg + prebuilt binary + FFI shims (no .mojo)" >&2
 ls -lh "$OUT" >&2

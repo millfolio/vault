@@ -8,10 +8,10 @@ machinery (indexer, vault tools, the privacy_box-driven ask loop) is wired in.
 from std.sys import argv
 from std.os import getenv
 
-from manifest import build_manifest, FileInfo
-from readers import csv_rows, md_text, pdf_text
-from embed import embed
-from index import build_index, search, Chunk, vault_files
+from vault.manifest import build_manifest, FileInfo
+from vault.readers import csv_rows, md_text, pdf_text
+from vault.embed import embed
+from vault.index import build_index, search, Chunk, vault_files
 
 
 def _print_manifest(data_dir: String) raises:

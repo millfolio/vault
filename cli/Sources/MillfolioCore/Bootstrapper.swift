@@ -100,10 +100,12 @@ public final class Bootstrapper: ObservableObject {
     public var isPrivacyBoxInstalled: Bool { FileManager.default.isExecutableFile(atPath: privacy_boxBin.path) }
 
     // ── millfolio (personal data vault) ───────────────────────────────────────────
-    // millfolio is a one-shot vault CLI built on the SAME Mojo nightly as privacy_box.
-    // Its bundle vendors the toolbox (flare/json + the LanceDB binding + pdftotext/
-    // zlib readers) + prebuilt FFI shims, so the on-device build is
-    // `mojo build src/millfolio.mojo -I ../flare -I … ` then installMillfolioShims().
+    // millfolio is a one-shot vault CLI shipped PRECOMPILED (commercial IP
+    // protection — no `.mojo` source on-device). Its bundle carries a prebuilt
+    // build/millfolio binary, pkgs/*.mojopkg (the vault tool surface + its libs,
+    // precompiled against the SAME Mojo nightly as privacy_box), and the prebuilt
+    // FFI shims. Install just places the binary + installMillfolioShims(); the
+    // generated `from vault import *` programs compile against `-I pkgs`.
     private var millfolioMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.privacy_boxMojoVersion)-release.conda")!
     }
@@ -915,11 +917,13 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// Download millfolio's Mojo toolchain + source bundle and build it. Same nightly
-    /// as privacy_box; the bundle vendors flare/json + the LanceDB binding + pdftotext/
-    /// zlib + prebuilt FFI shims, so the build uses `-I` includes + installs shims.
+    /// Download millfolio's Mojo toolchain + PRECOMPILED bundle and place it. Same
+    /// nightly as privacy_box; the bundle ships a prebuilt binary + pkgs/*.mojopkg
+    /// (the vault surface + libs) + prebuilt FFI shims — no source, no on-device
+    /// build. The toolchain is still needed to compile the per-query generated
+    /// programs against `-I pkgs`, and to install the shims into its lib/.
     public func installMillfolioEngine() async throws {
-        // Idempotent: skip the whole download+build if the binary is already there.
+        // Idempotent: skip the whole download if the binary is already there.
         if isMillfolioInstalled
             && !mojoToolchainStale(millfolioMojoPrefix, Self.privacy_boxMojoVersion) {
             set("millfolio already installed — skipping")
@@ -945,23 +949,23 @@ public final class Bootstrapper: ObservableObject {
         }
         try relocateMojoPrefix(millfolioMojoPrefix)
 
-        // 2. millfolio source bundle (just source — no FFI/sibling deps yet).
+        // 2. millfolio bundle — PRECOMPILED, no source. Ships pkgs/*.mojopkg (the
+        //    vault tool surface + its libs) + a prebuilt build/millfolio binary +
+        //    the FFI shims. Commercial IP protection: no `.mojo` for the vault
+        //    surface or its libs reaches the device, and there is no on-device
+        //    source build.
         try await ensureBundle()
-        guard fm.fileExists(atPath: millfolioDir.appendingPathComponent("src/millfolio.mojo").path) else {
-            throw BootstrapError.step("unpack", "millfolio zip missing millfolio/src/millfolio.mojo")
+        guard fm.fileExists(atPath: millfolioBin.path) else {
+            throw BootstrapError.step("unpack", "millfolio zip missing prebuilt millfolio/build/millfolio")
+        }
+        guard fm.fileExists(atPath: millfolioDir.appendingPathComponent("pkgs/vault.mojopkg").path) else {
+            throw BootstrapError.step("unpack", "millfolio zip missing precompiled millfolio/pkgs/vault.mojopkg")
         }
 
-        // 3. Build millfolio against its vendored siblings (flare/json + the LanceDB
-        //    binding + pdftotext/zlib/docx readers), all bundled by package_millfolio.sh.
-        let python = try findPython()
-        set("Building millfolio (first run, ~1 min)…")
-        let mojo = millfolioMojoPrefix.appendingPathComponent("bin/mojo").path
-        try run(mojo, ["build", "src/millfolio.mojo",
-                       "-I", "../flare", "-I", "../json", "-I", "../lancedb.mojo/src",
-                       "-I", "../pdftotext.mojo/src", "-I", "../zlib.mojo/src",
-                       "-I", "../csv.mojo/src", "-I", "../docx.mojo/src",
-                       "-o", "build/millfolio"],
-                cwd: millfolioDir, env: millfolioMojoEnv(python: python))
+        // 3. The binary is already built (shipped in build/millfolio) — nothing to
+        //    compile on-device. Just ensure it's executable.
+        set("Installing millfolio…")
+        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: millfolioBin.path)
 
         // 4. Put the bundle's FFI shims (libzlibmojo / liblancedbmojo / libflare_*
         //    + their dylib deps) under the toolchain's lib/, where each binding's
@@ -1023,17 +1027,10 @@ public final class Bootstrapper: ObservableObject {
               let python = try? findPython() else { return }
         let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
         // The orchestrator's include set (mirror of vaultcfg.vault_include_paths):
-        // millfolio/src + flare/json/lancedb/pdftotext/zlib/csv/docx as siblings.
-        let sib = millfolioDir.deletingLastPathComponent()  // …/millfolio (the bundle root)
+        // the single millfolio/pkgs dir of precompiled `.mojopkg`s (vault + its
+        // libs). No source on the include path.
         let inc = [
-            "-I", millfolioDir.appendingPathComponent("src").path,
-            "-I", sib.appendingPathComponent("flare").path,
-            "-I", sib.appendingPathComponent("json").path,
-            "-I", sib.appendingPathComponent("lancedb.mojo/src").path,
-            "-I", sib.appendingPathComponent("pdftotext.mojo/src").path,
-            "-I", sib.appendingPathComponent("zlib.mojo/src").path,
-            "-I", sib.appendingPathComponent("csv.mojo/src").path,
-            "-I", sib.appendingPathComponent("docx.mojo/src").path,
+            "-I", millfolioDir.appendingPathComponent("pkgs").path,
         ]
         let tmp = fm.temporaryDirectory.appendingPathComponent("millfolio-prime-\(UUID().uuidString)", isDirectory: true)
         defer { try? fm.removeItem(at: tmp) }

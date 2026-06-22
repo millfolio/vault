@@ -661,9 +661,10 @@ struct Sandbox(Movable):
         remote model carry only aliased names (col_0…), never real data.
 
         `include_paths` are `mojo build`'s `-I` search dirs. For the VAULT path
-        these are the millfolio `src` dir + its transitive deps (flare/json/lancedb/
-        pdftotext/zlib) so the generated `from vault import *` + everything it
-        pulls resolves. Empty for the CSV path (no imports beyond stdlib).
+        this is the single millfolio `pkgs` dir of precompiled `.mojopkg`s (vault +
+        its transitive deps flare/json/lancedb/pdf/docx/csv/zlib) so the generated
+        `from vault import *` + everything it pulls resolves against compiled
+        packages — no source. Empty for the CSV path (no imports beyond stdlib).
 
         The compile runs UNDER a network-denied sandbox (sandbox/compile.sb.template):
         Mojo `comptime` executes at build time, so this contains it — no network

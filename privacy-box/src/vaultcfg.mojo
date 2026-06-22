@@ -5,8 +5,9 @@ and runs it. To do that privacy_box needs to know, all relative to a configured
 millfolio checkout (or the sibling layout):
 
   - the millfolio `build/millfolio` binary    (to print the aliased manifest)
-  - the `-I` include set for `mojo build` (millfolio/src + flare/json/lancedb/
-    pdftotext/zlib so the generated program + its transitive deps resolve)
+  - the `-I` include set for `mojo build` (the single `<millfolio>/pkgs` dir of
+    precompiled `.mojopkg`s — vault + flare/json/lancedb/pdf/docx/csv/zlib — so
+    the generated program + its transitive deps resolve with NO source)
   - the LanceDB index dir                 (~/.config/millfolio — read-allowed in
     the vault run sandbox)
 
@@ -49,31 +50,23 @@ def millfolio_bin() raises -> String:
 
 
 def vault_include_paths() raises -> List[String]:
-    """The `-I` dirs for compiling a `from vault import *` program. Mirrors
-    millfolio/pixi.toml's build line: millfolio/src + flare + json + lancedb.mojo/src
-    + pdftotext.mojo/src + zlib.mojo/src.
+    """The `-I` dirs for compiling a `from vault import *` program.
 
-    PRIVACY_BOX_VAULT_SRC (colon-separated) overrides the whole set. Otherwise the
-    deps are resolved as SIBLINGS of the millfolio dir (so a moved millfolio keeps
-    its deps adjacent)."""
+    The install ships PRECOMPILED packages (commercial IP protection — no `.mojo`
+    source for the vault surface or its libs), so this is a SINGLE include dir:
+    `<millfolio>/pkgs`, which holds vault.mojopkg + the flare/json/lancedb/pdf/
+    docx/csv/zlib `.mojopkg`s. A generated `from vault import *` program compiles
+    against those packages alone (the FFI shims it dlopens are already in the
+    toolchain's lib/).
+
+    PRIVACY_BOX_VAULT_SRC (colon-separated) still overrides the whole set (e.g. a
+    dev run pointing at source trees or a custom pkgs dir)."""
     var override = getenv("PRIVACY_BOX_VAULT_SRC", "")
     if override != "":
         return _split_colon(override)
 
-    var dac = millfolio_dir()
-    # The sibling root: millfolio's parent dir. If millfolio is "../millfolio", the
-    # parent is "..". We keep it relative so it resolves from the privacy_box cwd,
-    # matching millfolio/pixi.toml's own relative `-I ../flare` style.
-    var sib = dac + "/.."
     var out = List[String]()
-    out.append(dac + "/src")
-    out.append(sib + "/flare")
-    out.append(sib + "/json")
-    out.append(sib + "/lancedb.mojo/src")
-    out.append(sib + "/pdftotext.mojo/src")
-    out.append(sib + "/zlib.mojo/src")
-    out.append(sib + "/csv.mojo/src")
-    out.append(sib + "/docx.mojo/src")
+    out.append(millfolio_dir() + "/pkgs")
     return out^
 
 

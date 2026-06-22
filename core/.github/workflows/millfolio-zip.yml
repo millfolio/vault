@@ -1,16 +1,19 @@
 name: millfolio zip
 
-# Builds millfolio.zip — the millfolio source bundle the Millfolio app downloads, then
-# `mojo build`s on-device. See scripts/package_millfolio.sh. Mirrors privacy_box's
-# privacy_box-zip.yml; millfolio now links the full toolbox (flare HTTP, the LanceDB
-# Rust shim, pdftotext + zlib), so the siblings are checked out and their FFI
-# shims built before the compile-check.
+# Builds millfolio.zip — the PRECOMPILED millfolio bundle the Millfolio app
+# downloads (commercial IP protection: ships .mojopkg + prebuilt binary + FFI
+# shims, NO .mojo source for the vault surface or its libs). See
+# scripts/package_millfolio.sh (which precompiles via scripts/precompile_pkgs.sh).
+# Mirrors privacy_box's privacy_box-zip.yml; millfolio links the full toolbox (flare
+# HTTP, the LanceDB Rust shim, pdftotext + zlib), so the siblings are checked out
+# and their FFI shims built before precompiling. The `.mojopkg`s are tied to the
+# pinned Mojo nightly, so this re-runs (and re-attaches) on every nightly bump.
 on:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
-    paths: ["scripts/package_millfolio.sh", ".github/workflows/millfolio-zip.yml", "pixi.toml"]
+    paths: ["scripts/package_millfolio.sh", "scripts/precompile_pkgs.sh", ".github/workflows/millfolio-zip.yml", "pixi.toml"]
   workflow_dispatch:
 
 permissions:
@@ -77,14 +80,18 @@ jobs:
           workspaces: lancedb.mojo/ffi
 
       # Builds every FFI shim (zlib + flare http/tls + the LanceDB cdylib — the
-      # last pulls lancedb+arrow on first build, so it's slow) then compiles millfolio.
-      - name: Build millfolio
-        working-directory: mill
+      # last pulls lancedb+arrow on first build, so it's slow). The packager below
+      # precompiles the .mojopkg set + builds the prebuilt binary itself, but this
+      # also primes the FFI shims into the pixi env that package_millfolio.sh needs.
+      - name: Build FFI shims + binary
+        working-directory: millfolio
         run: pixi run build
 
+      # Precompile the .mojopkg set, build the prebuilt binary against it, and
+      # stage ONLY pkgs/*.mojopkg + the binary + the FFI shims (no .mojo source).
       - name: Package millfolio.zip
-        working-directory: mill
-        run: pixi run bash scripts/package_millfolio.sh "$GITHUB_WORKSPACE/millfolio.zip"
+        working-directory: millfolio
+        run: pixi run bash core/scripts/package_millfolio.sh "$GITHUB_WORKSPACE/millfolio.zip"
 
       - uses: actions/upload-artifact@v7
         with:

@@ -2,7 +2,7 @@
 sortable ISO. `pixi run test-dates`. Regression guard for the M/D-date fix (a
 mid-statement chunk has no year, so the program supplies the header year)."""
 
-from dates import iso_date
+from vault.dates import iso_date
 
 
 def _eq(got: String, want: String, label: String) -> Bool:

@@ -2,7 +2,7 @@
 test-amounts`. Regression guard for the "total spent" crash (atof choked on the
 comma in '4,000.00')."""
 
-from amounts import parse_amount
+from vault.amounts import parse_amount
 
 
 def _close(got: Float64, want: Float64) -> Bool:

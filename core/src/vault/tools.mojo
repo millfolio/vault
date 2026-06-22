@@ -39,12 +39,12 @@ from std.time import perf_counter_ns
 
 from flare.http import HttpClient, Request
 
-from manifest import build_manifest, FileInfo
-import readers
-import index
-from index import Chunk, vault_files
-from dates import iso_date as _iso_date
-from amounts import parse_amount as _parse_amount
+from vault.manifest import build_manifest, FileInfo
+import vault.readers as readers
+import vault.index as index
+from vault.index import Chunk, vault_files
+from vault.dates import iso_date as _iso_date
+from vault.amounts import parse_amount as _parse_amount
 
 
 # The SENTINEL that prefixes a progress line on stdout. A `progress(msg)` call
