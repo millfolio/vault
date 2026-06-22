@@ -46,13 +46,24 @@
   let session: Session | undefined;
   let view = $state<"chat" | "vault">("chat");
 
+  // Safe unique id: crypto.randomUUID() throws in a non-secure context (plain
+  // http:// over a raw Tailscale IP) and is missing on older mobile Safari — which
+  // would abort send() *before* the user's question is added. Fall back so a
+  // question (and every event) always renders.
+  function uid(): string {
+    try {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    } catch {}
+    return `id-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+  }
+
   function handle(e: ServerEvent) {
     switch (e.type) {
       case "status": {
         // Update the status line in place (keyed by stepId), else append it inline.
         const i = items.findIndex((x) => x.kind === "status" && x.stepId === e.stepId);
         if (i === -1) {
-          items.push({ kind: "status", id: crypto.randomUUID(), stepId: e.stepId, label: e.label, state: e.state, detail: e.detail });
+          items.push({ kind: "status", id: uid(), stepId: e.stepId, label: e.label, state: e.state, detail: e.detail });
         } else {
           items[i] = { ...items[i], label: e.label, state: e.state, detail: e.detail };
         }
@@ -60,24 +71,24 @@
         break;
       }
       case "approval-request":
-        items.push({ kind: "approval", id: crypto.randomUUID(), stepId: e.stepId, title: e.payload.title, body: e.payload.body, language: e.payload.language });
+        items.push({ kind: "approval", id: uid(), stepId: e.stepId, title: e.payload.title, body: e.payload.body, language: e.payload.language });
         break;
       case "debug":
-        items.push({ kind: "debug", id: crypto.randomUUID(), title: e.title, body: e.body, language: e.language });
+        items.push({ kind: "debug", id: uid(), title: e.title, body: e.body, language: e.language });
         break;
       case "message":
         items.push({ kind: "assistant", id: e.id, text: e.text });
         busy = false;
         break;
       case "error":
-        items.push({ kind: "assistant", id: crypto.randomUUID(), text: `Error: ${e.message}` });
+        items.push({ kind: "assistant", id: uid(), text: `Error: ${e.message}` });
         busy = false;
         break;
     }
   }
 
   function send(text: string) {
-    items.push({ kind: "user", id: crypto.randomUUID(), text });
+    items.push({ kind: "user", id: uid(), text });
     busy = true;
     session = client.ask(text, handle);
   }

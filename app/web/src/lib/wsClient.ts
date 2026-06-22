@@ -11,10 +11,20 @@ import type {
   MillfolioClient,
 } from "./protocol";
 
+// crypto.randomUUID() throws in a non-secure context / older Safari; fall back so
+// opening a session never throws.
+function safeId(): string {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  } catch {}
+  return `ask-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+}
+
 class WsSession implements Session {
   private ws: WebSocket;
   private ready = false;
   private pending: ClientMessage[] = [];
+  private done = false; // a terminal event (final message or error) was delivered
 
   constructor(
     url: string,
@@ -25,21 +35,40 @@ class WsSession implements Session {
 
     this.ws.onopen = () => {
       this.ready = true;
-      this.put({ type: "ask", id: crypto.randomUUID(), text });
+      this.put({ type: "ask", id: safeId(), text });
       for (const m of this.pending) this.write(m);
       this.pending = [];
     };
 
     this.ws.onmessage = (ev) => {
       try {
-        this.onEvent(JSON.parse(ev.data) as ServerEvent);
+        const e = JSON.parse(ev.data) as ServerEvent;
+        // The server closes the socket right after the final message/error; mark
+        // the session done so the close below isn't reported as a drop.
+        if (e.type === "message" || e.type === "error") this.done = true;
+        this.onEvent(e);
       } catch {
         this.onEvent({ type: "error", message: "malformed event from server" });
       }
     };
 
-    this.ws.onerror = () =>
-      this.onEvent({ type: "error", message: `cannot reach server at ${url}` });
+    this.ws.onerror = () => {
+      if (this.done) return;
+      this.done = true;
+      this.onEvent({ type: "error", message: `Can't reach the server at ${url}.` });
+    };
+
+    // If the socket closes BEFORE a final answer (e.g. the server was restarted
+    // mid-request, as during a release), surface it instead of hanging silently.
+    this.ws.onclose = () => {
+      if (this.done) return;
+      this.done = true;
+      this.onEvent({
+        type: "error",
+        message:
+          "The server stopped responding (connection closed) — it may be restarting. Try again in a moment.",
+      });
+    };
   }
 
   approve(stepId: string) {

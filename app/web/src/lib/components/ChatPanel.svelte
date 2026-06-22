@@ -60,6 +60,7 @@
 
 <section class="chat">
   <div class="stream" bind:this={stream}>
+    <div class="thread">
     {#if items.length === 0}
       <p class="empty">Ask a question about your vault.</p>
     {/if}
@@ -97,11 +98,19 @@
         </div>
       {/if}
     {/each}
+    {#if busy}
+      <div class="working" aria-live="polite">
+        <span class="spin" aria-hidden="true"></span>working…
+      </div>
+    {/if}
+    </div>
   </div>
 
   <form onsubmit={submit}>
-    <input type="text" placeholder="Ask your vault…" bind:value={draft} disabled={busy} />
-    <button type="submit" disabled={busy || !draft.trim()}>Send</button>
+    <div class="row">
+      <input type="text" placeholder="Ask your vault…" bind:value={draft} disabled={busy} />
+      <button type="submit" disabled={busy || !draft.trim()}>Send</button>
+    </div>
   </form>
 </section>
 
@@ -116,13 +125,46 @@
     flex: 1;
     overflow-y: auto;
     padding: 16px;
+  }
+  /* Keep the conversation in a centered, readable column — on a wide screen the
+     full-width stream flung right-aligned (user) and left-aligned (assistant)
+     bubbles to opposite edges, so the question was easy to miss. */
+  .thread {
+    max-width: 760px;
+    margin: 0 auto;
+    width: 100%;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-height: 100%;
   }
   .empty {
     color: var(--text-dim);
     margin: auto;
+  }
+
+  /* live "working" indicator — visible activity during long compiles/runs and
+     until the server replies (or the connection drops -> an error item appears). */
+  .working {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 2px 2px 4px;
+  }
+  .spin {
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* chat bubbles */
@@ -164,7 +206,13 @@
     width: 1em;
     text-align: center;
   }
-  .status.running .icon { color: var(--accent); }
+  .status.running .icon {
+    color: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% { opacity: 0.35; }
+  }
   .status.done .icon { color: var(--ok); }
   .status.error .icon { color: var(--err); }
   .status.awaiting-approval .icon { color: var(--warn); }
@@ -241,12 +289,16 @@
 
   /* input */
   form {
-    display: flex;
-    gap: 8px;
     padding: 12px;
     /* keep the input clear of the iOS home-indicator / URL bar inset */
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--border);
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+    max-width: 760px;
+    margin: 0 auto; /* match the centered conversation column */
   }
   input {
     flex: 1;
