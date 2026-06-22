@@ -410,9 +410,6 @@
     border: 1px solid var(--warn);
     background: transparent;
   }
-  code.warn {
-    color: var(--warn);
-  }
   .search {
     display: flex;
     gap: 8px;

@@ -3,7 +3,7 @@ name: app zip
 # Builds + packages millfolio-app.zip (ws_server source + the built web UI) the CLI
 # downloads and builds/serves on-device. Compiles millfolio-server + millfolio-ws as a
 # gate, builds the web app, then packages. Attaches to a Release on tags. Modeled
-# on headgate's headgate-zip.yml.
+# on vault's vault-zip.yml.
 on:
   push:
     branches: [main]
@@ -20,14 +20,14 @@ jobs:
   zip:
     runs-on: macos-14
     steps:
-      # Sibling layout: app/ alongside headgate/ flare/ json/ jinja2.mojo/.
+      # Sibling layout: app/ alongside vault/ flare/ json/ jinja2.mojo/.
       - uses: actions/checkout@v4
         with:
           path: app
       - uses: actions/checkout@v4
         with:
-          repository: millfolio/headgate
-          path: headgate
+          repository: millfolio/vault
+          path: vault
       - uses: actions/checkout@v4
         with:
           repository: millfolio/flare
@@ -52,11 +52,9 @@ jobs:
         working-directory: app/server
         run: pixi run test
 
-      - name: Build millfolio-server + millfolio-ws (compile gate)
+      - name: Build millfolio-server (compile gate)
         working-directory: app/server
-        run: |
-          pixi run build
-          pixi run build-ws
+        run: pixi run build
 
       - name: Build web UI
         working-directory: app/web

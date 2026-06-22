@@ -65,7 +65,11 @@
         if (i === -1) {
           items.push({ kind: "status", id: uid(), stepId: e.stepId, label: e.label, state: e.state, detail: e.detail });
         } else {
-          items[i] = { ...items[i], label: e.label, state: e.state, detail: e.detail };
+          const cur = items[i];
+          // Narrow before spreading — re-indexing items[] loses the union narrowing,
+          // and a bare spread would widen the result off the ChatItem union (svelte-check).
+          if (cur.kind === "status")
+            items[i] = { ...cur, label: e.label, state: e.state, detail: e.detail };
         }
         if (e.state === "awaiting-approval") busy = false; // hand control to the user
         break;

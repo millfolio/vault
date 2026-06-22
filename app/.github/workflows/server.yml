@@ -1,8 +1,8 @@
 name: server
 
-# Compiles the Mojo server against the headgate orchestrator + flare/json/jinja2,
-# checked out as siblings (the layout the -I paths assume). Modeled on headgate's
-# headgate-zip.yml build recipe. Path-filtered to server changes.
+# Compiles the Mojo server against the vault orchestrator + flare/json/jinja2,
+# checked out as siblings (the layout the -I paths assume). Modeled on vault's
+# vault-zip.yml build recipe. Path-filtered to server changes.
 on:
   push:
     branches: [main]
@@ -15,15 +15,15 @@ jobs:
   build:
     runs-on: macos-14 # Apple Silicon — matches the osx-arm64 toolchain pin
     steps:
-      # Sibling layout: app/ alongside headgate/ flare/ json/ jinja2.mojo/, so
+      # Sibling layout: app/ alongside vault/ flare/ json/ jinja2.mojo/, so
       # from app/server the includes resolve to ../../<repo>.
       - uses: actions/checkout@v4
         with:
           path: app
       - uses: actions/checkout@v4
         with:
-          repository: millfolio/headgate
-          path: headgate
+          repository: millfolio/vault
+          path: vault
       - uses: actions/checkout@v4
         with:
           repository: millfolio/flare
@@ -45,8 +45,6 @@ jobs:
         working-directory: app/server
         run: pixi run test
 
-      - name: Build millfolio-server + millfolio-ws
+      - name: Build millfolio-server
         working-directory: app/server
-        run: |
-          pixi run build
-          pixi run build-ws
+        run: pixi run build
