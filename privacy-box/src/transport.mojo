@@ -246,7 +246,11 @@ struct RemoteClient(Movable):
 
     def _anthropic(self, prompt: String) raises -> Generated:
         var sys = _codegen_system()
-        var body = String('{"model":"') + self.model + '","max_tokens":2048,'
+        # 8192 (was 2048): a fuller program — search + per-chunk ask_local loop with
+        # progress(), parse_amount/iso_date, both branches — plus any reasoning the
+        # model emits can exceed 2048 and get cut mid-line, which then never compiles
+        # (and every fix attempt re-truncated at the same cap).
+        var body = String('{"model":"') + self.model + '","max_tokens":8192,'
         body += '"system":"' + _json_escape(sys) + '",'
         body += '"messages":[{"role":"user","content":"' + _json_escape(prompt) + '"}]}'
 
@@ -262,6 +266,18 @@ struct RemoteClient(Movable):
         var resp = client.send(req)
         var v = resp.json()
         var code = _strip_fences(v["content"][0]["text"].string_value())
+        # If the model hit the token cap the program is incomplete (cut mid-line),
+        # which never compiles — and every fix attempt would re-truncate. Fail with a
+        # clear message instead of silently looping the compile/fix on a partial file.
+        var truncated = False
+        try:
+            truncated = v["stop_reason"].string_value() == "max_tokens"
+        except:
+            truncated = False
+        if truncated:
+            raise Error(
+                "codegen truncated: the model hit max_tokens before finishing the "
+                "program (stop_reason=max_tokens). Raise max_tokens or simplify the task.")
         var toks: Int
         try:
             toks = Int(v["usage"]["input_tokens"].int_value()) + Int(
