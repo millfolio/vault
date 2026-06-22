@@ -150,7 +150,7 @@ struct LocalClient(Movable):
     def chat(self, messages: List[ChatMessage]) raises -> String:
         """POST the messages and return the assistant content. Local only — no
         egress guard. Requires inference-server running."""
-        var body = String('{"model":"') + self.model + '","messages":['
+        var body = String('{"model":"') + self.model + '","max_tokens":4096,"messages":['
         for i in range(len(messages)):
             if i > 0:
                 body += ","

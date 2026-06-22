@@ -1253,6 +1253,21 @@ public final class Bootstrapper: ObservableObject {
         if FileManager.default.fileExists(atPath: "/etc/ssl/cert.pem") {
             env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
         }
+        // Forward the frontier-model credentials from the invoking shell into the
+        // daemon. launchd agents DON'T inherit the login shell, so without this the
+        // app server sees no ANTHROPIC_API_KEY → settings.load_config sets
+        // token_budget=0 → EVERY codegen falls back to the weak local model (which
+        // fabricates + truncates the program). The privacy design wants the frontier
+        // model WRITING programs (it sees only the aliased manifest, never data), so
+        // forward the key (+ optional base-url / budget overrides) when present.
+        // NOTE: this persists the key in the launch-agent plist (plaintext, under
+        // ~/Library/LaunchAgents, user-only perms). To avoid that, put the key in
+        // ~/.config/privacy_box/config.json instead — settings reads either.
+        for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "PRIVACY_BOX_REMOTE_TOKEN_BUDGET"] {
+            if let v = ProcessInfo.processInfo.environment[key], !v.isEmpty {
+                env[key] = v
+            }
+        }
         let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
         // Timestamp every log line. launchd's StandardOutPath redirect writes the
         // fd verbatim — no timestamps — so instead run the server through a tiny
