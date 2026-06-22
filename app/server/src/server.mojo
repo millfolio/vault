@@ -40,7 +40,7 @@ from std.ffi import external_call
 
 from settings import load_config
 from wiring import build_vault_orchestrator
-from orchestrator import Orchestrator, PROGRESS_SENTINEL
+from orchestrator import Orchestrator, PROGRESS_SENTINEL, STAT_SENTINEL
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
 from events import field, status, debug_event, approval, message, error_event
@@ -494,6 +494,12 @@ def _progress_label(line: String) raises -> String:
     return String(line.removeprefix(PROGRESS_SENTINEL))
 
 
+def _secs1(ms: Float64) -> String:
+    """Milliseconds → seconds with one decimal: 38234.5 -> "38.2s"."""
+    var tenths = Int(ms / 100.0 + 0.5)
+    return String(tenths // 10) + "." + String(tenths % 10) + "s"
+
+
 def on_connect(mut conn: WsConnection) raises:
     """Streaming chat over the SAME :10000 listener — flare upgrades the WebSocket
     request; every other request stays on the unary HTTP path (the `Api` handler).
@@ -549,23 +555,42 @@ def on_connect(mut conn: WsConnection) raises:
             "Running it locally over your vault…",
             "running"))
         var h = orch.vault_run_start(vault_dir)
-        while True:
+        var n_ask = 0
+        var ms_ask = 0.0
+        var n_search = 0
+        var ms_search = 0.0
+        var running = True
+        while running:
+            # Reap FIRST, then poll — so the final poll (once the child has exited)
+            # still drains every progress/stat line written just before it died.
+            running = orch.vault_run_reap(h) == -1  # -1 = still running
             var lines = orch.vault_run_poll(h)
             for i in range(len(lines)):
                 var ln = lines[i].copy()
                 if ln.startswith(PROGRESS_SENTINEL):
                     conn.send_text(status("execute", _progress_label(ln), "running"))
-            var code2 = orch.vault_run_reap(h)
-            if code2 != -1:   # -1 = still running; anything else = exited (or error)
-                break
-            _usleep(120_000)  # 120 ms between polls
+                elif ln.startswith(STAT_SENTINEL):
+                    # "<tool>\t<ms>" — accumulate per-engine-call count + duration.
+                    var parts = String(ln.removeprefix(STAT_SENTINEL)).split("\t")
+                    if len(parts) == 2:
+                        var ms = atof(String(parts[1]))
+                        if String(parts[0]) == "search":
+                            n_search += 1; ms_search += ms
+                        else:
+                            n_ask += 1; ms_ask += ms
+            if running:
+                _usleep(120_000)  # 120 ms between polls
 
-        # Drain any progress lines written between the last poll and exit.
-        var tail = orch.vault_run_poll(h)
-        for i in range(len(tail)):
-            var ln = tail[i].copy()
-            if ln.startswith(PROGRESS_SENTINEL):
-                conn.send_text(status("execute", _progress_label(ln), "running"))
+        # A one-line summary of the on-device engine calls, before the answer.
+        var total = n_ask + n_search
+        if total > 0:
+            var sum = String("Engine: ") + String(total) + " calls"
+            if n_ask > 0:
+                sum += " · ask_local ×" + String(n_ask) + " (" + _secs1(ms_ask) + ")"
+            if n_search > 0:
+                sum += " · search ×" + String(n_search) + " (" + _secs1(ms_search) + ")"
+            sum += " · " + _secs1(ms_ask + ms_search) + " total"
+            conn.send_text(status("engine", sum, "done"))
 
         conn.send_text(status("execute", "Running it locally over your vault", "done"))
         var reply = orch.vault_run_finish(h)
