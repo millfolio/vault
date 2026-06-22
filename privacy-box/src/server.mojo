@@ -117,7 +117,7 @@ def _cors(var resp: Response) -> Response:
 
 @fieldwise_init
 struct Api(Handler, Copyable, Movable):
-    var st: UnsafePointer[PrivacyBoxState, MutExternalOrigin]
+    var st: UnsafePointer[PrivacyBoxState, MutUntrackedOrigin]
 
     def serve(self, req: Request) raises -> Response:
         var path = req.url

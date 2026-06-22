@@ -38,15 +38,15 @@ comptime _O_TRUNC: c_int = 0x0400
 comptime _OUT_MODE: c_int = 0o644  # rw-r--r-- for the capture file
 
 # A NULL `char*` / `void*` — argv terminator, attrp, etc.
-comptime _NULL_CHARP = UnsafePointer[c_char, MutExternalOrigin](
+comptime _NULL_CHARP = UnsafePointer[c_char, MutUntrackedOrigin](
     unsafe_from_address=Int(0)
 )
-comptime _NULL_VOIDP = UnsafePointer[NoneType, MutExternalOrigin](
+comptime _NULL_VOIDP = UnsafePointer[NoneType, MutUntrackedOrigin](
     unsafe_from_address=Int(0)
 )
 
 
-def _cstr(s: String) -> UnsafePointer[c_char, MutExternalOrigin]:
+def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     """malloc a NUL-terminated C copy of `s`. Caller owns it — `_free_cstr`."""
     var n = s.byte_length()
     var p = alloc[c_char](n + 1)
@@ -58,7 +58,7 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutExternalOrigin]:
 
 
 def _environ() -> UnsafePointer[
-    UnsafePointer[c_char, MutExternalOrigin], MutExternalOrigin
+    UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin
 ]:
     """The process `environ` (`char**`). On macOS the global isn't directly
     linkable, so go through `_NSGetEnviron()` which returns `char***`; deref
@@ -68,9 +68,9 @@ def _environ() -> UnsafePointer[
         "_NSGetEnviron",
         UnsafePointer[
             UnsafePointer[
-                UnsafePointer[c_char, MutExternalOrigin], MutExternalOrigin
+                UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin
             ],
-            MutExternalOrigin,
+            MutUntrackedOrigin,
         ],
     ]()
     return pp[]
@@ -93,7 +93,7 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
         raise Error("_spawn_capture: empty argv")
 
     # Build NULL-terminated char** argv. Each entry is an owned C string.
-    var cargv = alloc[UnsafePointer[c_char, MutExternalOrigin]](n + 1)
+    var cargv = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
     for i in range(n):
         (cargv + i).init_pointee_copy(_cstr(argv[i]))
     (cargv + n).init_pointee_copy(_NULL_CHARP)
@@ -166,7 +166,7 @@ def _canonical(var path: String) raises -> String:
     macOS (SPIKE.md). The path must exist."""
     var buf = stack_allocation[4096, UInt8]()
     buf[0] = 0
-    _ = external_call["realpath", UnsafePointer[c_char, MutExternalOrigin]](
+    _ = external_call["realpath", UnsafePointer[c_char, MutUntrackedOrigin]](
         path.as_c_string_slice(), buf.bitcast[c_char]()
     )
     if Int(buf[0]) == 0:
