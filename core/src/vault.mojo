@@ -157,15 +157,26 @@ def ask_local(instruction: String, content: String) raises -> String:
     var msg = instruction + "\n\n" + content
     var body = String('{"model":"') + _local_model() + '","messages":[{"role":"user","content":"'
     body += _json_escape(msg) + '"}]}'
-    var req = Request(
-        method="POST",
-        url=_local_url() + "/chat/completions",
-        body=List[UInt8](body.as_bytes()),
-    )
-    req.headers.set("content-type", "application/json")
-    var client = HttpClient()
-    var resp = client.send(req)
-    return resp.json()["choices"][0]["message"]["content"].string_value()
+    # One retry, then give up gracefully: the local server can return a transient,
+    # garbled, or truncated response (it was busy, mid-restart, or the body framing
+    # was off) and a single bad reply must NOT crash a whole sum/scan loop — the
+    # caller treats "" like "none" and skips that chunk. Catches HTTP + JSON-parse
+    # errors alike ("trailing content after top-level JSON value").
+    var attempt = 0
+    while attempt < 2:
+        try:
+            var req = Request(
+                method="POST",
+                url=_local_url() + "/chat/completions",
+                body=List[UInt8](body.as_bytes()),
+            )
+            req.headers.set("content-type", "application/json")
+            var client = HttpClient()
+            var resp = client.send(req)
+            return resp.json()["choices"][0]["message"]["content"].string_value()
+        except:
+            attempt += 1
+    return String("")
 
 
 def print_answer(s: String):
