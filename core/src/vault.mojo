@@ -35,6 +35,7 @@ so nothing the generated program does can leave the machine.
 from std.os import getenv
 from std.ffi import external_call, c_char
 from std.memory import UnsafePointer
+from std.time import perf_counter_ns
 
 from flare.http import HttpClient, Request
 
@@ -53,6 +54,22 @@ from amounts import parse_amount as _parse_amount
 # answer, so it can't be spoofed by ordinary print_answer text. The orchestrator
 # + server hold a matching copy of this exact string — keep them in lockstep.
 comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
+
+# Sentinel for a per-engine-call timing line: `STAT_SENTINEL + <tool>\t<ms>\n` on
+# fd 1 (same unbuffered raw-write channel as progress). The server aggregates these
+# (count + duration per tool) and shows a one-line summary before the final answer,
+# then strips them from the reply. \x1f can't appear in real answer text.
+comptime STAT_SENTINEL = "\x1f@@stat@@\x1f"
+
+
+def _stat(tool: String, ms: Float64):
+    """Emit a timing line for one engine call (ask_local/search) to fd 1, unbuffered
+    (see `progress` for why raw write(2), not print)."""
+    var line = String(STAT_SENTINEL) + tool + "\t" + String(ms) + "\n"
+    var b = line.as_bytes()
+    var p = b.unsafe_ptr()
+    var n = len(b)
+    _ = external_call["write", Int](Int(1), p, Int(n))
 
 
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
@@ -125,7 +142,10 @@ def search(query: String, k: Int) raises -> List[Chunk]:
     `.text`, `.score`). Embeds the query on-device (the EMBED endpoint) and
     k-NNs the LanceDB store. Uses _embed_url(), NOT the chat url — search needs
     the embedding model."""
-    return index.search(query, k, _embed_url())
+    var t0 = perf_counter_ns()
+    var r = index.search(query, k, _embed_url())
+    _stat("search", Float64(perf_counter_ns() - t0) / 1.0e6)
+    return r^
 
 
 def csv_rows(file_alias: String) raises -> List[List[String]]:
@@ -174,6 +194,7 @@ def ask_local(instruction: String, content: String) raises -> String:
     # was off) and a single bad reply must NOT crash a whole sum/scan loop — the
     # caller treats "" like "none" and skips that chunk. Catches HTTP + JSON-parse
     # errors alike ("trailing content after top-level JSON value").
+    var t0 = perf_counter_ns()
     var attempt = 0
     while attempt < 2:
         try:
@@ -185,9 +206,12 @@ def ask_local(instruction: String, content: String) raises -> String:
             req.headers.set("content-type", "application/json")
             var client = HttpClient()
             var resp = client.send(req)
-            return resp.json()["choices"][0]["message"]["content"].string_value()
+            var out = resp.json()["choices"][0]["message"]["content"].string_value()
+            _stat("ask_local", Float64(perf_counter_ns() - t0) / 1.0e6)
+            return out
         except:
             attempt += 1
+    _stat("ask_local", Float64(perf_counter_ns() - t0) / 1.0e6)
     return String("")
 
 

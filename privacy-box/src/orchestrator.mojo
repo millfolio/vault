@@ -28,18 +28,20 @@ from vaultcfg import millfolio_bin, vault_include_paths
 # path, not privacy-box's). The server imports THIS constant so it can't drift from
 # the orchestrator. Keep all three copies of the literal in lockstep.
 comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
+comptime STAT_SENTINEL = "\x1f@@stat@@\x1f"
 
 
 def _strip_progress(out_text: String) raises -> String:
-    """Drop any progress-sentinel lines from captured stdout, leaving only the
-    program's real answer text. Used by `vault_run_finish` so the streamed
-    progress (already sent live) doesn't pollute the final reply."""
+    """Drop the internal sentinel lines (live progress + per-engine-call timing)
+    from captured stdout, leaving only the program's real answer text. Used by both
+    `vault_run` (CLI) and `vault_run_finish` (WS) so the streamed progress/stats
+    don't pollute the final reply."""
     var lines = out_text.split("\n")
     var kept = String("")
     var first = True
     for i in range(len(lines)):
         var ln = String(lines[i])
-        if ln.startswith(String(PROGRESS_SENTINEL)):
+        if ln.startswith(String(PROGRESS_SENTINEL)) or ln.startswith(String(STAT_SENTINEL)):
             continue
         if not first:
             kept += "\n"
@@ -178,7 +180,9 @@ struct Orchestrator(Movable):
         var bin = self.sandbox.scratch_bin()
         var out = self.sandbox.run(bin, List[String]()).output.copy()
         _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")
-        return out
+        # Strip the internal progress/stat sentinel lines so the CLI reply is just
+        # the program's answer (the WS path streams those live instead).
+        return _strip_progress(out)
 
     # ── streaming run (steps 4a–4d) ──────────────────────────────────────────────
     # The blocking `vault_run` above stays for the CLI / run_vault_task. The WS
