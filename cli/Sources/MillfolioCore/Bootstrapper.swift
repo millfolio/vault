@@ -450,6 +450,16 @@ public final class Bootstrapper: ObservableObject {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(Self.serverLabel).plist")
     }
+    // The app server (UI + REST + chat WS on :10000) now runs under launchd too —
+    // the SAME mechanism as the inference server — instead of a nohup that orphaned
+    // and raced the port. Both are launchd agents; the only difference is which env
+    // they carry. (They stay TWO processes so the app can restart without reloading
+    // the ~7GB model.)
+    public static let appServerLabel = "me.millfolio.appserver"
+    private var appServerLaunchAgentURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(Self.appServerLabel).plist")
+    }
     private var guiDomain: String { "gui/\(getuid())" }
 
     /// Start the server LaunchAgent. Idempotent: re-bootstraps a fresh plist.
@@ -1162,63 +1172,77 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// Launcher: one millfolio-server serves the web UI + REST + the streaming chat
-    /// WebSocket on a single port (:10000). Runs from the app bundle dir (so
-    /// `./web/dist` resolves) with privacy_box's toolchain env (CONDA_PREFIX + flare
-    /// shims) + the vault resolution env, detached in the background; opens the browser.
-    public func writeMillfolioAppScript(vaultDir dir: String) throws -> URL {
+    /// The app server (UI + REST + chat WS on :10000) as a launchd agent — the SAME
+    /// mechanism as the inference server (no more nohup orphan / pkill race). Runs the
+    /// millfolio-server binary from privacy_box's dir (so `sandbox/*.sb.template`
+    /// resolve), the UI from MILLFOLIO_WEB_DIR (absolute), with the toolchain env
+    /// (CONDA_PREFIX + flare shims) + the vault-resolution env. Returns the plist URL.
+    private func writeAppServerLaunchAgent(vaultDir dir: String) throws -> URL {
+        try FileManager.default.createDirectory(
+            at: appServerLaunchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: millfolioLogDir, withIntermediateDirectories: true)
         let mojoBin = privacy_boxMojoPrefix.appendingPathComponent("bin").path
-        let modularHome = privacy_boxMojoPrefix.appendingPathComponent("share/max").path
-        let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
-        let script = support.appendingPathComponent("run-millfolio-app.sh")
-        let serverBin = appRoot.appendingPathComponent("build/millfolio-server").path
-        // The engine runner the app server shells for /api/search (it keeps LanceDB
-        // out of the server). Ensure it exists + hand the server its path.
+        // The engine runner the app server shells for /api/search (LanceDB stays out
+        // of the web server). Ensure it exists + hand the server its path.
         let runScript = try writeMillfolioScript()
-        let body = """
-        #!/bin/bash
-        # Run from the privacy_box engine dir: the vault orchestrator reads its
-        # sandbox/*.sb.template profiles relative to cwd (the same dir the `ask`
-        # launcher uses). The UI is served via MILLFOLIO_WEB_DIR (absolute), and the
-        # server binaries are referenced by absolute path, so cwd can be privacy_box's.
-        cd '\(privacy_boxDir.path)'
-        export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
-        export MODULAR_HOME='\(modularHome)'
-        export PATH='\(mojoBin)':"$PATH"
-        [ -f /etc/ssl/cert.pem ] && export SSL_CERT_FILE='/etc/ssl/cert.pem'
-        export PRIVACY_BOX_VAULT_DIR='\(dir)'
-        export MILLFOLIO_VAULT='\(dir)'
-        # The vault tools (search/ask_local) hit the combined inference server over
-        # loopback — embeddings + chat on one port (:8000).
-        export MILLFOLIO_EMBED_URL='http://127.0.0.1:8000/v1'
-        export MILLFOLIO_LOCAL_URL='http://127.0.0.1:8000/v1'
-        # The chat WS compiles the generated vault program against the millfolio sources.
-        export PRIVACY_BOX_MILLFOLIO='\(millfolioDir.path)'
-        # Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
-        export MILLFOLIO_WEB_DIR='\(appRoot.appendingPathComponent("web/dist").path)'
-        # The app server shells THIS script for /api/search (it runs the millfolio
-        # engine with its own toolchain env — LanceDB stays out of the web server).
-        export MILLFOLIO_RUN_SCRIPT='\(runScript.path)'
-        # Run the server detached in the BACKGROUND (no Terminal) — UI + REST + the
-        # chat WS all on :10000 — logging to the millfolio server log. nohup so it
-        # survives this launcher (and the CLI) exiting; `mill stop` reaps it. This
-        # launcher spawns it and exits immediately.
-        LOG='\(serverLog)'
-        mkdir -p "$(dirname "$LOG")"
-        echo "=== millfolio app server starting $(date) ===" >> "$LOG"
-        nohup '\(serverBin)' >> "$LOG" 2>&1 &
-        # Expose the app on the tailnet (HTTPS) for the iOS client — best-effort,
-        # only when Tailscale is installed. One port now carries the UI, REST AND the
-        # chat WS, so :10000 over the tailnet gives iOS the whole app (chat included).
-        # The server stays bound to 127.0.0.1; Tailscale proxies it.
-        if command -v tailscale >/dev/null 2>&1; then
-            tailscale serve --bg 10000 >/dev/null 2>&1 || true
-        fi
-        ( sleep 1.5 && open 'http://localhost:10000' ) >/dev/null 2>&1 &
-        """
-        try body.write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        return script
+        var env: [String: String] = [
+            "CONDA_PREFIX": privacy_boxMojoPrefix.path,
+            "MODULAR_HOME": privacy_boxMojoPrefix.appendingPathComponent("share/max").path,
+            // launchd doesn't inherit a login PATH — give it mojo's bin + system dirs.
+            "PATH": "\(mojoBin):/usr/bin:/bin:/usr/sbin:/sbin",
+            "PRIVACY_BOX_VAULT_DIR": dir,
+            "MILLFOLIO_VAULT": dir,
+            // The vault tools (search/ask_local) hit the inference server over loopback.
+            "MILLFOLIO_EMBED_URL": "http://127.0.0.1:8000/v1",
+            "MILLFOLIO_LOCAL_URL": "http://127.0.0.1:8000/v1",
+            // The chat WS compiles the generated program against the millfolio sources.
+            "PRIVACY_BOX_MILLFOLIO": millfolioDir.path,
+            // Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
+            "MILLFOLIO_WEB_DIR": appRoot.appendingPathComponent("web/dist").path,
+            "MILLFOLIO_RUN_SCRIPT": runScript.path,
+        ]
+        if FileManager.default.fileExists(atPath: "/etc/ssl/cert.pem") {
+            env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
+        }
+        let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
+        let plist: [String: Any] = [
+            "Label": Self.appServerLabel,
+            "ProgramArguments": [appServerBin.path],
+            "WorkingDirectory": privacy_boxDir.path,   // sandbox/*.sb.template resolve here
+            "EnvironmentVariables": env,
+            "StandardOutPath": serverLog,
+            "StandardErrorPath": serverLog,
+            "RunAtLoad": true,
+            "ProcessType": "Interactive",
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: appServerLaunchAgentURL)
+        return appServerLaunchAgentURL
+    }
+
+    /// Start the app server under launchd, wait until :10000 answers, then expose it
+    /// on the tailnet + open the browser (one-shot — not part of the daemon).
+    public func startAppServer(vaultDir dir: String) throws {
+        let url = try writeAppServerLaunchAgent(vaultDir: dir)
+        _ = try? runStatus("/bin/launchctl", ["bootout", "\(guiDomain)/\(Self.appServerLabel)"])
+        killStaleOnPort(10000); killStaleOnPort(10001)   // reap any legacy nohup instance
+        try run("/bin/launchctl", ["bootstrap", guiDomain, url.path])
+        _ = waitForPort(10000, timeout: 25)
+        _ = try? runStatus("/bin/bash", ["-c",
+            "command -v tailscale >/dev/null 2>&1 && tailscale serve --bg 10000 >/dev/null 2>&1 || true"])
+        _ = try? runStatus("/bin/bash", ["-c", "(sleep 1 && open 'http://localhost:10000') >/dev/null 2>&1 &"])
+    }
+
+    /// Poll until something is LISTENING on `port`, or `timeout` s elapse.
+    @discardableResult
+    public func waitForPort(_ port: Int, timeout: Double = 25) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if (try? runStatus("/bin/bash", ["-c",
+                "lsof -ti tcp:\(port) -sTCP:LISTEN >/dev/null 2>&1"])) == 0 { return true }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return false
     }
 
     /// `mill start`: ensure the combined inference server is running (launchd),
@@ -1229,22 +1253,15 @@ public final class Bootstrapper: ObservableObject {
         //    over it (a clean machine has no vault dir yet).
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true)
-        // 1. Ensure the combined inference server is up AND READY (waits for :8000
-        //    to answer, so the app/UI never races the weight load).
+        // 1. Ensure the inference server is up AND READY (waits for :8000 to answer,
+        //    so the app/UI never races the ~10s weight load).
         try ensureInferenceServer()
-        // Reap any stale servers holding :10000/:10001 (a prior `start`) so the
-        // fresh ones can bind cleanly — pkill by name, then by port for anything it
-        // missed (avoids the AddressInUse a rapid restart used to hit).
+        // 2. Stop any prior app-server agent + reap stale ports, build it if an older
+        //    install predates it (self-heal on upgrade), then (re)start it under
+        //    launchd — the SAME clean mechanism as the inference server.
         _ = stopAppServer()
-        killStaleOnPort(10000)
-        killStaleOnPort(10001)
-        // 2. Build the millfolio app server if an older install predates it (self-heal
-        //    on upgrade), then start it: the launcher spawns both servers detached in
-        //    the background — static UI on :10000, streaming WS on :10001 — opens the
-        //    browser, and exits. No Terminal window (clients are web/mobile).
         if !isAppServerInstalled { try await installAppServer() }
-        let script = try writeMillfolioAppScript(vaultDir: dir)
-        try run("/bin/bash", [script.path])
+        try startAppServer(vaultDir: dir)
     }
 
     /// Ensure the combined inference server is running (idempotent). No-op if it
@@ -1267,12 +1284,17 @@ public final class Bootstrapper: ObservableObject {
         serverRunning = true
     }
 
-    /// Stop the background app servers (millfolio-server + millfolio-ws). Returns true
-    /// if at least one was running.
+    /// Stop the app server. Bootout the launchd agent (the current mechanism), and
+    /// also pkill any legacy nohup-launched instance (pre-launchd installs) + reap
+    /// the ports. Returns true if anything was running.
     public func stopAppServer() -> Bool {
+        let wasLoaded = (try? runStatus("/bin/launchctl", ["print", "\(guiDomain)/\(Self.appServerLabel)"])) == 0
+        _ = try? runStatus("/bin/launchctl", ["bootout", "\(guiDomain)/\(Self.appServerLabel)"])
+        // Legacy nohup processes from an older install (no launchd agent): pkill them.
         let ws = (try? runStatus("/usr/bin/pkill", ["-f", "build/millfolio-ws"])) == 0
         let srv = (try? runStatus("/usr/bin/pkill", ["-f", "build/millfolio-server"])) == 0
-        return ws || srv
+        for port in [10000, 10001] { killStaleOnPort(port) }
+        return wasLoaded || ws || srv
     }
 
     // ── server readiness / port hygiene ──────────────────────────────────────
