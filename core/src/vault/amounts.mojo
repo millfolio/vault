@@ -41,3 +41,25 @@ def parse_amount(s: String) raises -> Float64:
         return 0.0
     var v = atof(digits)
     return -v if neg else v
+
+
+def format_money(x: Float64) raises -> String:
+    """Format a Float64 as a clean currency string — `$31,241.06`, `-$5.00`, `$0.00`
+    — rounded to cents with thousands separators. Use this for any dollar amount in
+    an answer instead of `String(x)`, which prints raw floats (`$31241.0599999998`)."""
+    var neg = x < 0.0
+    var v = -x if neg else x
+    var cents = Int(v * 100.0 + 0.5)        # round to the nearest cent
+    var dollars = cents // 100
+    var rem = cents % 100
+    var ds = String(dollars)
+    var b = ds.as_bytes()
+    var n = len(b)
+    var grouped = String("")
+    for i in range(n):
+        if i > 0 and (n - i) % 3 == 0:
+            grouped += ","
+        grouped += chr(Int(b[i]))
+    var cs = String(rem) if rem >= 10 else (String("0") + String(rem))
+    var out = String("$") + grouped + "." + cs
+    return ("-" + out) if neg else out^

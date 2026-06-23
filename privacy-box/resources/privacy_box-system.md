@@ -65,6 +65,7 @@ Questions are open-ended but personal, e.g.
 | `progress` | `progress(msg: String)` | report a one-line progress update to the user while your program runs (e.g. its scan position); call it at loop boundaries — it's free and never sees data |
 | `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
 | `parse_amount` | `parse_amount(s: String) -> Float64` | parse a money string (`$4,000.00`, `(42.10)`, `-31.00`) to a number — handles `$`/commas/parens. **Use instead of `atof`** when summing; `atof` crashes on the comma. |
+| `money` | `money(x: Float64) -> String` | format a dollar amount as a clean string — returns it **INCLUDING the leading `$`** (`$31,241.06`, `-$5.00`). ALWAYS use this for amounts in `print_answer`; never `String(x)` (raw floats like `$31241.0599999998`) and never prepend your own `$` (writing `"$" + money(x)` double-prints it). |
 
 You may use plain Mojo for the glue (loops, sums, date math, filtering the
 *structured* values `ask_local` returns). Keep prose understanding inside
@@ -175,13 +176,16 @@ def main() raises:
     print_answer("You spent about $" + String(total) + " on travel in 2025.")
 ```
 
-**"How many transactions do I have? / total spent? / total deposits?"** (count/sum — `transactions`)
+**"How many transactions / what's my total / total spent / total deposits?"** (count/sum — `transactions`)
+A bare "total of my transactions" is AMBIGUOUS (money out? money in? net?), so report
+BOTH sides — `money(out)` spent and `money(in)` received — never silently sum just
+debits. Always format amounts with `money(...)`, not `String(x)`.
 ```mojo
 from vault import *
 def main() raises:
     var n = 0
-    var spent = 0.0
-    var deposited = 0.0
+    var spent = 0.0       # debits (money out)
+    var received = 0.0    # credits (money in)
     var files = manifest()
     for i in range(len(files)):
         var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
@@ -191,15 +195,15 @@ def main() raises:
             if x.direction == "debit":
                 spent += x.amount
             elif x.direction == "credit":
-                deposited += x.amount
+                received += x.amount
     if n > 0:
-        print_answer("You have " + String(n) + " transactions: $" + String(spent)
-            + " out (debits) and $" + String(deposited) + " in (deposits).")
+        print_answer("You have " + String(n) + " transactions: " + money(spent)
+            + " out (debits) and " + money(received) + " in (deposits/credits).")
     else:
         print_answer("I couldn't find any verified transactions in your vault.")
 ```
 
-**"What was my biggest / most expensive transaction?"** (ENUMERATE — `transactions` first)
+**"What was my biggest / most expensive transaction? / which merchant did I spend the most at?"** (ENUMERATE — `transactions` first; the merchant is the `.desc` of the max `Txn`, so NO `search`/`ask_local` is needed when `transactions()` is non-empty)
 A "biggest / highest / most expensive" question is a **max over every transaction**
 — so enumerate, don't `search`. Try `transactions()` per statement file first (exact,
 verified, no model call); only fall back to scanning ALL of a file's chunks when a
@@ -247,7 +251,7 @@ def main() raises:
                     top_amount = amt
                     top_merchant = String(parts[0].strip())
     if have:
-        print_answer("Your biggest purchase was $" + String(top_amount) + " at " + top_merchant + ".")
+        print_answer("Your biggest purchase was " + money(top_amount) + " at " + top_merchant + ".")
     else:
         print_answer("I couldn't find any purchases with amounts in your vault.")
 ```

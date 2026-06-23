@@ -46,6 +46,7 @@ from vault.index import Chunk, vault_files
 from vault.transactions import Txn
 from vault.dates import iso_date as _iso_date
 from vault.amounts import parse_amount as _parse_amount
+from vault.amounts import format_money as _format_money
 
 
 # The SENTINEL that prefixes a progress line on stdout. A `progress(msg)` call
@@ -378,6 +379,14 @@ def parse_amount(s: String) raises -> Float64:
     or surrounding `()` as negative, and returns `0.0` for a non-number. Use this
     instead of `atof` when summing amounts; `atof` crashes on the comma."""
     return _parse_amount(s)
+
+
+def money(x: Float64) raises -> String:
+    """Format a dollar amount as a clean string — `$31,241.06`, `-$5.00`, `$0.00`
+    (rounded to cents, thousands separators). ALWAYS use this for dollar amounts in
+    `print_answer`, never `String(x)` (which prints raw floats like
+    `$31241.0599999998`)."""
+    return _format_money(x)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
