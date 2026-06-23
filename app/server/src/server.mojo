@@ -46,8 +46,27 @@ from sandbox import _spawn_capture
 from events import field, status, debug_event, approval, message, error_event
 from json import loads
 
-comptime PORT = 10000
+comptime DEFAULT_PORT = 10000
 comptime EMBED_DIM = 1024  # Qwen3-Embedding-0.6B — mirrors vault/core embed.mojo
+
+
+def _port() raises -> Int:
+    """The HTTP/WS listen port — MILLFOLIO_PORT (digits) overrides, else 10000. Lets a
+    second instance (e.g. the demo) coexist on the same box without a rebuild."""
+    var s = String(getenv("MILLFOLIO_PORT", "").strip())
+    if s == "":
+        return DEFAULT_PORT
+    var n = 0
+    var any = False
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c >= 48 and c <= 57:
+            n = n * 10 + (c - 48)
+            any = True
+        else:
+            break
+    return n if (any and n > 0 and n <= 65535) else DEFAULT_PORT
 
 
 struct MillfolioState(Movable):
@@ -615,7 +634,8 @@ def main() raises:
     sp.init_pointee_move(st^)
     var api = Api(sp)
 
-    print("millfolio server on http://127.0.0.1:", PORT, "  (flare)", sep="")
+    var port = _port()
+    print("millfolio server on http://127.0.0.1:", port, "  (flare)", sep="")
     print('  POST /chat   { "message": ... } -> { "reply": ... }')
     print("  GET  /api/vault  -> vault files + index stats")
     print("  POST /api/search { query, k } -> ranked hits")
@@ -624,6 +644,6 @@ def main() raises:
     # the WebSocket Upgrade headers, the streaming `on_connect` chat — no second port.
     # (The 2-arg serve overload is plain-function-only; we use a stateful Handler
     # struct, so set the WS handler on the config and use the Handler-typed serve.)
-    var srv = HttpServer.bind(SocketAddr.localhost(UInt16(PORT)))
+    var srv = HttpServer.bind(SocketAddr.localhost(UInt16(port)))
     srv.config.ws_handler = on_connect
     srv.serve(api^)
