@@ -23,8 +23,8 @@ SYNTHETIC statement text (no private data) by transactions_test.mojo
 (`pixi run test-transactions`).
 """
 
-from vault.amounts import parse_amount
-from vault.dates import iso_date
+from vault.extract.amounts import parse_amount
+from vault.extract.dates import iso_date
 
 
 comptime _EPS = 0.005   # half-a-cent tolerance for money reconciliation

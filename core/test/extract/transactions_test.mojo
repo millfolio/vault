@@ -7,12 +7,12 @@ Covers: (A) a checking statement validated by the running-balance recurrence;
 works); (C) a sectioned card statement validated by sum-vs-printed-total; and the
 format-agnostic token scanners (money `.dd` filter, date-token rejection)."""
 
-from vault.transactions import (
+from vault.extract.transactions import (
     extract_transactions, _money_tokens, _leading_date, Extraction,
     TxnRow, txn_rows_to_tsv, tsv_to_txn_rows, select_txns, drop_aliases,
     texts_for_alias,
 )
-from vault.amounts import parse_amount
+from vault.extract.amounts import parse_amount
 
 
 def _say(ok: Bool, label: String):

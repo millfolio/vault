@@ -28,12 +28,12 @@ from std.os import getenv, makedirs, remove, rmdir, listdir
 from std.os.path import exists, isfile
 
 from lancedb import Store
-from vault.manifest import build_manifest, FileInfo, _csv_columns
-from vault.readers import csv_rows, md_text, pdf_text, docx_text
-import vault.readers as readers
-from vault.embed import embed, embed_batch, EMBED_DIM
-from vault.sha256 import sha256_file_hex
-from vault.transactions import (
+from vault.index.manifest import build_manifest, FileInfo, _csv_columns
+from vault.index.readers import csv_rows, md_text, pdf_text, docx_text
+import vault.index.readers as readers
+from vault.index.embed import embed, embed_batch, EMBED_DIM
+from vault.index.sha256 import sha256_file_hex
+from vault.extract.transactions import (
     Txn, extract_transactions, TxnRow, txn_rows_to_tsv, tsv_to_txn_rows,
     drop_aliases, select_txns, texts_for_alias,
 )

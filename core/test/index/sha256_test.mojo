@@ -1,6 +1,6 @@
 """Gate: sha256_hex against FIPS-180-4 known-answer vectors."""
 
-from vault.sha256 import sha256_hex
+from vault.index.sha256 import sha256_hex
 
 
 def _hex_of(s: String) -> String:
