@@ -45,22 +45,22 @@ cli = "swift build --package-path cli -c release"
 
 # Gate: pure-Mojo SHA-256 against FIPS known-answer vectors (used for the
 # incremental-reindex content hash). No FFI/-I beyond core/src.
-test-sha256 = { cmd = "mkdir -p build && mojo build core/src/sha256_test.mojo -I core/src -o build/sha256-test && ./build/sha256-test" }
+test-sha256 = { cmd = "mkdir -p build && mojo build core/test/sha256_test.mojo -I core/src -o build/sha256-test && ./build/sha256-test" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
-test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/src/sandbox_test.mojo -I privacy-box/src -o build/sandbox-test && ./build/sandbox-test" }
+test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/test/sandbox_test.mojo -I privacy-box/src -o build/sandbox-test && ./build/sandbox-test" }
 # Gate: M/D statement dates fold with the statement's year into sortable ISO.
-test-dates = { cmd = "mkdir -p build && mojo build core/src/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
+test-dates = { cmd = "mkdir -p build && mojo build core/test/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
 # Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
-test-amounts = { cmd = "mkdir -p build && mojo build core/src/amounts_test.mojo -I core/src -o build/amounts-test && ./build/amounts-test" }
+test-amounts = { cmd = "mkdir -p build && mojo build core/test/amounts_test.mojo -I core/src -o build/amounts-test && ./build/amounts-test" }
 # Gate: the invariant-aware transaction extractor reconciles SYNTHETIC statements
 # against their own arithmetic (running balance / printed totals), REFUSES a
 # corrupted one, and the structured-txn + file_chunks side-table helpers round-trip.
-test-transactions = { cmd = "mkdir -p build && mojo build core/src/transactions_test.mojo -I core/src -o build/transactions-test && ./build/transactions-test" }
+test-transactions = { cmd = "mkdir -p build && mojo build core/test/transactions_test.mojo -I core/src -o build/transactions-test && ./build/transactions-test" }
 # Gate: the EgressGuard blocks real-value fingerprints + canary tokens.
-test-egress = { cmd = "mkdir -p build && mojo build privacy-box/src/egress_test.mojo -I privacy-box/src -o build/egress-test && ./build/egress-test" }
+test-egress = { cmd = "mkdir -p build && mojo build privacy-box/test/egress_test.mojo -I privacy-box/src -o build/egress-test && ./build/egress-test" }
 # Gate: budget directive parsing/accounting.
-test-budget = { cmd = "mkdir -p build && mojo build privacy-box/src/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
+test-budget = { cmd = "mkdir -p build && mojo build privacy-box/test/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
 test = { depends-on = ["test-sha256", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget"] }
