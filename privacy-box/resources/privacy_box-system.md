@@ -97,6 +97,14 @@ at the top of the loop with your position (e.g.
 live progress instead of a frozen spinner. It's free and never sees data.
 
 ### Aggregations ("how much total…", "biggest…", "how many transactions…")
+**HARD RULE — if the question is about TRANSACTIONS (count them, total/sum them,
+the biggest/most-expensive/largest, average, list them, spending) you MUST call
+`transactions(file_alias)` for each file in `manifest()` and aggregate its `Txn`s
+in plain Mojo. Do NOT `search` and do NOT `ask_local` for these — `transactions`
+is exact and verified. Only if EVERY file's `transactions(...)` is empty do you
+fall back to `file_chunks`. Writing `search(...)` for a "how many / total /
+biggest transaction" question is wrong.**
+
 A count / sum / total / biggest / average needs **every** matching record — so
 **ENUMERATE, don't `search`.** `search` is similarity-ranked top-k: it returns ~k
 of a file's (possibly hundreds of) chunks, so summing or counting over search hits
@@ -165,6 +173,30 @@ def main() raises:
     for a in range(len(ans)):
         total += parse_amount(String(ans[a]))
     print_answer("You spent about $" + String(total) + " on travel in 2025.")
+```
+
+**"How many transactions do I have? / total spent? / total deposits?"** (count/sum — `transactions`)
+```mojo
+from vault import *
+def main() raises:
+    var n = 0
+    var spent = 0.0
+    var deposited = 0.0
+    var files = manifest()
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        for t in range(len(txns)):
+            ref x = txns[t]
+            n += 1
+            if x.direction == "debit":
+                spent += x.amount
+            elif x.direction == "credit":
+                deposited += x.amount
+    if n > 0:
+        print_answer("You have " + String(n) + " transactions: $" + String(spent)
+            + " out (debits) and $" + String(deposited) + " in (deposits).")
+    else:
+        print_answer("I couldn't find any verified transactions in your vault.")
 ```
 
 **"What was my biggest / most expensive transaction?"** (ENUMERATE — `transactions` first)
