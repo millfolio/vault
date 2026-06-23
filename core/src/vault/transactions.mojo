@@ -238,6 +238,10 @@ def _summary_phrases() raises -> List[String]:
     p.append(String("opening balance"))
     p.append(String("ending balance"))
     p.append(String("new balance"))
+    p.append(String("deposits/additions"))       # summary totals (may sit BELOW the
+    p.append(String("withdrawals/subtractions"))  # transaction list) — close the run
+    p.append(String("deposits and additions"))    # so they don't pollute the last record
+    p.append(String("withdrawals and subtractions"))
     p.append(String("minimum payment"))
     p.append(String("account summary"))
     p.append(String("statement period"))
