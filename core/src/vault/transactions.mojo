@@ -230,6 +230,7 @@ def _credit_total_phrases() raises -> List[String]:
     var p = List[String]()
     p.append(String("total deposits"))
     p.append(String("deposits and other"))
+    p.append(String("deposits/additions"))      # Wells Fargo account summary
     p.append(String("payments and other credits"))
     p.append(String("total credits"))
     p.append(String("total payments"))
@@ -240,6 +241,7 @@ def _debit_total_phrases() raises -> List[String]:
     var p = List[String]()
     p.append(String("total withdrawals"))
     p.append(String("withdrawals and other"))
+    p.append(String("withdrawals/subtractions"))  # Wells Fargo account summary
     p.append(String("total purchases"))
     p.append(String("total debits"))
     p.append(String("total charges"))

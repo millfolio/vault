@@ -11,7 +11,7 @@ These take REAL paths and live on the trusted side. The alias->path resolution
 happens in `vault.mojo`; nothing here knows about aliases.
 """
 
-from pdf import read_file, extract_text
+from pdf import read_file, extract_text, extract_text_layout
 from csv import read as csv_read
 import docx
 
@@ -43,6 +43,15 @@ def pdf_text(path: String) raises -> String:
     """
     var data = read_file(path)
     return extract_text(data)
+
+
+def pdf_text_layout(path: String) raises -> String:
+    """Extract a PDF's text LAYOUT-PRESERVED — each page's runs regrouped into
+    visual rows and aligned left-to-right by x, so table columns (a statement's
+    date / description / amount / running-balance) stay on one line. Used by the
+    indexer's structured-transaction extraction; `pdf_text` (stream order) still
+    backs chunking/search."""
+    return extract_text_layout(read_file(path))
 
 
 def docx_text(path: String) raises -> String:

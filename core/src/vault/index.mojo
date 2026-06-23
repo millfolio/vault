@@ -30,6 +30,7 @@ from std.os.path import exists, isfile
 from lancedb import Store
 from vault.manifest import build_manifest, FileInfo, _csv_columns
 from vault.readers import csv_rows, md_text, pdf_text, docx_text
+import vault.readers as readers
 from vault.embed import embed, embed_batch, EMBED_DIM
 from vault.sha256 import sha256_file_hex
 from vault.transactions import (
@@ -589,7 +590,11 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         # (no model call) — runs for every text doc; non-statements simply won't
         # reconcile. CSVs are already structured (csv_rows), so skip them.
         if cur_kinds[i] != "csv":
-            var ext = extract_transactions(body)
+            # Transaction extraction needs COLUMN-ALIGNED text (date│desc│amount│
+            # balance on one line); `body` is stream-order (good for chunks/search,
+            # but it scatters a row's cells). For PDFs, re-extract layout-preserved.
+            var txn_src = readers.pdf_text_layout(cur_paths[i]) if cur_kinds[i] == "pdf" else body
+            var ext = extract_transactions(txn_src)
             if ext.reconciled:
                 for x in range(len(ext.txns)):
                     ref tx = ext.txns[x]
