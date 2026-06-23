@@ -52,12 +52,53 @@ def _card() raises -> String:
     return s^
 
 
+# A LAYOUT-PRESERVED checking statement (columns aligned with spaces, exactly like
+# pdftotext's extract_text_layout produces): date / description / Deposits column /
+# Withdrawals column / Ending-daily-balance column. Includes INTRA-DAY rows — 4/06 has
+# three transactions but only the LAST prints a running balance, and 4/14 has two — so
+# per-transaction direction must come from the COLUMN a value sits in, validated by the
+# running-balance recurrence. `dep1` lets a fixture corrupt one deposit (negative test).
+#   begin 1,000.00
+#   4/02  +500.00  -> 1,500.00          (one deposit, balance shown)
+#   4/06  +250.00, -40.00, -110.00 -> 1,600.00   (intra-day: 1 deposit + 2 withdrawals)
+#   4/10  -800.00 -> 800.00             (rent withdrawal)
+#   4/14  +1,200.00, -300.00 -> 1,700.00 (intra-day: deposit + withdrawal)
+#   deposits total 1,950.00 ; withdrawals total 1,250.00 ; ending 1,700.00
+def _checking_layout(dep1: String) raises -> String:
+    #        date  description (col ~22)                       deposits(~58)  withdrawals(~76)  balance(~96)
+    var s = String("Wells Fargo Everyday Checking\n")
+    s += "Statement period activity summary\n"
+    s += "Beginning balance on 4/01                                                    1,000.00\n"
+    s += "Deposits/Additions                                                           1,950.00\n"
+    s += "Withdrawals/Subtractions                                                  -  1,250.00\n"
+    s += "Ending balance on 4/30                                                       1,700.00\n"
+    s += "Transaction history\n"
+    s += " Date         Description                            Additions    Subtractions       balance\n"
+    s += "4/02          Paycheck Deposit Acme Corp           " + dep1 + "                          1,500.00\n"
+    s += "4/06          Mobile Deposit Refund                    250.00                                    \n"
+    s += "4/06          Coffee Shop Downtown                                    40.00                      \n"
+    s += "4/06          Hardware Store Purchase                                110.00              1,600.00\n"
+    s += "4/10          Rent Payment Landlord LLC                              800.00                800.00\n"
+    s += "4/14          Online Transfer From Savings           1,200.00                                    \n"
+    s += "4/14          Utility Bill Autopay                                    300.00              1,700.00\n"
+    s += "Totals                                                  1,950.00      1,250.00\n"
+    return s^
+
+
 def _max_debit(e: Extraction) -> Float64:
     var m = 0.0
     for i in range(len(e.txns)):
         if e.txns[i].direction == "debit" and e.txns[i].amount > m:
             m = e.txns[i].amount
     return m
+
+
+def _sum_dir(e: Extraction, dir: String) -> Float64:
+    var s = 0.0
+    for i in range(len(e.txns)):
+        if e.txns[i].direction == dir:
+            s += e.txns[i].amount
+    return s
 
 
 def _count_dir(e: Extraction, dir: String) -> Int:
@@ -108,6 +149,27 @@ def main() raises:
     _say(sc2, "C: 1 payment (credit) + 3 purchases (debit)"); ok = sc2 and ok
     var sc3 = _close(_max_debit(c), 250.0)
     _say(sc3, "C: most expensive purchase = 250.00"); ok = sc3 and ok
+
+    # ── D: LAYOUT-PRESERVED checking with INTRA-DAY rows reconciles via columns ─
+    # 4/06 and 4/14 each carry several transactions but only the day's LAST row prints
+    # a balance, so direction is recovered from the deposit/withdrawal COLUMN, then the
+    # running balance is asserted at each checkpoint (the trust gate).
+    var d = extract_transactions(_checking_layout("500.00"))
+    var sd0 = (d.reconciled and d.method == "column-direction" and len(d.txns) == 7)
+    _say(sd0, "D: intra-day layout reconciles via column-direction, 7 txns"); ok = sd0 and ok
+    var sd1 = (_count_dir(d, "credit") == 3 and _count_dir(d, "debit") == 4)
+    _say(sd1, "D: 3 deposits (credit) + 4 withdrawals (debit)"); ok = sd1 and ok
+    var sd2 = (_close(_sum_dir(d, "credit"), 1950.0) and _close(_sum_dir(d, "debit"), 1250.0))
+    _say(sd2, "D: sum(credits)=1,950.00 + sum(debits)=1,250.00 match printed totals"); ok = sd2 and ok
+    var sd3 = _close(_max_debit(d), 800.0)
+    _say(sd3, "D: biggest debit = 800.00 (the rent)"); ok = sd3 and ok
+
+    # ── E: corrupt one deposit in the layout statement → must NOT reconcile ─────
+    # 4/02's deposit 500.00 → 600.00 breaks both the running balance AND the printed
+    # Deposits/Additions total, so the column-direction gate (and every fallback) abstains.
+    var e = extract_transactions(_checking_layout("600.00"))
+    var se0 = (not e.reconciled and e.method == "unreconciled")
+    _say(se0, "E: a corrupted deposit does NOT reconcile (column-direction gate works)"); ok = se0 and ok
 
     # ── enumeration helper: texts_for_alias returns ALL of a file, id-ordered ──
     var ids = List[Int]()
