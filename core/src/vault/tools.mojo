@@ -43,6 +43,7 @@ from vault.manifest import build_manifest, FileInfo
 import vault.readers as readers
 import vault.index as index
 from vault.index import Chunk, vault_files
+from vault.transactions import Txn
 from vault.dates import iso_date as _iso_date
 from vault.amounts import parse_amount as _parse_amount
 
@@ -179,6 +180,27 @@ def docx_text(file_alias: String) raises -> String:
     if fi.kind != "docx":
         raise Error("vault.docx_text: " + file_alias + " is not a docx (it's " + fi.kind + ")")
     return readers.docx_text(fi.path)
+
+
+def file_chunks(file_alias: String) raises -> List[String]:
+    """EVERY indexed chunk of a file, in document order — COMPLETE coverage for
+    enumeration (count / sum / max), unlike `search()`'s similarity-ranked top-k
+    which only sees ~k chunks and structurally undercounts aggregations. Reuses the
+    text the index already extracted (no re-reading the file). Use this to scan an
+    entire file's content. `[]` for an unknown alias or an unindexed vault."""
+    return index.file_chunks(file_alias)
+
+
+def transactions(file_alias: String) raises -> List[Txn]:
+    """The reconcile-VERIFIED structured transactions of a statement file: a list of
+    `Txn` with `.date` (raw `M/D`), `.desc` (merchant/description), `.amount` (a
+    non-negative magnitude), and `.direction` (`"credit"` money-in / `"debit"`
+    money-out). Extracted ONCE at index time and kept ONLY when they reconcile
+    against the statement's own arithmetic (running balance or printed totals), so
+    these are exact — count = `len`, total = `sum(.amount)`, biggest = `max(.amount)`,
+    no per-row model call. EMPTY when the file isn't a statement, has none, or
+    couldn't be reconciled — then fall back to `file_chunks()` + `ask_local`."""
+    return index.file_transactions(file_alias)
 
 
 def ask_local(instruction: String, content: String) raises -> String:

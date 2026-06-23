@@ -54,9 +54,13 @@ test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/src/sandbox_tes
 test-dates = { cmd = "mkdir -p build && mojo build core/src/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
 # Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
 test-amounts = { cmd = "mkdir -p build && mojo build core/src/amounts_test.mojo -I core/src -o build/amounts-test && ./build/amounts-test" }
+# Gate: the invariant-aware transaction extractor reconciles SYNTHETIC statements
+# against their own arithmetic (running balance / printed totals), REFUSES a
+# corrupted one, and the structured-txn + file_chunks side-table helpers round-trip.
+test-transactions = { cmd = "mkdir -p build && mojo build core/src/transactions_test.mojo -I core/src -o build/transactions-test && ./build/transactions-test" }
 # Gate: the EgressGuard blocks real-value fingerprints + canary tokens.
 test-egress = { cmd = "mkdir -p build && mojo build privacy-box/src/egress_test.mojo -I privacy-box/src -o build/egress-test && ./build/egress-test" }
 # Gate: budget directive parsing/accounting.
 test-budget = { cmd = "mkdir -p build && mojo build privacy-box/src/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-dates", "test-amounts", "test-sandbox", "test-egress", "test-budget"] }
+test = { depends-on = ["test-sha256", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget"] }

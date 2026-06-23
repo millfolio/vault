@@ -32,6 +32,10 @@ from vault.manifest import build_manifest, FileInfo, _csv_columns
 from vault.readers import csv_rows, md_text, pdf_text, docx_text
 from vault.embed import embed, embed_batch, EMBED_DIM
 from vault.sha256 import sha256_file_hex
+from vault.transactions import (
+    Txn, extract_transactions, TxnRow, txn_rows_to_tsv, tsv_to_txn_rows,
+    drop_aliases, select_txns, texts_for_alias,
+)
 
 
 comptime CHUNK_SIZE = 512      # ~codepoints per chunk
@@ -511,6 +515,7 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     var emb_alias = List[String]()        # the alias to assign each embedded file
     var del_starts = List[Int]()
     var del_counts = List[Int]()
+    var removed_aliases = List[String]()   # files dropped entirely (for txn eviction)
     var matched = List[Bool]()
     for _ in range(len(old)):
         matched.append(False)
@@ -535,6 +540,7 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         if not matched[oi]:                                 # removed: drop its range
             del_starts.append(old[oi].id_start)
             del_counts.append(old[oi].chunk_count)
+            removed_aliases.append(old[oi].falias.copy())
 
     if len(emb_idx) == 0 and len(del_starts) == 0:
         print(
@@ -556,6 +562,14 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     var st = _load_sidetable()
     st = _drop_ranges(st, del_starts, del_counts)
 
+    # Structured transactions live in their own side-table; evict the re-embedded +
+    # removed files' rows, then re-extract the embedded ones below (in lockstep).
+    var trows = _load_txn_rows()
+    var txn_drop = removed_aliases.copy()
+    for t in range(len(emb_alias)):
+        txn_drop.append(emb_alias[t].copy())
+    trows = drop_aliases(trows, txn_drop)
+
     print(
         "embedding " + String(len(emb_idx)) + " new/changed file(s)"
         + (" (the embedding model loads on first use — this can take a bit)…"
@@ -567,6 +581,23 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         var i = emb_idx[t]
         var falias = emb_alias[t].copy()
         var body = _file_text(cur_paths[i], cur_kinds[i])
+
+        # Extract structured transactions ONCE here, with whole-document context, and
+        # persist only those that RECONCILE against the statement's own arithmetic
+        # (running balance or printed totals). Unreconciled/none → nothing written, so
+        # `transactions()` stays empty and callers fall back to chunks. Cheap + pure
+        # (no model call) — runs for every text doc; non-statements simply won't
+        # reconcile. CSVs are already structured (csv_rows), so skip them.
+        if cur_kinds[i] != "csv":
+            var ext = extract_transactions(body)
+            if ext.reconciled:
+                for x in range(len(ext.txns)):
+                    ref tx = ext.txns[x]
+                    trows.append(
+                        TxnRow(falias.copy(), tx.date.copy(), tx.amount,
+                               tx.direction.copy(), tx.desc.copy())
+                    )
+
         var chunks = _chunk_text(body)
         # Print BEFORE the (slow) embed so a multi-page file isn't a silent stall.
         print(
@@ -596,6 +627,7 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         store.optimize()
 
     _write_sidetable(st)
+    _write_txn_rows(trows)
     _write_manifest(Manifest(new_entries^, next_id, next_alias, data_dir))
     print(
         "index updated — " + String(len(emb_idx)) + " file(s) embedded, "
@@ -637,3 +669,48 @@ def search(query: String, k: Int, base_url: String) raises -> List[Chunk]:
                 hits.append(Chunk(st.aliases[j].copy(), st.texts[j].copy(), dists[i]))
                 break
     return hits^
+
+
+# ── enumeration (complete coverage, not similarity-ranked) ────────────────────
+
+def file_chunks(file_alias: String) raises -> List[String]:
+    """EVERY indexed chunk of one file, in document order — the complete text the
+    index already extracted, reachable by enumeration (unlike `search()`, which is
+    similarity-ranked top-k and structurally undercounts aggregations). For
+    count/sum/max over a file, read all of its chunks instead of gambling on the
+    top-k. Returns `[]` for an unknown alias or an unindexed vault. (Ordering/filter
+    logic is `transactions.texts_for_alias`, unit-tested hermetically.)"""
+    if not exists(_sidetable_path()):
+        return List[String]()
+    var st = _load_sidetable()
+    return texts_for_alias(st.ids, st.aliases, st.texts, file_alias)
+
+
+# ── structured transactions (reconcile-validated, extracted at index time) ────
+# The row type + (de)serialization + selection live in vault.transactions (pure,
+# hermetically tested); here we only add the file I/O around them.
+
+def _txns_path() raises -> String:
+    return _config_dir() + "/transactions.tsv"
+
+
+def _load_txn_rows() raises -> List[TxnRow]:
+    if not exists(_txns_path()):
+        return List[TxnRow]()
+    var text: String
+    with open(_txns_path(), "r") as f:
+        text = f.read()
+    return tsv_to_txn_rows(text)
+
+
+def _write_txn_rows(rows: List[TxnRow]) raises:
+    with open(_txns_path(), "w") as f:
+        f.write(txn_rows_to_tsv(rows))
+
+
+def file_transactions(file_alias: String) raises -> List[Txn]:
+    """The reconcile-VERIFIED transactions of one file (date/desc/amount/direction),
+    extracted once at index time. EMPTY when the file has none or its transactions
+    could not be reconciled against the statement's own totals — in which case the
+    caller should fall back to `file_chunks()` + `ask_local`, not trust a guess."""
+    return select_txns(_load_txn_rows(), file_alias)

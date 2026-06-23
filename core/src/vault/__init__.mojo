@@ -22,3 +22,4 @@ from vault.tools import *
 #                                    name it explicitly so it's unambiguous)
 from vault.index import Chunk
 from vault.tools import VaultFile
+from vault.transactions import Txn
