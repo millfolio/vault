@@ -177,7 +177,7 @@
     <form onsubmit={submitPicked}>
       <div class="row">
         <select bind:value={picked} disabled={busy} aria-label="Pick a question">
-          <option value="" disabled>Pick a question…</option>
+          <option value="" disabled>Pick a demo question…</option>
           {#each SUGGESTED as q}
             <option value={q}>{q}</option>
           {/each}
