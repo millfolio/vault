@@ -17,7 +17,7 @@ struct ChatPanel: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     if messages.isEmpty {
-                        Text("Ask a question about your vault.")
+                        Text("Ask a question about the files in your vault")
                             .foregroundStyle(Theme.textDim)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.top, 40)
@@ -60,7 +60,7 @@ struct ChatPanel: View {
 
     private var composer: some View {
         HStack(spacing: 8) {
-            TextField("Ask your vault…", text: $draft)
+            TextField("My question is…", text: $draft)
                 .textFieldStyle(.plain)
                 .padding(.vertical, 9)
                 .padding(.horizontal, 12)

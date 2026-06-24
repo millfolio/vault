@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import ChatPanel from "$lib/components/ChatPanel.svelte";
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import { createMockClient } from "$lib/client";
@@ -45,6 +46,24 @@
   let busy = $state(false);
   let session: Session | undefined;
   let view = $state<"chat" | "vault">("chat");
+
+  // Intro disclaimer shown when the demo starts. Remembered per browser session so a
+  // reload within the same tab doesn't nag, but every new visitor sees it once.
+  const INTRO_KEY = "millfolio-demo-intro-dismissed";
+  let showIntro = $state(false);
+  onMount(() => {
+    try {
+      showIntro = sessionStorage.getItem(INTRO_KEY) !== "1";
+    } catch {
+      showIntro = true; // sessionStorage unavailable (private mode etc.) — still show it
+    }
+  });
+  function dismissIntro() {
+    showIntro = false;
+    try {
+      sessionStorage.setItem(INTRO_KEY, "1");
+    } catch {}
+  }
 
   // Safe unique id: crypto.randomUUID() throws in a non-secure context (plain
   // http:// over a raw Tailscale IP) and is missing on older mobile Safari — which
@@ -112,6 +131,26 @@
   }
 </script>
 
+<svelte:window onkeydown={(e) => { if (showIntro && e.key === "Escape") dismissIntro(); }} />
+
+{#if showIntro}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="intro-backdrop" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) dismissIntro(); }}>
+    <div class="intro-card" role="dialog" aria-modal="true" aria-labelledby="intro-title" tabindex="-1">
+      <h2 id="intro-title">About this demo</h2>
+      <p>
+        This application must be installed and run on your own Mac (mini) computer. It
+        relies on a local model to see your data and on a foundational model to write
+        code. In this demo both are stubbed out.
+      </p>
+      <p>
+        See <a href="https://millfolio.app" target="_blank" rel="noopener">millfolio.app</a>.
+      </p>
+      <button class="intro-ok" onclick={dismissIntro}>Got it</button>
+    </div>
+  </div>
+{/if}
+
 <main>
   <header class="topbar">
     <div class="brand">millfolio</div>
@@ -173,5 +212,52 @@
     flex: 1;
     min-height: 0;
     display: grid;
+  }
+  .intro-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .intro-card {
+    max-width: 460px;
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  }
+  .intro-card h2 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .intro-card p {
+    margin: 0 0 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  .intro-card a {
+    color: var(--accent);
+  }
+  .intro-ok {
+    margin-top: 6px;
+    padding: 7px 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--accent);
+    color: #00132e;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .intro-ok:hover {
+    filter: brightness(1.08);
   }
 </style>

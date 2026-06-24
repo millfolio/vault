@@ -62,7 +62,7 @@
   <div class="stream" bind:this={stream}>
     <div class="thread">
     {#if items.length === 0}
-      <p class="empty">Ask a question about your vault.</p>
+      <p class="empty">Ask a question about the files in your vault</p>
     {/if}
     {#each items as it (it.id)}
       {#if it.kind === "user" || it.kind === "assistant"}
@@ -108,7 +108,7 @@
 
   <form onsubmit={submit}>
     <div class="row">
-      <input type="text" placeholder="Ask your vault…" bind:value={draft} disabled={busy} />
+      <input type="text" placeholder="My question is…" bind:value={draft} disabled={busy} />
       <button type="submit" disabled={busy || !draft.trim()}>Send</button>
     </div>
   </form>
