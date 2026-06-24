@@ -53,7 +53,7 @@ export default function App() {
       <main className="chat">
         {messages.length === 0 && (
           <div className="empty">
-            <h1>Ask your vault.</h1>
+            <h1>Ask a question about the files in your vault</h1>
             <p className="hint">
               privacy_box has a model write code that runs locally over your private
               vault — nothing leaves your machine.
@@ -84,7 +84,7 @@ export default function App() {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask your vault…"
+          placeholder="My question is…"
           aria-label="Message"
           autoFocus
         />
