@@ -42,6 +42,16 @@
   }
   const client = pickClient();
 
+  // Demo mode: the public replay demo only answers the curated questions (the replay
+  // cache is keyed on the exact prompt), so we restrict input to a dropdown of those.
+  // Detected by the demo host or its :10010 port (the real app is :10000 / free-text).
+  function detectDemo(): boolean {
+    if (typeof location === "undefined") return false;
+    if (new URLSearchParams(location.search).get("demo") === "1") return true;
+    return location.hostname.endsWith("demo.millfolio.app") || location.port === "10010";
+  }
+  const isDemo = detectDemo();
+
   let items = $state<ChatItem[]>([]);
   let busy = $state(false);
   let session: Session | undefined;
@@ -161,7 +171,7 @@
   </header>
   <div class="single">
     {#if view === "chat"}
-      <ChatPanel {items} {busy} onsend={send} onapprove={approve} onreject={reject} />
+      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
     {:else}
       <VaultPanel />
     {/if}

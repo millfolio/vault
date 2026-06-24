@@ -21,18 +21,31 @@
   let {
     items,
     busy,
+    demo = false,
     onsend,
     onapprove,
     onreject,
   }: {
     items: Item[];
     busy: boolean;
+    demo?: boolean;
     onsend: (text: string) => void;
     onapprove: (id: string, stepId: string) => void;
     onreject: (id: string, stepId: string) => void;
   } = $props();
 
+  // The curated demo questions — the ONLY ones the replay cache can answer. Keep in
+  // sync with scripts/prime-cache.sh in the demo repo (those captures ARE the demo).
+  const SUGGESTED = [
+    "how many transactions do I have",
+    "what is my biggest transaction",
+    "what is the total of my transactions",
+    "what kinds of files are in my vault",
+    "how much did I spend",
+  ];
+
   let draft = $state("");
+  let picked = $state("");
   let stream = $state<HTMLDivElement>();
 
   const icon: Record<StepState, string> = {
@@ -55,6 +68,14 @@
     if (!t || busy) return;
     onsend(t);
     draft = "";
+  }
+
+  // Demo: ask the selected curated question (only these are in the replay cache).
+  function submitPicked(e: SubmitEvent) {
+    e.preventDefault();
+    if (!picked || busy) return;
+    onsend(picked);
+    picked = "";
   }
 </script>
 
@@ -106,12 +127,26 @@
     </div>
   </div>
 
-  <form onsubmit={submit}>
-    <div class="row">
-      <input type="text" placeholder="My question is…" bind:value={draft} disabled={busy} />
-      <button type="submit" disabled={busy || !draft.trim()}>Send</button>
-    </div>
-  </form>
+  {#if demo}
+    <form onsubmit={submitPicked}>
+      <div class="row">
+        <select bind:value={picked} disabled={busy} aria-label="Pick a question">
+          <option value="" disabled>Pick a question…</option>
+          {#each SUGGESTED as q}
+            <option value={q}>{q}</option>
+          {/each}
+        </select>
+        <button type="submit" disabled={busy || !picked}>Ask</button>
+      </div>
+    </form>
+  {:else}
+    <form onsubmit={submit}>
+      <div class="row">
+        <input type="text" placeholder="My question is…" bind:value={draft} disabled={busy} />
+        <button type="submit" disabled={busy || !draft.trim()}>Send</button>
+      </div>
+    </form>
+  {/if}
 </section>
 
 <style>
@@ -309,6 +344,20 @@
     color: var(--text);
   }
   input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  select {
+    flex: 1;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+  select:focus {
     outline: none;
     border-color: var(--accent);
   }
