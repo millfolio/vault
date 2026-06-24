@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { StepState } from "$lib/protocol";
 
   // One inline timeline: chat bubbles (user/assistant), plus the workflow events
@@ -47,6 +48,46 @@
   let draft = $state("");
   let picked = $state("");
   let stream = $state<HTMLDivElement>();
+
+  // Demo auto-approve: the public demo shouldn't park on the "Approve" gate (the
+  // single-threaded server would wedge), so in demo mode an unresolved approval gets
+  // a 15s countdown and then auto-approves. "+1 min" extends it for a closer look.
+  // (The real product keeps manual approval — gated on `demo`.)
+  const AUTO_APPROVE_SECS = 15;
+  let remaining = $state(0); // seconds left on the current auto-approve countdown
+  let pendingId = $state<string | null>(null); // approval id currently being timed
+  let ticker: ReturnType<typeof setInterval> | undefined;
+  function stopTimer() {
+    if (ticker !== undefined) clearInterval(ticker);
+    ticker = undefined;
+    pendingId = null;
+  }
+  function bumpTimer() {
+    remaining += 60;
+  }
+  onDestroy(stopTimer);
+
+  // Track the latest unresolved approval and (re)start the countdown for it.
+  $effect(() => {
+    const pending = demo ? [...items].reverse().find((x) => x.kind === "approval" && !x.resolved) : undefined;
+    if (!pending) {
+      if (pendingId !== null) stopTimer();
+      return;
+    }
+    if (pending.id === pendingId) return; // already counting down for this one
+    stopTimer();
+    pendingId = pending.id;
+    remaining = AUTO_APPROVE_SECS;
+    ticker = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        const id = pendingId;
+        const step = items.find((x) => x.id === id)?.stepId ?? "";
+        stopTimer();
+        if (id) onapprove(id, step);
+      }
+    }, 1000);
+  });
 
   const icon: Record<StepState, string> = {
     pending: "○",
@@ -112,7 +153,12 @@
             </p>
           {:else}
             <div class="actions">
-              <button class="approve" onclick={() => onapprove(it.id, it.stepId ?? "")}>Approve</button>
+              <button class="approve" onclick={() => onapprove(it.id, it.stepId ?? "")}>
+                {#if demo && it.id === pendingId}Approve ({remaining}s){:else}Approve{/if}
+              </button>
+              {#if demo && it.id === pendingId}
+                <button class="bump" onclick={bumpTimer} title="Give yourself another minute to review">+1 min</button>
+              {/if}
               <button class="reject" onclick={() => onreject(it.id, it.stepId ?? "")}>Reject</button>
             </div>
           {/if}
@@ -314,6 +360,14 @@
     background: transparent;
     color: var(--text-dim);
     border: 1px solid var(--border) !important;
+  }
+  .bump {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent) !important;
+  }
+  .bump:hover {
+    background: var(--accent-dim);
   }
   .decision {
     margin: 0;
