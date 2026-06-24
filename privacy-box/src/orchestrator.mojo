@@ -126,6 +126,20 @@ struct Orchestrator(Movable):
             raise Error(
                 "vault: `mill manifest` failed (is millfolio built at " + dac
                 + "? try `pixi run build` in millfolio). Output:\n" + m.output)
+        # Strip the leading "vault: <abs path>" line `mill manifest` prints. That path
+        # is host-specific (…/<dev-home>/… vs …/<demo-account>/…) and the manifest is
+        # embedded verbatim in the codegen prompt — so leaking it (a) violates the
+        # aliases-only confidentiality invariant and (b) makes the replay-cache key
+        # host-specific, so a cache primed on one machine never hits on another. The
+        # model only needs the aliased file list that follows.
+        var lines = m.output.split("\n")
+        if len(lines) > 0 and String(lines[0]).startswith("vault:"):
+            var out = String("")
+            for i in range(1, len(lines)):
+                if i > 1:
+                    out += "\n"
+                out += String(lines[i])
+            return out^
         return m.output.copy()
 
     def vault_codegen(mut self, question: String, manifest: String) raises -> String:
