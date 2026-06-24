@@ -241,6 +241,7 @@
     border-radius: var(--radius);
     padding: 22px 24px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    text-align: center;
   }
   .intro-card h2 {
     margin: 0 0 12px;
