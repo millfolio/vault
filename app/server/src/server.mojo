@@ -36,7 +36,7 @@ from flare.prelude import *
 from flare.http import Handler
 from flare.ws import WsConnection, WsOpcode, WsCloseCode
 
-from std.ffi import external_call
+from std.ffi import external_call, c_char
 
 from settings import load_config
 from wiring import build_vault_orchestrator
@@ -67,6 +67,27 @@ def _port() raises -> Int:
         else:
             break
     return n if (any and n > 0 and n <= 65535) else DEFAULT_PORT
+
+
+def _workers() raises -> Int:
+    """Worker thread count — MILLFOLIO_WORKERS (digits) overrides, else 1. The default
+    keeps the real product single-threaded (one local user); the demo sets it >1 so
+    concurrent visitors don't block each other at codegen/approval. The actual sandboxed
+    run stays serial regardless — see the run-queue (flock) in `on_connect`."""
+    var s = String(getenv("MILLFOLIO_WORKERS", "").strip())
+    if s == "":
+        return 1
+    var n = 0
+    var any = False
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c >= 48 and c <= 57:
+            n = n * 10 + (c - 48)
+            any = True
+        else:
+            break
+    return n if (any and n > 0 and n <= 256) else 1
 
 
 struct MillfolioState(Movable):
@@ -519,6 +540,49 @@ def _secs1(ms: Float64) -> String:
     return String(tenths // 10) + "." + String(tenths % 10) + "s"
 
 
+# ── serial run-queue (multi-worker safe) ─────────────────────────────────────
+# With MILLFOLIO_WORKERS>=2, flare runs N worker threads so several visitors can be at
+# codegen/approval at once. But the generated program compiles + runs through a FIXED
+# scratch path and a sandboxed `mojo build` is CPU/RAM heavy — so the RUN must be
+# serial. We gate it on an advisory file lock (flock): a request "enters the queue"
+# AFTER approval and blocks until it's the only one running. macOS constants (the
+# per-query sandbox is Seatbelt → the server is macOS-only).
+comptime _O_RDWR: Int = 0x0002
+comptime _O_CREAT: Int = 0x0200
+comptime _LOCK_EX: Int = 0x0002
+comptime _LOCK_NB: Int = 0x0004
+comptime _LOCK_UN: Int = 0x0008
+comptime _RUN_LOCK_PATH = "/tmp/millfolio-run.lock"
+
+
+def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
+    """malloc a NUL-terminated C copy of `s` (caller frees with `.free()`)."""
+    var n = s.byte_length()
+    var p = alloc[c_char](n + 1)
+    var sp = s.unsafe_ptr()
+    for i in range(n):
+        (p + i).init_pointee_copy(c_char(Int(sp[i])))
+    (p + n).init_pointee_copy(c_char(0))
+    return p
+
+
+def _run_lock_open() -> Int32:
+    """Open (creating) the shared run-lock file; return its fd (<0 on failure)."""
+    var cpath = _cstr(_RUN_LOCK_PATH)
+    var fd = external_call["open", Int32](
+        cpath, Int32(_O_RDWR | _O_CREAT), Int32(0o600)
+    )
+    cpath.free()
+    return fd
+
+
+def _run_lock_release(fd: Int32):
+    """Release the run slot + close the fd. No-op for an unheld lock (fd < 0)."""
+    if fd >= Int32(0):
+        _ = external_call["flock", Int32](fd, Int32(_LOCK_UN))
+        _ = external_call["close", Int32](fd)
+
+
 def on_connect(mut conn: WsConnection) raises:
     """Streaming chat over the SAME :10000 listener — flare upgrades the WebSocket
     request; every other request stays on the unary HTTP path (the `Api` handler).
@@ -536,6 +600,7 @@ def on_connect(mut conn: WsConnection) raises:
         conn.send_text(error_event("empty or malformed ask"))
         conn.close(WsCloseCode.NORMAL)
         return
+    var lock_fd = Int32(-1)  # run-queue slot; >= 0 once we hold it (see _run_lock_*)
     try:
         var cfg = load_config()
         var vault_dir = resolve_vault_dir()
@@ -559,6 +624,16 @@ def on_connect(mut conn: WsConnection) raises:
             conn.send_text(message("Okay — I won't run that. Tell me how you'd like to adjust it."))
             conn.close(WsCloseCode.NORMAL)
             return
+
+        # Enter the serial run-queue — AFTER approval. With multiple workers several
+        # visitors can reach here at once, but only ONE may run (shared scratch path +
+        # heavy sandboxed build), so block on the run-lock for our turn. flock is the
+        # queue; if a slot isn't free, tell the user they're waiting.
+        lock_fd = _run_lock_open()
+        if external_call["flock", Int32](lock_fd, Int32(_LOCK_EX | _LOCK_NB)) != Int32(0):
+            conn.send_text(status("queue", "Waiting for a free run slot…", "running"))
+            _ = external_call["flock", Int32](lock_fd, Int32(_LOCK_EX))
+            conn.send_text(status("queue", "Run slot ready", "done"))
 
         # Approved — surface the two real phases SEPARATELY so the wait isn't one
         # opaque "working": first compile the generated Mojo, then run it over the
@@ -614,8 +689,11 @@ def on_connect(mut conn: WsConnection) raises:
         conn.send_text(status("execute", "Running it locally over your vault", "done"))
         var reply = orch.vault_run_finish(h)
         conn.send_text(message(reply))
+        _run_lock_release(lock_fd)  # leave the run-queue
+        lock_fd = Int32(-1)
     except e:
         conn.send_text(error_event(String(e)))
+        _run_lock_release(lock_fd)  # release if we died mid-run (no-op otherwise)
     conn.close(WsCloseCode.NORMAL)
 
 
@@ -646,4 +724,14 @@ def main() raises:
     # struct, so set the WS handler on the config and use the Handler-typed serve.)
     var srv = HttpServer.bind(SocketAddr.localhost(UInt16(port)))
     srv.config.ws_handler = on_connect
-    srv.serve(api^)
+    var workers = _workers()
+    if workers > 1:
+        print(
+            "  workers: ", workers,
+            " (concurrent connections; the sandboxed run stays serial via the run-queue)",
+            sep="",
+        )
+    # num_workers=1 (default) → single-threaded reactor (real product). >1 → N pthread
+    # workers via the multicore Handler-serve; Api is Copyable (shares the state
+    # pointer) and config.ws_handler propagates to each worker.
+    srv.serve(api^, num_workers=workers)
