@@ -680,6 +680,14 @@ struct Sandbox(Movable):
         var build_out = scratch_c + "/build.out"
         _write(src_path, source)
 
+        # Unlink the previous binary before the linker writes a new one. If a PRIOR
+        # run's program is still executing `gen` (a wedged/slow child that hasn't
+        # exited yet), opening that same path for write would fail with ETXTBSY
+        # ("ld: can't write output file") — and every fix attempt would re-hit it.
+        # unlink(2) just drops the name: the running process keeps its now-anonymous
+        # inode, and the build creates a fresh `gen`. No-op (ENOENT) on the first run.
+        _ = external_call["unlink", c_int](bin_path.as_c_string_slice())
+
         # Absolute mojo path: the harness may be launched without pixi's PATH
         # activation (e.g. ./build/privacy_box), so don't rely on `mojo` being on PATH.
         var prefix = getenv("CONDA_PREFIX", "")
