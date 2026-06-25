@@ -52,6 +52,21 @@
   }
   const isDemo = detectDemo();
 
+  // The product name follows the domain it's served from: millfolio.* → "millfolio",
+  // millfoil.* → "millfoil" — i.e. the registrable name, the second-to-last DNS label.
+  // Falls back to "millfolio" for localhost / IPs / single-label hosts.
+  function brandFromHost(): string {
+    if (typeof location === "undefined") return "millfolio";
+    const labels = location.hostname.split(".").filter(Boolean);
+    const sld = labels.length >= 2 ? labels[labels.length - 2] : "";
+    return /^[a-z]/i.test(sld) ? sld : "millfolio";
+  }
+  const brandName = brandFromHost();
+  $effect(() => {
+    // Title tracks the brand too (app.html ships a static fallback).
+    document.title = brandName.charAt(0).toUpperCase() + brandName.slice(1);
+  });
+
   let items = $state<ChatItem[]>([]);
   let busy = $state(false);
   let session: Session | undefined;
@@ -189,7 +204,10 @@
 
 <main>
   <header class="topbar">
-    <div class="brand">millfolio</div>
+    <div class="brand">
+      <img class="brand-logo" src="/favicon.svg" alt="" width="22" height="22" />
+      {brandName}
+    </div>
     <nav class="tabs">
       <button class:active={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
       <button class:active={view === "vault"} onclick={() => (view = "vault")}>Vault</button>
@@ -220,8 +238,17 @@
     background: var(--surface);
   }
   .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-weight: 700;
     letter-spacing: 0.02em;
+  }
+  .brand-logo {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    display: block;
   }
   .tabs {
     display: flex;
