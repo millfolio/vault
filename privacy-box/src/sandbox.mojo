@@ -230,6 +230,7 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
 
     if rc != 0:
         raise Error("posix_spawn (async) failed (rc=" + String(rc) + ")")
+    print("[run] spawn ok: pid=", Int(pid), "  (", argv[0], ")", sep="")
     return pid
 
 
