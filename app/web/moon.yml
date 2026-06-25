@@ -6,5 +6,5 @@ tasks:
   build:
     command: 'npm run build'
     toolchain: 'system'
-    inputs: ['src/**/*', 'package.json']
+    inputs: ['src/**/*', 'static/**/*', 'package.json']
     outputs: ['build/**/*']
