@@ -35,7 +35,7 @@ flare-ffi = "bash -c 'source ../../flare/flare/tls/ffi/build.sh; source ../../fl
 # orchestrator (wiring/orchestrator/settings/vaultcfg) via -I ../../vault/privacy-box/src,
 # plus flare/json/jinja2. The vault gen program's extra shims (zlib/lancedb) are NOT
 # needed here: it's compiled + run as a separate subprocess at request time.
-build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
+build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -I ../../logging.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
 
 # Unit-test the protocol wire helpers (events.mojo) — no flare/privacy_box, only json.
 test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../../json -o build/events-test && ./build/events-test" }

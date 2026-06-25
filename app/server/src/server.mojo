@@ -44,6 +44,7 @@ from orchestrator import Orchestrator, PROGRESS_SENTINEL, STAT_SENTINEL
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
+from logging import log
 from events import field, status, debug_event, approval, message, error_event
 from json import loads
 
@@ -629,7 +630,7 @@ def on_connect(mut conn: WsConnection) raises:
             "Running it locally over your vault…",
             "running"))
         var h = orch.vault_run_start(vault_dir)
-        print("[run] poll start: pid=", Int(h.pid), sep="")
+        log("[run] poll start: pid=" + String(Int(h.pid)))
         var n_ask = 0
         var ms_ask = 0.0
         var n_search = 0
@@ -644,7 +645,8 @@ def on_connect(mut conn: WsConnection) raises:
             running = reap == -1  # -1 = still running
             var lines = orch.vault_run_poll(h)
             if iters % 16 == 0:  # ~every 2s: prove the loop's alive + where it's stuck
-                print("[run] poll iter=", iters, " reap=", reap, " captured=", h.cursor, "B", sep="")
+                log("[run] poll iter=" + String(iters) + " reap=" + String(reap)
+                    + " captured=" + String(h.cursor) + "B")
             for i in range(len(lines)):
                 var ln = lines[i].copy()
                 if ln.startswith(PROGRESS_SENTINEL):
@@ -675,7 +677,7 @@ def on_connect(mut conn: WsConnection) raises:
                 else:
                     _usleep(120_000)  # 120 ms between polls
 
-        print("[run] poll done: iters=", iters, " timed_out=", timed_out, sep="")
+        log("[run] poll done: iters=" + String(iters) + " timed_out=" + String(timed_out))
         # A one-line summary of the on-device engine calls, before the answer.
         var total = n_ask + n_search
         if total > 0:
@@ -687,14 +689,21 @@ def on_connect(mut conn: WsConnection) raises:
             sum += " · " + _secs1(ms_ask + ms_search) + " total"
             conn.send_text(status("engine", sum, "done"))
 
+        # Past `poll done` the run is over, so a perceived "hang" on the SECOND
+        # question must live in this tail — finish/read, the WS sends, or releasing
+        # the queue slot. Bracket each step so the log shows exactly where it stalls.
+        log("[run] finish: reading captured output")
         var reply = orch.vault_run_finish(h)
+        log("[run] finish: reply " + String(reply.byte_length()) + "B")
         if timed_out:
             conn.send_text(status("execute", "Stopped — the run exceeded the time limit", "error"))
             conn.send_text(message("That took too long and was stopped. Please try another question."))
         else:
             conn.send_text(status("execute", "Running it locally over your vault", "done"))
             conn.send_text(message(reply))
+        log("[run] reply sent; releasing queue slot ticket=" + String(ticket))
         runq_done(ticket)  # leave the run slot → next waiter proceeds
+        log("[run] queue slot released")
         ticket = -1
     except e:
         conn.send_text(error_event(String(e)))
