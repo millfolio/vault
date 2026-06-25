@@ -665,6 +665,13 @@ def on_connect(mut conn: WsConnection) raises:
                     _ = external_call["kill", Int32](h.pid, Int32(_SIGKILL))
                     timed_out = True
                     running = False
+                    # Reap the corpse so it doesn't linger as a zombie. SIGKILL isn't
+                    # instant (a child wedged in a syscall dies when it returns), so
+                    # poll a few times before giving up.
+                    for _r in range(25):
+                        if orch.vault_run_reap(h) != -1:
+                            break
+                        _usleep(40_000)  # 40 ms
                 else:
                     _usleep(120_000)  # 120 ms between polls
 
