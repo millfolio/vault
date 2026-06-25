@@ -166,7 +166,12 @@
       <p>
         This application must be installed and run on your own Mac (mini) computer. It
         relies on a local model to see your data and on a foundational model to write
-        code. In this demo both are stubbed out.
+        code. In this demo the local model really runs on a Mac mini; only the
+        foundational model is stubbed out (its answers are replayed).
+      </p>
+      <p>
+        Because everything runs on that one Mac mini, requests are handled one at a
+        time — if others are ahead of you, you'll wait your turn.
       </p>
       <p>
         See <a href="https://millfolio.app" target="_blank" rel="noopener">millfolio.app</a>.
