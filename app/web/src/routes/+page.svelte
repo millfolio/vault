@@ -96,8 +96,14 @@
           queueMsg = e.state === "running" ? e.label : null;
           break;
         }
-        // Update the status line in place (keyed by stepId), else append it inline.
-        const i = items.findIndex((x) => x.kind === "status" && x.stepId === e.stepId);
+        // Update the status line in place (keyed by stepId) — but ONLY within the
+        // current turn (after the last user message), so a new question's statuses
+        // don't update the PREVIOUS question's lines (which left them looking stuck).
+        let lastUser = -1;
+        for (let k = 0; k < items.length; k++) if (items[k].kind === "user") lastUser = k;
+        const i = items.findIndex(
+          (x, idx) => idx > lastUser && x.kind === "status" && x.stepId === e.stepId,
+        );
         if (i === -1) {
           items.push({ kind: "status", id: uid(), stepId: e.stepId, label: e.label, state: e.state, detail: e.detail });
         } else {
@@ -173,6 +179,8 @@
 {#if queueMsg}
   <div class="queue-badge" role="status" aria-live="polite">⏳ {queueMsg}</div>
 {/if}
+
+<div class="version" title="build">{__APP_VERSION__}</div>
 
 <main>
   <header class="topbar">
@@ -300,5 +308,17 @@
   }
   @media (max-width: 480px) {
     .queue-badge { right: 8px; bottom: 8px; font-size: 12px; }
+  }
+  .version {
+    position: fixed;
+    left: 8px;
+    bottom: 6px;
+    z-index: 30;
+    font-size: 11px;
+    color: var(--text-dim);
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+    user-select: none;
   }
 </style>
