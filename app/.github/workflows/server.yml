@@ -45,6 +45,10 @@ jobs:
         working-directory: app/server
         run: pixi run test
 
+      - name: Test run-queue state file
+        working-directory: app/server
+        run: pixi run test-runqueue
+
       - name: Build millfolio-server
         working-directory: app/server
         run: pixi run build
