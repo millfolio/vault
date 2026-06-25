@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  
   import type { StepState } from "$lib/protocol";
 
   // One inline timeline: chat bubbles (user/assistant), plus the workflow events
@@ -55,38 +55,29 @@
   // (The real product keeps manual approval — gated on `demo`.)
   const AUTO_APPROVE_SECS = 15;
   let remaining = $state(0); // seconds left on the current auto-approve countdown
-  let pendingId = $state<string | null>(null); // approval id currently being timed
-  let ticker: ReturnType<typeof setInterval> | undefined;
-  function stopTimer() {
-    if (ticker !== undefined) clearInterval(ticker);
-    ticker = undefined;
-    pendingId = null;
-  }
+  // The id of the approval currently awaiting a decision (null if none). $derived so it
+  // recomputes reactively for EVERY question, not just the first.
+  const pendingApprovalId = $derived<string | null>(
+    demo ? ([...items].reverse().find((x) => x.kind === "approval" && !x.resolved)?.id ?? null) : null,
+  );
   function bumpTimer() {
     remaining += 60;
   }
-  onDestroy(stopTimer);
-
-  // Track the latest unresolved approval and (re)start the countdown for it.
+  // One countdown per pending approval; the effect's cleanup clears the interval when
+  // the pending id changes (next question) or the component unmounts.
   $effect(() => {
-    const pending = demo ? [...items].reverse().find((x) => x.kind === "approval" && !x.resolved) : undefined;
-    if (!pending) {
-      if (pendingId !== null) stopTimer();
-      return;
-    }
-    if (pending.id === pendingId) return; // already counting down for this one
-    stopTimer();
-    pendingId = pending.id;
+    const id = pendingApprovalId;
+    if (!id) return;
     remaining = AUTO_APPROVE_SECS;
-    ticker = setInterval(() => {
+    const h = setInterval(() => {
       remaining -= 1;
       if (remaining <= 0) {
-        const id = pendingId;
+        clearInterval(h);
         const step = items.find((x) => x.id === id)?.stepId ?? "";
-        stopTimer();
-        if (id) onapprove(id, step);
+        onapprove(id, step);
       }
     }, 1000);
+    return () => clearInterval(h);
   });
 
   const icon: Record<StepState, string> = {
@@ -154,9 +145,9 @@
           {:else}
             <div class="actions">
               <button class="approve" onclick={() => onapprove(it.id, it.stepId ?? "")}>
-                {#if demo && it.id === pendingId}Approve ({remaining}s){:else}Approve{/if}
+                {#if demo && it.id === pendingApprovalId}Approve ({remaining}s){:else}Approve{/if}
               </button>
-              {#if demo && it.id === pendingId}
+              {#if demo && it.id === pendingApprovalId}
                 <button class="bump" onclick={bumpTimer} title="Give yourself another minute to review">+1 min</button>
               {/if}
               <button class="reject" onclick={() => onreject(it.id, it.stepId ?? "")}>Reject</button>
