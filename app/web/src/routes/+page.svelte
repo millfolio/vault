@@ -138,7 +138,11 @@
         items.push({ kind: "debug", id: uid(), title: e.title, body: e.body, language: e.language });
         break;
       case "message":
-        items.push({ kind: "assistant", id: e.id, text: e.text });
+        // NB: the server stamps every message with id "msg" (events.mojo), so two
+        // identical answers (same cached program → same reply) would collide on the
+        // {#each items (it.id)} key and Svelte would silently drop the 2nd — the
+        // classic "2nd question hangs". Key on a fresh unique id, not the server's.
+        items.push({ kind: "assistant", id: uid(), text: e.text });
         busy = false;
         queueMsg = null;
         break;
