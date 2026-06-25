@@ -603,18 +603,15 @@ def on_connect(mut conn: WsConnection) raises:
         var waited = 0
         while True:
             var ahead = ticket - st[0]   # people in front of us
-            var qlen = st[1] - st[0]     # total waiting + running, including us
             if ahead <= 0:
-                conn.send_text(status("queue",
-                    "Position 1 of " + String(qlen) + " — running now", "done"))
+                conn.send_text(status("queue", "You're next — running now", "done"))
                 break
             waited += 1
             if waited > 600:  # ~300s — assume the queue stalled; take our turn anyway
-                conn.send_text(status("queue", "Starting now (queue wait timed out)", "done"))
+                conn.send_text(status("queue", "Starting now", "done"))
                 break
             conn.send_text(status("queue",
-                "Position " + String(ahead + 1) + " of " + String(qlen) + " — waiting…",
-                "running"))
+                "There are " + String(ahead) + " ahead of you", "running"))
             _usleep(500_000)  # re-check twice a second
             st = runq_peek()
 

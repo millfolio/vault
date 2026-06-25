@@ -56,6 +56,8 @@
   let busy = $state(false);
   let session: Session | undefined;
   let view = $state<"chat" | "vault">("chat");
+  // Run-queue position — shown as a floating bottom-right badge, not inline.
+  let queueMsg = $state<string | null>(null);
 
   // Intro disclaimer shown when the demo starts. Remembered per browser session so a
   // reload within the same tab doesn't nag, but every new visitor sees it once.
@@ -89,6 +91,11 @@
   function handle(e: ServerEvent) {
     switch (e.type) {
       case "status": {
+        // The run-queue position renders as a floating corner badge, not inline.
+        if (e.stepId === "queue") {
+          queueMsg = e.state === "running" ? e.label : null;
+          break;
+        }
         // Update the status line in place (keyed by stepId), else append it inline.
         const i = items.findIndex((x) => x.kind === "status" && x.stepId === e.stepId);
         if (i === -1) {
@@ -112,10 +119,12 @@
       case "message":
         items.push({ kind: "assistant", id: e.id, text: e.text });
         busy = false;
+        queueMsg = null;
         break;
       case "error":
         items.push({ kind: "assistant", id: uid(), text: `Error: ${e.message}` });
         busy = false;
+        queueMsg = null;
         break;
     }
   }
@@ -159,6 +168,10 @@
       <button class="intro-ok" onclick={dismissIntro}>Got it</button>
     </div>
   </div>
+{/if}
+
+{#if queueMsg}
+  <div class="queue-badge" role="status" aria-live="polite">⏳ {queueMsg}</div>
 {/if}
 
 <main>
@@ -270,5 +283,22 @@
   }
   .intro-ok:hover {
     filter: brightness(1.08);
+  }
+  .queue-badge {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 40;
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--accent);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  }
+  @media (max-width: 480px) {
+    .queue-badge { right: 8px; bottom: 8px; font-size: 12px; }
   }
 </style>
