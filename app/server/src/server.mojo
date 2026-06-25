@@ -713,16 +713,20 @@ def on_connect(mut conn: WsConnection) raises:
         # streaming our live position so the wait isn't a blind spinner.
         ticket = _runq_take()
         var st = _runq_peek()
-        if st[0] < ticket:
-            while st[0] < ticket:
-                var ahead = ticket - st[0]
-                var qlen = st[1] - st[0]
+        # Always surface the queue position — even "1 of 1" for a solo run — so the
+        # serial run-queue is visible, and update it live while we wait our turn.
+        while True:
+            var ahead = ticket - st[0]   # people in front of us
+            var qlen = st[1] - st[0]     # total waiting + running, including us
+            if ahead <= 0:
                 conn.send_text(status("queue",
-                    String(ahead) + " ahead of you (" + String(qlen) + " in the queue)…",
-                    "running"))
-                _usleep(500_000)  # re-check twice a second
-                st = _runq_peek()
-            conn.send_text(status("queue", "Your turn — running now", "done"))
+                    "Position 1 of " + String(qlen) + " — running now", "done"))
+                break
+            conn.send_text(status("queue",
+                "Position " + String(ahead + 1) + " of " + String(qlen) + " — waiting…",
+                "running"))
+            _usleep(500_000)  # re-check twice a second
+            st = _runq_peek()
 
         # Approved — surface the two real phases SEPARATELY so the wait isn't one
         # opaque "working": first compile the generated Mojo, then run it over the
