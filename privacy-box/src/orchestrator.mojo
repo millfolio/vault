@@ -190,7 +190,12 @@ struct Orchestrator(Movable):
         tools at the vault dir. Returns stdout (print_answer) — local; a runtime
         error surfaces here and is NEVER fed upstream."""
         print("• running it locally over your vault…")
-        _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
+        # setenv is process-global and NOT thread-safe: with multiple server workers a
+        # per-run setenv races other threads' getenv and corrupts environ, hanging the
+        # next posix_spawn. Only write when it actually changes (a no-op after the first
+        # run / when the launcher already exports MILLFOLIO_VAULT) — no realloc, no race.
+        if String(getenv("MILLFOLIO_VAULT", "")) != vault_dir:
+            _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
         var bin = self.sandbox.scratch_bin()
         var out = self.sandbox.run(bin, List[String]()).output.copy()
         _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")
@@ -208,7 +213,12 @@ struct Orchestrator(Movable):
         """Step 4a — point the tools at the vault dir and SPAWN the compiled binary
         in the loopback sandbox without blocking. Returns a handle to poll/reap."""
         print("• running it locally over your vault…")
-        _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
+        # setenv is process-global and NOT thread-safe: with multiple server workers a
+        # per-run setenv races other threads' getenv and corrupts environ, hanging the
+        # next posix_spawn. Only write when it actually changes (a no-op after the first
+        # run / when the launcher already exports MILLFOLIO_VAULT) — no realloc, no race.
+        if String(getenv("MILLFOLIO_VAULT", "")) != vault_dir:
+            _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
         var bin = self.sandbox.scratch_bin()
         return self.sandbox.run_start(bin, List[String]())
 
