@@ -629,6 +629,7 @@ def on_connect(mut conn: WsConnection) raises:
             "Running it locally over your vault…",
             "running"))
         var h = orch.vault_run_start(vault_dir)
+        print("[run] poll start: pid=", Int(h.pid), sep="")
         var n_ask = 0
         var ms_ask = 0.0
         var n_search = 0
@@ -639,8 +640,11 @@ def on_connect(mut conn: WsConnection) raises:
         while running:
             # Reap FIRST, then poll — so the final poll (once the child has exited)
             # still drains every progress/stat line written just before it died.
-            running = orch.vault_run_reap(h) == -1  # -1 = still running
+            var reap = orch.vault_run_reap(h)
+            running = reap == -1  # -1 = still running
             var lines = orch.vault_run_poll(h)
+            if iters % 16 == 0:  # ~every 2s: prove the loop's alive + where it's stuck
+                print("[run] poll iter=", iters, " reap=", reap, " captured=", h.cursor, "B", sep="")
             for i in range(len(lines)):
                 var ln = lines[i].copy()
                 if ln.startswith(PROGRESS_SENTINEL):
@@ -664,6 +668,7 @@ def on_connect(mut conn: WsConnection) raises:
                 else:
                     _usleep(120_000)  # 120 ms between polls
 
+        print("[run] poll done: iters=", iters, " timed_out=", timed_out, sep="")
         # A one-line summary of the on-device engine calls, before the answer.
         var total = n_ask + n_search
         if total > 0:
