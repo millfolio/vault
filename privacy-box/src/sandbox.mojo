@@ -26,6 +26,7 @@ Implementation notes / honest TODOs:
 from std.ffi import external_call, c_int, c_char, CStringSlice
 from std.memory import UnsafePointer, stack_allocation
 from std.os import getenv
+from logging import log
 
 
 # ── posix_spawn-based exec ────────────────────────────────────────────────────
@@ -230,7 +231,7 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
 
     if rc != 0:
         raise Error("posix_spawn (async) failed (rc=" + String(rc) + ")")
-    print("[run] spawn ok: pid=", Int(pid), "  (", argv[0], ")", sep="")
+    log("[run] spawn ok: pid=" + String(Int(pid)) + "  (" + argv[0] + ")")
     return pid
 
 

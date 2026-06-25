@@ -15,6 +15,7 @@ See run_vault_task for the full confidentiality argument.
 """
 
 from std.os import getenv, setenv
+from logging import log
 
 from budget import Budget
 from transport import LocalClient, RemoteClient, ChatMessage, _codegen_system
@@ -118,7 +119,7 @@ struct Orchestrator(Movable):
         """Step 1 — the ALIASED, frontier-safe manifest. Shell out to the trusted
         `mill manifest <vault_dir>` and capture its stdout. This is the ONLY
         vault info that reaches the remote model, aliases-only by construction."""
-        print("• aliasing the vault manifest (the frontier-safe view)…")
+        log("• aliasing the vault manifest (the frontier-safe view)…")
         var dac = millfolio_bin()
         var manifest_argv: List[String] = [dac, String("manifest"), vault_dir]
         var m = self.sandbox.capture(manifest_argv)
@@ -146,7 +147,7 @@ struct Orchestrator(Movable):
         """Step 2 — ask the model (budget-routed; EgressGuard-checked inside
         _codegen) for a `from vault import *` program from the question + the
         aliased manifest. The system prompt is resources/privacy_box-system.md."""
-        print("• asking the outside model to write the program…")
+        log("• asking the outside model to write the program…")
         var user_msg = (
             String("Question: ") + question
             + "\n\nVault manifest (aliases only — you never see real content):\n"
@@ -168,7 +169,7 @@ struct Orchestrator(Movable):
         feed back; a RUNTIME error could carry real content and is never sent
         upstream). Leaves the compiled binary in scratch; raises if it never
         compiles."""
-        print("• compiling the generated program…")
+        log("• compiling the generated program…")
         var work = code.copy()
         var includes = vault_include_paths()
         var compiled = self.sandbox.compile(work, includes)
@@ -189,7 +190,7 @@ struct Orchestrator(Movable):
         local models but the program cannot phone home). MILLFOLIO_VAULT points the
         tools at the vault dir. Returns stdout (print_answer) — local; a runtime
         error surfaces here and is NEVER fed upstream."""
-        print("• running it locally over your vault…")
+        log("• running it locally over your vault…")
         # setenv is process-global and NOT thread-safe: with multiple server workers a
         # per-run setenv races other threads' getenv and corrupts environ, hanging the
         # next posix_spawn. Only write when it actually changes (a no-op after the first
@@ -212,7 +213,7 @@ struct Orchestrator(Movable):
     def vault_run_start(mut self, vault_dir: String) raises -> RunHandle:
         """Step 4a — point the tools at the vault dir and SPAWN the compiled binary
         in the loopback sandbox without blocking. Returns a handle to poll/reap."""
-        print("• running it locally over your vault…")
+        log("• running it locally over your vault…")
         # setenv is process-global and NOT thread-safe: with multiple server workers a
         # per-run setenv races other threads' getenv and corrupts environ, hanging the
         # next posix_spawn. Only write when it actually changes (a no-op after the first

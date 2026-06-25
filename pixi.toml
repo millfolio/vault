@@ -35,7 +35,7 @@ ffi = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; source ../flare/flare/tls/ff
 vault = { cmd = "mkdir -p build && mojo build core/src/millfolio.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/vault", depends-on = ["ffi"] }
 
 # privacy-box = the privacy harness (frontier/local broker, codegen, egress guard).
-privacy-box = { cmd = "mkdir -p build && mojo build privacy-box/src/privacy_box.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -o build/privacy_box", depends-on = ["ffi"] }
+privacy-box = { cmd = "mkdir -p build && mojo build privacy-box/src/privacy_box.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/privacy_box", depends-on = ["ffi"] }
 
 # the "one mojo" — both Mojo binaries.
 build = { depends-on = ["vault", "privacy-box"] }
@@ -49,7 +49,7 @@ test-sha256 = { cmd = "mkdir -p build && mojo build core/test/index/sha256_test.
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
-test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/test/sandbox_test.mojo -I privacy-box/src -o build/sandbox-test && ./build/sandbox-test" }
+test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/test/sandbox_test.mojo -I privacy-box/src -I ../logging.mojo/src -o build/sandbox-test && ./build/sandbox-test" }
 # Gate: M/D statement dates fold with the statement's year into sortable ISO.
 test-dates = { cmd = "mkdir -p build && mojo build core/test/extract/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
 # Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
