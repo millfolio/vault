@@ -39,3 +39,5 @@ build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../va
 
 # Unit-test the protocol wire helpers (events.mojo) — no flare/privacy_box, only json.
 test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../../json -o build/events-test && ./build/events-test" }
+# Unit-test the serial run-queue state file (runqueue.mojo) — flock + ticket invariants.
+test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I src -I ../../flare -o build/runqueue-test && rm -f /tmp/millfolio-runq-test /tmp/millfolio-runq-test.lock && MILLFOLIO_RUNQ_PATH=/tmp/millfolio-runq-test ./build/runqueue-test" }

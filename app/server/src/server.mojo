@@ -41,6 +41,7 @@ from std.ffi import external_call, c_char
 from settings import load_config
 from wiring import build_vault_orchestrator
 from orchestrator import Orchestrator, PROGRESS_SENTINEL, STAT_SENTINEL
+from runqueue import runq_take, runq_peek, runq_done, runq_reset
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
 from events import field, status, debug_event, approval, message, error_event
@@ -540,129 +541,13 @@ def _secs1(ms: Float64) -> String:
     return String(tenths // 10) + "." + String(tenths % 10) + "s"
 
 
-# ── serial run-queue WITH POSITION (multi-worker safe) ───────────────────────
-# With MILLFOLIO_WORKERS>=2, several visitors reach codegen/approval at once, but the
-# sandboxed compile+run (shared scratch path, heavy `mojo build`, on-device inference)
-# must be SERIAL. A FIFO ticket queue in a PER-PORT state file (/tmp/millfolio-runq-<port>
-# — so the demo :10010 and production :10000 keep separate queues) gives both
-# serialization AND each waiter's live position. A run is also time-bounded (the child
-# is killed past _RUN_MAX_ITERS) so one slow/stuck program can't stall the whole queue.
-# macOS/loopback-only demo → raw libc FFI is fine.
-comptime _O_RDWR: Int = 0x0002
-comptime _O_CREAT: Int = 0x0200
-comptime _LOCK_EX: Int = 0x0002
-comptime _LOCK_UN: Int = 0x0008
+# ── serial run-queue ─────────────────────────────────────────────────────────
+# The FIFO ticket queue (one sandboxed run at a time across workers, with each
+# waiter's live position) lives in runqueue.mojo and is unit-tested by
+# test/runqueue_test.mojo. A run is ALSO time-bounded here (the child is killed past
+# _RUN_MAX_ITERS) so one slow/stuck program can't stall the whole queue.
 comptime _SIGKILL: Int = 9
 comptime _RUN_MAX_ITERS: Int = 1000   # ~120s at 120ms/poll — kill a run past this
-
-
-def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
-    """malloc a NUL-terminated C copy of `s` (caller frees with `.free()`)."""
-    var n = s.byte_length()
-    var p = alloc[c_char](n + 1)
-    var sp = s.unsafe_ptr()
-    for i in range(n):
-        (p + i).init_pointee_copy(c_char(Int(sp[i])))
-    (p + n).init_pointee_copy(c_char(0))
-    return p
-
-
-def _runq_path() -> String:
-    return String("/tmp/millfolio-runq-") + String(getenv("MILLFOLIO_PORT", "0"))
-
-
-def _runq_open() -> Int32:
-    var cpath = _cstr(_runq_path())
-    var fd = external_call["open", Int32](cpath, Int32(_O_RDWR | _O_CREAT), Int32(0o600))
-    cpath.free()
-    return fd
-
-
-def _runq_parse(buf: UnsafePointer[UInt8, _], n: Int) -> Tuple[Int, Int]:
-    """Parse the two space-separated ints `head tail` out of the state file bytes."""
-    var vals = List[Int]()
-    var cur = 0
-    var indig = False
-    for i in range(n):
-        var c = Int(buf[i])
-        if c >= 48 and c <= 57:
-            cur = cur * 10 + (c - 48); indig = True
-        elif indig:
-            vals.append(cur); cur = 0; indig = False
-    if indig:
-        vals.append(cur)
-    var a = vals[0] if len(vals) >= 1 else 0
-    var b = vals[1] if len(vals) >= 2 else 0
-    return (a, b)
-
-
-def _runq_read_fd(fd: Int32) -> Tuple[Int, Int]:
-    var buf = alloc[UInt8](64)
-    var n = external_call["pread", Int](fd, buf, Int(63), Int(0))  # positioned read @0
-    var nn = Int(n) if Int(n) > 0 else 0
-    var ht = _runq_parse(buf, nn)
-    buf.free()
-    return ht
-
-
-def _runq_write_fd(fd: Int32, head: Int, tail: Int):
-    var s = String(head) + " " + String(tail) + "\n"
-    _ = external_call["ftruncate", Int32](fd, Int(0))
-    var cs = _cstr(s)
-    _ = external_call["pwrite", Int](fd, cs, s.byte_length(), Int(0))  # positioned write @0
-    cs.free()
-
-
-def _runq_take() -> Int:
-    """Enter the queue: atomically grab the next ticket. Returns it (0 on failure)."""
-    var fd = _runq_open()
-    if fd < Int32(0):
-        return 0
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_EX))
-    var ht = _runq_read_fd(fd)
-    var my = ht[1]
-    _runq_write_fd(fd, ht[0], ht[1] + 1)
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_UN))
-    _ = external_call["close", Int32](fd)
-    return my
-
-
-def _runq_peek() -> Tuple[Int, Int]:
-    """(head, tail): head = ticket now running, tail = next ticket to hand out."""
-    var fd = _runq_open()
-    if fd < Int32(0):
-        return (0, 0)
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_EX))
-    var ht = _runq_read_fd(fd)
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_UN))
-    _ = external_call["close", Int32](fd)
-    return ht
-
-
-def _runq_done(my: Int):
-    """Leave the run slot: advance head past our ticket so the next waiter proceeds."""
-    var fd = _runq_open()
-    if fd < Int32(0):
-        return
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_EX))
-    var ht = _runq_read_fd(fd)
-    var nh = ht[0]
-    if my + 1 > nh:
-        nh = my + 1
-    _runq_write_fd(fd, nh, ht[1])
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_UN))
-    _ = external_call["close", Int32](fd)
-
-
-def _runq_reset():
-    """Reset our port's queue at startup — stale head/tail from a prior process stalls."""
-    var fd = _runq_open()
-    if fd < Int32(0):
-        return
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_EX))
-    _runq_write_fd(fd, 0, 0)
-    _ = external_call["flock", Int32](fd, Int32(_LOCK_UN))
-    _ = external_call["close", Int32](fd)
 
 
 def on_connect(mut conn: WsConnection) raises:
@@ -682,7 +567,7 @@ def on_connect(mut conn: WsConnection) raises:
         conn.send_text(error_event("empty or malformed ask"))
         conn.close(WsCloseCode.NORMAL)
         return
-    var ticket = -1  # our run-queue ticket; >= 0 once we've entered (see _runq_*)
+    var ticket = -1  # our run-queue ticket; >= 0 once we've entered (see runqueue.mojo)
     try:
         var cfg = load_config()
         var vault_dir = resolve_vault_dir()
@@ -711,10 +596,11 @@ def on_connect(mut conn: WsConnection) raises:
         # visitors reach here at once; only ONE runs at a time (shared scratch path +
         # heavy build + on-device inference). Take a FIFO ticket and wait our turn,
         # streaming our live position so the wait isn't a blind spinner.
-        ticket = _runq_take()
-        var st = _runq_peek()
+        ticket = runq_take()
+        var st = runq_peek()
         # Always surface the queue position — even "1 of 1" for a solo run — so the
         # serial run-queue is visible, and update it live while we wait our turn.
+        var waited = 0
         while True:
             var ahead = ticket - st[0]   # people in front of us
             var qlen = st[1] - st[0]     # total waiting + running, including us
@@ -722,11 +608,15 @@ def on_connect(mut conn: WsConnection) raises:
                 conn.send_text(status("queue",
                     "Position 1 of " + String(qlen) + " — running now", "done"))
                 break
+            waited += 1
+            if waited > 600:  # ~300s — assume the queue stalled; take our turn anyway
+                conn.send_text(status("queue", "Starting now (queue wait timed out)", "done"))
+                break
             conn.send_text(status("queue",
                 "Position " + String(ahead + 1) + " of " + String(qlen) + " — waiting…",
                 "running"))
             _usleep(500_000)  # re-check twice a second
-            st = _runq_peek()
+            st = runq_peek()
 
         # Approved — surface the two real phases SEPARATELY so the wait isn't one
         # opaque "working": first compile the generated Mojo, then run it over the
@@ -795,12 +685,12 @@ def on_connect(mut conn: WsConnection) raises:
         else:
             conn.send_text(status("execute", "Running it locally over your vault", "done"))
             conn.send_text(message(reply))
-        _runq_done(ticket)  # leave the run slot → next waiter proceeds
+        runq_done(ticket)  # leave the run slot → next waiter proceeds
         ticket = -1
     except e:
         conn.send_text(error_event(String(e)))
         if ticket >= 0:
-            _runq_done(ticket)  # release the slot if we died mid-run
+            runq_done(ticket)  # release the slot if we died mid-run
     conn.close(WsCloseCode.NORMAL)
 
 
@@ -829,7 +719,7 @@ def main() raises:
     # the WebSocket Upgrade headers, the streaming `on_connect` chat — no second port.
     # (The 2-arg serve overload is plain-function-only; we use a stateful Handler
     # struct, so set the WS handler on the config and use the Handler-typed serve.)
-    _runq_reset()  # clear any stale run-queue state from a prior process
+    runq_reset()  # clear any stale run-queue state from a prior process
     var srv = HttpServer.bind(SocketAddr.localhost(UInt16(port)))
     srv.config.ws_handler = on_connect
     var workers = _workers()
