@@ -620,14 +620,21 @@ def _model_label() -> String:
     return String(getenv("MILLFOLIO_MODEL_LABEL", "Qwen2.5-3B-Instruct"))
 
 
+def _app_version() -> String:
+    """The deployed build label (matches the UI's bottom-bar stamp: '<sha> · <date>').
+    Stamped on each stats record so the Stats page can average per deployed version.
+    MILLFOLIO_VERSION is set by run-demo.sh from the deploy stamp; 'dev' otherwise."""
+    return String(getenv("MILLFOLIO_VERSION", "dev"))
+
+
 def _stats_path() -> String:
     """Where per-question usage records accumulate (JSONL). MILLFOLIO_STATS_FILE
     overrides; defaults under the config dir (which `cp -R` deploys never delete)."""
     return String(getenv("MILLFOLIO_STATS_FILE", _config_dir() + "/stats.jsonl"))
 
 
-def _append_stats(epoch: Int64, question: String, label: String, ok: Bool,
-                  total_ms: Float64, pf_tok: Int, gen_tok: Int,
+def _append_stats(epoch: Int64, question: String, label: String, version: String,
+                  ok: Bool, total_ms: Float64, pf_tok: Int, gen_tok: Int,
                   pf_ms: Float64, dec_ms: Float64,
                   names: List[String], counts: List[Int], ms: List[Float64]):
     """Append ONE self-contained JSON object (a usage record) to the stats file.
@@ -645,6 +652,7 @@ def _append_stats(epoch: Int64, question: String, label: String, ok: Bool,
         '{"ts":' + String(epoch)
         + ',"q":' + json_escape(question)
         + ',"model":' + json_escape(label)
+        + ',"version":' + json_escape(version)
         + ',"ok":' + ("true" if ok else "false")
         + ',"total_ms":' + String(Int(total_ms + 0.5))
         + ',"prefill_tok":' + String(pf_tok)
@@ -905,7 +913,7 @@ def on_connect(mut conn: WsConnection) raises:
         # run slot, so writes across workers are serialized. total = work time only
         # (pre-approval manifest+codegen + post-approval compile+run); the human pause
         # and queue wait are excluded so the average reflects the machine, not the user.
-        _append_stats(_epoch_s(), question, _model_label(), not timed_out,
+        _append_stats(_epoch_s(), question, _model_label(), _app_version(), not timed_out,
                       pre_ms + _ms_since(t_run0), pf_tok, gen_tok, pf_ms, dec_ms,
                       api_names, api_count, api_ms)
         runq_done(ticket)  # leave the run slot → next waiter proceeds

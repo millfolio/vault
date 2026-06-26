@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import ChatPanel from "$lib/components/ChatPanel.svelte";
   import VaultPanel from "$lib/components/VaultPanel.svelte";
+  import StatsPanel from "$lib/components/StatsPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
   import type { ServerEvent, Session, MillfolioClient, StepState } from "$lib/protocol";
@@ -70,7 +71,7 @@
   let items = $state<ChatItem[]>([]);
   let busy = $state(false);
   let session: Session | undefined;
-  let view = $state<"chat" | "vault">("chat");
+  let view = $state<"chat" | "vault" | "stats">("chat");
   // Run-queue position — shown as a floating bottom-right badge, not inline.
   let queueMsg = $state<string | null>(null);
   // The on-device model the server serves (bottom status bar). Empty under the
@@ -218,13 +219,16 @@
     <nav class="tabs">
       <button class:active={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
       <button class:active={view === "vault"} onclick={() => (view = "vault")}>Vault</button>
+      <button class:active={view === "stats"} onclick={() => (view = "stats")}>Stats</button>
     </nav>
   </header>
   <div class="single">
     {#if view === "chat"}
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
-    {:else}
+    {:else if view === "vault"}
       <VaultPanel />
+    {:else}
+      <StatsPanel />
     {/if}
   </div>
   <footer class="statusbar">
@@ -234,7 +238,6 @@
       </span>
     {/if}
     <span class="spacer"></span>
-    <a class="statslink" href="/stats">Stats</a>
     <span class="ver" title="build">{__APP_VERSION__}</span>
   </footer>
 </main>
@@ -377,14 +380,6 @@
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
-  }
-  .statusbar .statslink {
-    color: var(--text-dim);
-    font-weight: 600;
-    text-decoration: none;
-  }
-  .statusbar .statslink:hover {
-    color: var(--accent);
   }
   .statusbar .ver {
     opacity: 0.6;
