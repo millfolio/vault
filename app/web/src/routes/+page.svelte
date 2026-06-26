@@ -209,7 +209,7 @@
 <main>
   <header class="topbar">
     <div class="brand">
-      <img class="brand-logo" src="/favicon.svg" alt="" width="22" height="22" />
+      <img class="brand-logo" src="/logo.png" alt="" width="22" height="22" />
       {brandName}
     </div>
     <nav class="tabs">
