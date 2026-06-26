@@ -73,6 +73,9 @@
   let view = $state<"chat" | "vault">("chat");
   // Run-queue position — shown as a floating bottom-right badge, not inline.
   let queueMsg = $state<string | null>(null);
+  // The on-device model the server serves (bottom status bar). Empty under the
+  // in-browser mock (:5173, no backend) — the bar just omits it then.
+  let modelName = $state("");
 
   // Intro disclaimer shown when the demo starts. Remembered per browser session so a
   // reload within the same tab doesn't nag, but every new visitor sees it once.
@@ -84,6 +87,11 @@
     } catch {
       showIntro = true; // sessionStorage unavailable (private mode etc.) — still show it
     }
+    // Ask the server which model it's serving (best-effort; mock has no backend).
+    fetch("/api/model")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && typeof d.model === "string") modelName = d.model; })
+      .catch(() => {});
   });
   function dismissIntro() {
     showIntro = false;
@@ -204,8 +212,6 @@
   <div class="queue-badge" role="status" aria-live="polite">⏳ {queueMsg}</div>
 {/if}
 
-<div class="version" title="build">{__APP_VERSION__}</div>
-
 <main>
   <header class="topbar">
     <div class="brand">{brandName}</div>
@@ -221,6 +227,16 @@
       <VaultPanel />
     {/if}
   </div>
+  <footer class="statusbar">
+    {#if modelName}
+      <span class="model" title="on-device model answering your questions">
+        <span class="dot" aria-hidden="true"></span>{modelName}
+      </span>
+    {/if}
+    <span class="spacer"></span>
+    <a class="statslink" href="/stats">Stats</a>
+    <span class="ver" title="build">{__APP_VERSION__}</span>
+  </footer>
 </main>
 
 <style>
@@ -319,7 +335,7 @@
   .queue-badge {
     position: fixed;
     right: 16px;
-    bottom: 16px;
+    bottom: 40px; /* clear the bottom status bar */
     z-index: 40;
     padding: 8px 14px;
     border-radius: var(--radius);
@@ -331,18 +347,48 @@
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   }
   @media (max-width: 480px) {
-    .queue-badge { right: 8px; bottom: 8px; font-size: 12px; }
+    .queue-badge { right: 8px; bottom: 34px; font-size: 12px; }
   }
-  .version {
-    position: fixed;
-    left: 8px;
-    bottom: 6px;
-    z-index: 30;
-    font-size: 11px;
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 12px;
     color: var(--text-dim);
+    min-height: 26px;
+  }
+  .statusbar .spacer {
+    flex: 1;
+  }
+  .statusbar .model {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .statusbar .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .statusbar .statslink {
+    color: var(--text-dim);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .statusbar .statslink:hover {
+    color: var(--accent);
+  }
+  .statusbar .ver {
     opacity: 0.6;
     font-variant-numeric: tabular-nums;
-    pointer-events: none;
     user-select: none;
   }
 </style>

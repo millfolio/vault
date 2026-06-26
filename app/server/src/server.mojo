@@ -28,7 +28,7 @@ multiplex them.)
     pixi run build   # -> build/millfolio-server, listens on 127.0.0.1:10000
 """
 
-from std.memory import alloc
+from std.memory import alloc, UnsafePointer
 from std.os import getenv, listdir, makedirs
 from std.os.path import isfile, isdir, getsize
 
@@ -36,7 +36,7 @@ from flare.prelude import *
 from flare.http import Handler
 from flare.ws import WsConnection, WsOpcode, WsCloseCode
 
-from std.ffi import external_call, c_char
+from std.ffi import external_call, c_char, c_int
 from std.time import perf_counter_ns
 
 from settings import load_config
@@ -46,7 +46,7 @@ from runqueue import runq_take, runq_peek, runq_done, runq_reset
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
 from logging import log
-from events import field, status, debug_event, approval, message, error_event
+from events import field, status, debug_event, approval, message, error_event, json_escape
 from json import loads
 
 comptime DEFAULT_PORT = 10000
@@ -311,11 +311,21 @@ struct Api(Handler, Copyable, Movable):
             return self.handle_search(req)
         if path == "/health":
             return _cors(ok("millfolio ok"))
+        # The on-device model name — the UI shows it in the bottom bar.
+        if path == "/api/model":
+            return _cors(ok_json('{"model":' + json_escape(_model_label()) + "}"))
+        # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
+        if path == "/api/stats":
+            return self.handle_stats()
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
             var root = _web_root()
             if path == "/" or path == "/index.html":
+                return _serve_file(root + "/index.html", "text/html; charset=utf-8")
+            # A client-side route (no file extension, e.g. /stats) → serve the SPA
+            # entry so SvelteKit's router can render it (adapter-static fallback).
+            if path.find(".") == -1:
                 return _serve_file(root + "/index.html", "text/html; charset=utf-8")
             # Any other path is a built asset — SvelteKit emits /_app/immutable/…
             # (JS/CSS), /_app/version.json, /favicon.svg, etc. Serve it from the web
@@ -336,6 +346,30 @@ struct Api(Handler, Copyable, Movable):
         except e:
             reply = String("error: ") + String(e)
         return _cors(ok_json('{"reply":' + _json_escape(reply) + "}"))
+
+    def handle_stats(self) raises -> Response:
+        """Return the usage log as {"model": <label>, "records": [<obj>, …]}. The file
+        is JSONL (each line is already a valid object), so we comma-join the non-empty
+        lines into an array — no server-side JSON parsing. Missing file → empty list."""
+        var recs = String("")
+        var first = True
+        try:
+            var raw: String
+            with open(_stats_path(), "r") as f:
+                raw = f.read()
+            var lines = raw.split("\n")
+            for i in range(len(lines)):
+                var ln = String(lines[i]).strip()
+                if len(ln) == 0:
+                    continue
+                if not first:
+                    recs += ","
+                recs += ln
+                first = False
+        except:
+            pass
+        return _cors(ok_json('{"model":' + json_escape(_model_label())
+                             + ',"records":[' + recs + "]}"))
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
@@ -572,6 +606,61 @@ def _ms_since(t0: UInt) -> Float64:
     return Float64(perf_counter_ns() - t0) / 1.0e6
 
 
+def _epoch_s() -> Int64:
+    """Unix epoch seconds, right now — time(2) with a NULL arg. For stats timestamps
+    (perf_counter_ns is monotonic, not wall-clock, so it can't date a record)."""
+    var null = UnsafePointer[NoneType, MutUntrackedOrigin](unsafe_from_address=Int(0))
+    return external_call["time", Int64](null)
+
+
+def _model_label() -> String:
+    """The on-device model name shown in the UI's bottom bar + stamped on each stats
+    record. MILLFOLIO_MODEL_LABEL (set by run-demo.sh from the engine's /v1/models)
+    overrides; defaults to the Qwen the demo ships."""
+    return String(getenv("MILLFOLIO_MODEL_LABEL", "Qwen2.5-3B-Instruct"))
+
+
+def _stats_path() -> String:
+    """Where per-question usage records accumulate (JSONL). MILLFOLIO_STATS_FILE
+    overrides; defaults under the config dir (which `cp -R` deploys never delete)."""
+    return String(getenv("MILLFOLIO_STATS_FILE", _config_dir() + "/stats.jsonl"))
+
+
+def _append_stats(epoch: Int64, question: String, label: String, ok: Bool,
+                  total_ms: Float64, pf_tok: Int, gen_tok: Int,
+                  pf_ms: Float64, dec_ms: Float64,
+                  names: List[String], counts: List[Int], ms: List[Float64]):
+    """Append ONE self-contained JSON object (a usage record) to the stats file.
+    JSONL — one object per line — so /api/stats can return the file verbatim and the
+    browser does the averaging (the Mojo json lib is avoided on this path). Best-effort:
+    a write failure is logged, never propagated into the chat reply."""
+    var api = String("[")
+    for i in range(len(names)):
+        if i > 0:
+            api += ","
+        api += ("[" + json_escape(names[i]) + "," + String(counts[i])
+                + "," + String(Int(ms[i] + 0.5)) + "]")
+    api += "]"
+    var line = (
+        '{"ts":' + String(epoch)
+        + ',"q":' + json_escape(question)
+        + ',"model":' + json_escape(label)
+        + ',"ok":' + ("true" if ok else "false")
+        + ',"total_ms":' + String(Int(total_ms + 0.5))
+        + ',"prefill_tok":' + String(pf_tok)
+        + ',"gen_tok":' + String(gen_tok)
+        + ',"prefill_ms":' + String(Int(pf_ms + 0.5))
+        + ',"decode_ms":' + String(Int(dec_ms + 0.5))
+        + ',"api":' + api
+        + "}\n"
+    )
+    try:
+        with open(_stats_path(), "a") as f:
+            f.write(line)
+    except:
+        log("[stats] append failed (non-fatal)")
+
+
 def _bump(mut names: List[String], mut counts: List[Int], mut ms: List[Float64],
           name: String, n: Int, dt: Float64):
     """Accumulate `n` calls (+ `dt` ms) under `name` in the parallel api-stat lists
@@ -646,6 +735,10 @@ def on_connect(mut conn: WsConnection) raises:
         var pf_ms = 0.0
         var dec_ms = 0.0
 
+        # Wall-clock for the stats record: the WORK time (manifest+codegen, then
+        # compile+run), deliberately EXCLUDING the human approval pause + queue wait.
+        var t_total0 = perf_counter_ns()
+        var pre_ms = 0.0
         conn.send_text(status("manifest", "Aliasing vault manifest", "running"))
         var _t = perf_counter_ns()
         var manifest = orch.vault_manifest(vault_dir)
@@ -659,6 +752,7 @@ def on_connect(mut conn: WsConnection) raises:
         _bump(api_names, api_count, api_ms, "codegen", 1, _ms_since(_t))
         conn.send_text(debug_event("codegen", "Generated program", code, "mojo"))
         conn.send_text(status("codegen", "Writing the program", "done"))
+        pre_ms = _ms_since(t_total0)  # manifest + codegen, before the approval pause
 
         conn.send_text(status("run", "Run the generated program over your vault?", "awaiting-approval"))
         conn.send_text(approval("run", "Run the generated program over your vault?", code))
@@ -699,6 +793,7 @@ def on_connect(mut conn: WsConnection) raises:
         # line the generated program emits as a live "execute" status update (same
         # stepId, so the UI updates ONE line in place) instead of a frozen spinner.
         conn.send_text(status("run", "Approved — running", "done"))
+        var t_run0 = perf_counter_ns()  # compile + run wall-clock (post-approval/queue)
         conn.send_text(status("compile", "Compiling the generated program", "running"))
         _t = perf_counter_ns()
         var fixes = orch.vault_build(code)
@@ -806,6 +901,13 @@ def on_connect(mut conn: WsConnection) raises:
             conn.send_text(status("execute", "Running it locally over your vault", "done"))
             conn.send_text(message(reply, src_file, src_alias))
         log("[run] reply sent; releasing queue slot ticket=" + String(ticket))
+        # Persist this question's usage (JSONL) for the Stats page — still inside the
+        # run slot, so writes across workers are serialized. total = work time only
+        # (pre-approval manifest+codegen + post-approval compile+run); the human pause
+        # and queue wait are excluded so the average reflects the machine, not the user.
+        _append_stats(_epoch_s(), question, _model_label(), not timed_out,
+                      pre_ms + _ms_since(t_run0), pf_tok, gen_tok, pf_ms, dec_ms,
+                      api_names, api_count, api_ms)
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")
         ticket = -1
