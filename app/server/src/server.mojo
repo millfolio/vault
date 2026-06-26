@@ -712,6 +712,8 @@ def on_connect(mut conn: WsConnection) raises:
         var h = orch.vault_run_start(vault_dir)
         log("[run] poll start: pid=" + String(Int(h.pid)))
         var cur_label = String("Running it locally over your vault…")
+        var src_file = String("")   # first document a tool read — surfaced as the source
+        var src_alias = String("")  # …its alias, for the /api/doc?alias= link
         var running = True
         var iters = 0
         var timed_out = False
@@ -739,6 +741,11 @@ def on_connect(mut conn: WsConnection) raises:
                         pf_ms += atof(String(parts[3]))
                         dec_ms += atof(String(parts[4]))
                         dirty = True
+                    elif len(parts) >= 3 and String(parts[0]) == "source":
+                        # "source\t<alias>\t<filename>" — the first document a tool read.
+                        if src_alias == "":
+                            src_alias = String(parts[1])
+                            src_file = String(parts[2])
                     elif len(parts) == 2:
                         # "<tool>\t<ms>" — one vault-tool API call + its duration.
                         _bump(api_names, api_count, api_ms, String(parts[0]), 1, atof(String(parts[1])))
@@ -797,7 +804,7 @@ def on_connect(mut conn: WsConnection) raises:
             conn.send_text(message("That took too long and was stopped. Please try another question."))
         else:
             conn.send_text(status("execute", "Running it locally over your vault", "done"))
-            conn.send_text(message(reply))
+            conn.send_text(message(reply, src_file, src_alias))
         log("[run] reply sent; releasing queue slot ticket=" + String(ticket))
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")

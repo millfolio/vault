@@ -42,6 +42,8 @@ export interface MessageEvent {
   id: string;
   role: "assistant";
   text: string;
+  source?: string;       // filename of the first document used to answer
+  sourceAlias?: string;  // its alias → link to /api/doc?alias=<sourceAlias>
 }
 
 export interface ErrorEvent {

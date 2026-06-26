@@ -82,10 +82,17 @@ def approval(step: String, label: String, body: String) -> String:
     )
 
 
-def message(text: String) -> String:
+def message(text: String, source: String = String(""), source_alias: String = String("")) -> String:
+    # `source`/`source_alias` (optional) — the filename + alias of the first document
+    # used to answer. The UI renders the filename as a link to /api/doc?alias=<alias>
+    # (alias-gated; no real path leaves). Omitted when empty.
+    var src = String("")
+    if len(source) > 0 and len(source_alias) > 0:
+        src = ',"source":' + json_escape(source) + ',"sourceAlias":' + json_escape(source_alias)
     return (
         '{"type":"message","id":"msg","role":"assistant","text":'
         + json_escape(text)
+        + src
         + "}"
     )
 

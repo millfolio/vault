@@ -17,6 +17,8 @@
     body?: string;
     language?: string;
     resolved?: "approved" | "rejected";
+    source?: string;       // assistant: filename of the doc used to answer
+    sourceAlias?: string;  // …its alias → /api/doc?alias=<sourceAlias>
   }
 
   let {
@@ -132,6 +134,12 @@
         <div class="msg {it.kind}">
           <span class="who">{it.kind === "user" ? "you" : "millfolio"}</span>
           <p>{it.text}</p>
+          {#if it.kind === "assistant" && it.source && it.sourceAlias}
+            <p class="source">
+              📄 Source:
+              <a href="/api/doc?alias={it.sourceAlias}" target="_blank" rel="noopener">{it.source}</a>
+            </p>
+          {/if}
         </div>
       {:else if it.kind === "status"}
         <div class="status {it.state}">
@@ -270,6 +278,16 @@
     background: var(--surface-2);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+  .msg p.source {
+    margin-top: 4px;
+    padding: 4px 12px;
+    background: transparent;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .msg p.source a {
+    color: var(--accent, #3b82f6);
   }
   .msg.user p {
     background: var(--accent-dim);
