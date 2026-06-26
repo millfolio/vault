@@ -115,6 +115,15 @@
   function nameFor(alias: string): string {
     return info?.files.find((f) => f.alias === alias)?.name ?? alias;
   }
+  // The indexed file behind a hit's alias (for opening it in the viewer).
+  function fileFor(alias: string): VaultFile | undefined {
+    return info?.files.find((f) => f.alias === alias);
+  }
+  // Open the document a search hit came from, in the in-app viewer.
+  function openHit(alias: string) {
+    const f = fileFor(alias);
+    if (f) openDoc(f);
+  }
 
   async function runSearch(e: SubmitEvent) {
     e.preventDefault();
@@ -219,7 +228,13 @@
             {#each hits as h (h.alias + h.score)}
               <div class="hit">
                 <div class="hmeta">
-                  <span class="hname">{nameFor(h.alias)}</span>
+                  {#if !mock && fileFor(h.alias)}
+                    <button type="button" class="hname link" onclick={() => openHit(h.alias)} title="View document">
+                      <span class="open" aria-hidden="true">↗</span>{nameFor(h.alias)}
+                    </button>
+                  {:else}
+                    <span class="hname">{nameFor(h.alias)}</span>
+                  {/if}
                   <span class="hscore">{h.score.toFixed(3)}</span>
                 </div>
                 <p class="hsnip">{h.text}</p>
@@ -466,6 +481,20 @@
   .hname {
     font-weight: 600;
     overflow-wrap: anywhere;
+  }
+  button.hname.link {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+  }
+  button.hname.link:hover {
+    text-decoration: underline;
   }
   .hscore {
     font-size: 11px;
