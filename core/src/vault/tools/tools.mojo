@@ -129,6 +129,16 @@ def _basename(path: String) -> String:
     return String(parts[len(parts) - 1]) if len(parts) > 0 else path
 
 
+def _relname(path: String) raises -> String:
+    """The file's name RELATIVE to the vault root (e.g. `reports/q1.pdf`) — its full
+    name within the vault, so files in subfolders read distinctly as the answer's
+    source. Falls back to the bare filename if `path` isn't under the vault dir."""
+    var pfx = _vault_dir() + "/"
+    if String(path).startswith(pfx):
+        return String(String(path).removeprefix(pfx))
+    return _basename(path)
+
+
 def _stat_source(falias: String, name: String):
     """Emit the SOURCE document a tool just read (`source\t<alias>\t<filename>`), fd 1
     unbuffered. The server keeps the FIRST and surfaces it as 'the document used to
@@ -220,7 +230,7 @@ def search(query: String, k: Int) raises -> List[Chunk]:
     _stat("search", Float64(perf_counter_ns() - t0) / 1.0e6)
     if len(r) > 0:  # the top hit's file — the document most relevant to the question
         try:
-            _stat_source(r[0].file_alias, _basename(_resolve(r[0].file_alias).path))
+            _stat_source(r[0].file_alias, _relname(_resolve(r[0].file_alias).path))
         except:
             pass
     return r^
@@ -231,7 +241,7 @@ def csv_rows(file_alias: String) raises -> List[List[String]]:
     Header row included as row 0."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
-    _stat_source(file_alias, _basename(fi.path))
+    _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "csv":
         raise Error("vault.csv_rows: " + file_alias + " is not a csv (it's " + fi.kind + ")")
     var r = readers.csv_rows(fi.path)
@@ -243,7 +253,7 @@ def pdf_text(file_alias: String) raises -> String:
     """Extracted text of a PDF file (by alias)."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
-    _stat_source(file_alias, _basename(fi.path))
+    _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "pdf":
         raise Error("vault.pdf_text: " + file_alias + " is not a pdf (it's " + fi.kind + ")")
     var r = readers.pdf_text(fi.path)
@@ -255,7 +265,7 @@ def md_text(file_alias: String) raises -> String:
     """Text of a markdown file (by alias)."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
-    _stat_source(file_alias, _basename(fi.path))
+    _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "md":
         raise Error("vault.md_text: " + file_alias + " is not a md file (it's " + fi.kind + ")")
     var r = readers.md_text(fi.path)
@@ -267,7 +277,7 @@ def docx_text(file_alias: String) raises -> String:
     """Extracted text of a Word .docx file (by alias)."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
-    _stat_source(file_alias, _basename(fi.path))
+    _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "docx":
         raise Error("vault.docx_text: " + file_alias + " is not a docx (it's " + fi.kind + ")")
     var r = readers.docx_text(fi.path)
@@ -285,7 +295,7 @@ def file_chunks(file_alias: String) raises -> List[String]:
     var r = index.file_chunks(file_alias)
     _stat("file_chunks", Float64(perf_counter_ns() - t0) / 1.0e6)
     try:
-        _stat_source(file_alias, _basename(_resolve(file_alias).path))
+        _stat_source(file_alias, _relname(_resolve(file_alias).path))
     except:
         pass
     return r^
@@ -309,7 +319,7 @@ def transactions(file_alias: String) raises -> List[Txn]:
     # must NOT stamp themselves as the source (that surfaced the wrong document).
     try:
         if len(r) > 0:
-            _stat_source(file_alias, _basename(_resolve(file_alias).path))
+            _stat_source(file_alias, _relname(_resolve(file_alias).path))
     except:
         pass
     return r^
