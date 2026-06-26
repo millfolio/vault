@@ -718,15 +718,29 @@ struct Sandbox(Movable):
                 berr = _read(build_out)
             except:
                 berr = String("")
-            # Normalize host-specific paths in the compiler error. The error embeds the
-            # absolute scratch + home paths (…/gen.mojo, the -I pkgs dir), which differ
-            # per machine (/Users/bgent vs /Users/<dev>). Since this error is fed to
-            # fix_code and thus becomes part of the replay-cache KEY, a host-specific
-            # path makes a fix captured on one machine never replay on another (the demo
-            # fell back on any program that needed a fix). Map both to fixed tokens so
-            # the fix request is identical everywhere.
+            # Normalize host-specific paths in the compiler error. The error embeds
+            # absolute paths — the scratch source (…/gen.mojo), the -I pkgs dirs, and
+            # the toolchain prefix — all under per-machine roots (/Users/bgent vs
+            # /Users/<dev>, or a throwaway prime HOME). Since this error is fed to
+            # fix_code and becomes part of the replay-cache KEY, ANY host-specific path
+            # makes a fix captured on one machine never replay on another (the demo fell
+            # back on every program that needed a fix). Map each root to a fixed token —
+            # canonical AND raw — so the fix request is byte-identical everywhere.
             var clean = _strip_compiler_noise(berr^)
             clean = _replace_all(clean, scratch_c, "@SCRATCH@")
+            for ip in range(len(include_paths)):
+                try:
+                    clean = _replace_all(clean, _canonical(include_paths[ip]), "@INC@")
+                except:
+                    pass
+                clean = _replace_all(clean, include_paths[ip], "@INC@")
+            var cprefix = getenv("CONDA_PREFIX", "")
+            if cprefix != "":
+                try:
+                    clean = _replace_all(clean, _canonical(cprefix), "@TOOLCHAIN@")
+                except:
+                    pass
+                clean = _replace_all(clean, cprefix, "@TOOLCHAIN@")
             try:
                 clean = _replace_all(clean, _canonical(getenv("HOME", "/")), "@HOME@")
             except:
