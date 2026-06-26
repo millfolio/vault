@@ -303,8 +303,13 @@ def transactions(file_alias: String) raises -> List[Txn]:
     var t0 = perf_counter_ns()
     var r = index.file_transactions(file_alias)
     _stat("transactions", Float64(perf_counter_ns() - t0) / 1.0e6)
+    # Only claim this file as the answer's source when it ACTUALLY contributed rows.
+    # A transactions question typically probes EVERY file to find the statement(s);
+    # files with no reconciled transactions (e.g. an insurance PDF) return empty and
+    # must NOT stamp themselves as the source (that surfaced the wrong document).
     try:
-        _stat_source(file_alias, _basename(_resolve(file_alias).path))
+        if len(r) > 0:
+            _stat_source(file_alias, _basename(_resolve(file_alias).path))
     except:
         pass
     return r^
