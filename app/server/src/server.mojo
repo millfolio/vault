@@ -559,6 +559,14 @@ def _rate1(n: Float64, ms: Float64) -> String:
     return String(tenths // 10) + "." + String(tenths % 10)
 
 
+def _dur(ms: Float64) -> String:
+    """A single op's wall-clock: '210ms' under a second, else '1.2s'. For an op
+    that ran ONCE, the duration is more telling than a per-second rate."""
+    if ms < 1000.0:
+        return String(Int(ms + 0.5)) + "ms"
+    return _secs1(ms)
+
+
 def _ms_since(t0: UInt) -> Float64:
     """Milliseconds elapsed since a perf_counter_ns() timestamp."""
     return Float64(perf_counter_ns() - t0) / 1.0e6
@@ -583,7 +591,11 @@ def _live_stats(names: List[String], counts: List[Int], pf_tok: Int, gen_tok: In
     working line — only the categories seen so far (empty stays clean)."""
     var s = String("")
     for i in range(len(names)):
-        s += " · " + names[i] + " ×" + String(counts[i])
+        # Single op → just the name; repeated → ×count.
+        if counts[i] == 1:
+            s += " · " + names[i]
+        else:
+            s += " · " + names[i] + " ×" + String(counts[i])
     if pf_tok > 0:
         s += " · prefill " + String(pf_tok) + " tok"
     if gen_tok > 0:
@@ -688,7 +700,9 @@ def on_connect(mut conn: WsConnection) raises:
         # stepId, so the UI updates ONE line in place) instead of a frozen spinner.
         conn.send_text(status("run", "Approved — running", "done"))
         conn.send_text(status("compile", "Compiling the generated program", "running"))
+        _t = perf_counter_ns()
         var fixes = orch.vault_build(code)
+        _bump(api_names, api_count, api_ms, "compile", 1, _ms_since(_t))
         if fixes > 0:
             _bump(api_names, api_count, api_ms, "fix", fixes, 0.0)
         conn.send_text(status("compile", "Compiling the generated program", "done"))
@@ -757,9 +771,15 @@ def on_connect(mut conn: WsConnection) raises:
         if len(api_names) > 0 or pf_tok + gen_tok > 0:
             var sum = String("Stats:")
             for i in range(len(api_names)):
-                sum += "  " + api_names[i] + " " + String(api_count[i])
-                if api_ms[i] > 0.0:  # timed calls get a rate; count-only ones (fix) don't
-                    sum += " (" + _rate1(Float64(api_count[i]), api_ms[i]) + "/s)"
+                if api_count[i] == 1:
+                    # One instance → the duration is more telling than a rate.
+                    sum += "  " + api_names[i]
+                    if api_ms[i] > 0.0:
+                        sum += " (" + _dur(api_ms[i]) + ")"
+                else:
+                    sum += "  " + api_names[i] + " ×" + String(api_count[i])
+                    if api_ms[i] > 0.0:  # repeated timed calls → a rate
+                        sum += " (" + _rate1(Float64(api_count[i]), api_ms[i]) + "/s)"
             if pf_tok > 0:
                 sum += "  prefill " + String(pf_tok) + " tok (" + _irate(Float64(pf_tok), pf_ms) + " tok/s)"
             if gen_tok > 0:
