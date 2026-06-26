@@ -542,6 +542,37 @@ def _secs1(ms: Float64) -> String:
     return String(tenths // 10) + "." + String(tenths % 10) + "s"
 
 
+def _irate(n: Float64, ms: Float64) -> String:
+    """Throughput `n` per second over `ms` milliseconds, integer: e.g. tokens/sec.
+    Empty-time-safe (returns "0")."""
+    if ms <= 0.0:
+        return String("0")
+    return String(Int(n * 1000.0 / ms + 0.5))
+
+
+def _rate1(n: Float64, ms: Float64) -> String:
+    """Throughput per second with one decimal — for the lower call rates (calls/s)."""
+    if ms <= 0.0:
+        return String("0.0")
+    var tenths = Int(n * 10000.0 / ms + 0.5)
+    return String(tenths // 10) + "." + String(tenths % 10)
+
+
+def _live_stats(n_search: Int, n_ask: Int, pf_tok: Int, gen_tok: Int) -> String:
+    """The running stats appended to the live 'working' line — only the non-zero
+    categories, so a tools-only run stays clean."""
+    var s = String("")
+    if n_search > 0:
+        s += " · search ×" + String(n_search)
+    if n_ask > 0:
+        s += " · ask ×" + String(n_ask)
+    if pf_tok > 0:
+        s += " · prefill " + String(pf_tok) + " tok"
+    if gen_tok > 0:
+        s += " · gen " + String(gen_tok) + " tok"
+    return s^
+
+
 # ── serial run-queue ─────────────────────────────────────────────────────────
 # The FIFO ticket queue (one sandboxed run at a time across workers, with each
 # waiter's live position) lives in runqueue.mojo and is unit-tested by
@@ -635,6 +666,12 @@ def on_connect(mut conn: WsConnection) raises:
         var ms_ask = 0.0
         var n_search = 0
         var ms_search = 0.0
+        # Model stats from the engine's `millfolio` response field (prefill/gen).
+        var pf_tok = 0
+        var gen_tok = 0
+        var pf_ms = 0.0
+        var dec_ms = 0.0
+        var cur_label = String("Running it locally over your vault…")
         var running = True
         var iters = 0
         var timed_out = False
@@ -647,19 +684,34 @@ def on_connect(mut conn: WsConnection) raises:
             if iters % 16 == 0:  # ~every 2s: prove the loop's alive + where it's stuck
                 log("[run] poll iter=" + String(iters) + " reap=" + String(reap)
                     + " captured=" + String(h.cursor) + "B")
+            var dirty = False
             for i in range(len(lines)):
                 var ln = lines[i].copy()
                 if ln.startswith(PROGRESS_SENTINEL):
-                    conn.send_text(status("execute", _progress_label(ln), "running"))
+                    cur_label = _progress_label(ln)
+                    dirty = True
                 elif ln.startswith(STAT_SENTINEL):
-                    # "<tool>\t<ms>" — accumulate per-engine-call count + duration.
                     var parts = String(ln.removeprefix(STAT_SENTINEL)).split("\t")
-                    if len(parts) == 2:
+                    if len(parts) >= 5 and String(parts[0]) == "model":
+                        # "model\t<pf_tok>\t<gen_tok>\t<pf_ms>\t<dec_ms>" — engine prefill/gen.
+                        pf_tok += Int(atof(String(parts[1])))
+                        gen_tok += Int(atof(String(parts[2])))
+                        pf_ms += atof(String(parts[3]))
+                        dec_ms += atof(String(parts[4]))
+                        dirty = True
+                    elif len(parts) == 2:
+                        # "<tool>\t<ms>" — per-engine-call API count + duration.
                         var ms = atof(String(parts[1]))
                         if String(parts[0]) == "search":
                             n_search += 1; ms_search += ms
                         else:
                             n_ask += 1; ms_ask += ms
+                        dirty = True
+            # Update the ONE 'working' line in place with the latest progress label
+            # + running api/model tallies, whenever a progress or stat line arrived.
+            if dirty:
+                conn.send_text(status("execute",
+                    cur_label + _live_stats(n_search, n_ask, pf_tok, gen_tok), "running"))
             if running:
                 iters += 1
                 if iters > _RUN_MAX_ITERS:
@@ -678,15 +730,18 @@ def on_connect(mut conn: WsConnection) raises:
                     _usleep(120_000)  # 120 ms between polls
 
         log("[run] poll done: iters=" + String(iters) + " timed_out=" + String(timed_out))
-        # A one-line summary of the on-device engine calls, before the answer.
-        var total = n_ask + n_search
-        if total > 0:
-            var sum = String("Engine: ") + String(total) + " calls"
-            if n_ask > 0:
-                sum += " · ask_local ×" + String(n_ask) + " (" + _secs1(ms_ask) + ")"
+        # Final per-category summary: total + throughput (number/sec) for each of the
+        # API calls (search/ask_local) and the model (prefill/gen tokens).
+        if n_search + n_ask + pf_tok + gen_tok > 0:
+            var sum = String("Stats:")
             if n_search > 0:
-                sum += " · search ×" + String(n_search) + " (" + _secs1(ms_search) + ")"
-            sum += " · " + _secs1(ms_ask + ms_search) + " total"
+                sum += "  search " + String(n_search) + " (" + _rate1(Float64(n_search), ms_search) + "/s)"
+            if n_ask > 0:
+                sum += "  ask_local " + String(n_ask) + " (" + _rate1(Float64(n_ask), ms_ask) + "/s)"
+            if pf_tok > 0:
+                sum += "  prefill " + String(pf_tok) + " tok (" + _irate(Float64(pf_tok), pf_ms) + " tok/s)"
+            if gen_tok > 0:
+                sum += "  gen " + String(gen_tok) + " tok (" + _irate(Float64(gen_tok), dec_ms) + " tok/s)"
             conn.send_text(status("engine", sum, "done"))
 
         # Past `poll done` the run is over, so a perceived "hang" on the SECOND
