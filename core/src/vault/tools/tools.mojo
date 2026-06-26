@@ -87,6 +87,42 @@ def _stat_model(prefill_tok: Int, gen_tok: Int, prefill_ms: Float64, decode_ms: 
     _ = external_call["write", Int](Int(1), b.unsafe_ptr(), Int(len(b)))
 
 
+def _int_after(s: String, key: String) -> Int:
+    """The integer immediately following `key` in `s` (skipping one ':' + spaces);
+    -1 if `key` is absent. A tiny scanner used to read the engine's `millfolio`
+    stats from the RAW response text — the Mojo json lib aborts (uncatchable
+    debug_assert) indexing that trailing nested object."""
+    var i = s.find(key)
+    if i == -1:
+        return -1
+    i += len(key)
+    var b = s.as_bytes()
+    while i < len(b) and (Int(b[i]) == 32 or Int(b[i]) == 58):  # spaces / ':'
+        i += 1
+    var n = 0
+    var any = False
+    while i < len(b) and Int(b[i]) >= 48 and Int(b[i]) <= 57:
+        n = n * 10 + (Int(b[i]) - 48)
+        any = True
+        i += 1
+    return n if any else -1
+
+
+def _stat_model_from_raw(raw: String):
+    """Emit model stats parsed from the RAW chat response text. No-op when the
+    `millfolio` field is absent (a non-millfolio endpoint). All four fields are
+    integers in the response."""
+    var gen = _int_after(raw, '"gen_tokens"')
+    if gen < 0:
+        return  # not a millfolio engine response
+    var pf = _int_after(raw, '"prompt_tokens"')
+    var pfms = _int_after(raw, '"prefill_ms"')
+    var decms = _int_after(raw, '"decode_ms"')
+    _stat_model(
+        pf if pf >= 0 else 0, gen,
+        Float64(pfms if pfms >= 0 else 0), Float64(decms if decms >= 0 else 0))
+
+
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
 
 @fieldwise_init
@@ -262,19 +298,13 @@ def ask_local(instruction: String, content: String) raises -> String:
             req.headers.set("content-type", "application/json")
             var client = HttpClient()
             var resp = client.send(req)
-            var j = resp.json()
-            var out = j["choices"][0]["message"]["content"].string_value()
+            var raw = resp.text()
+            var out = resp.json()["choices"][0]["message"]["content"].string_value()
             _stat("ask_local", Float64(perf_counter_ns() - t0) / 1.0e6)
-            # Engine prefill/gen stats ride in the non-standard `millfolio` field;
-            # best-effort (absent on a non-millfolio endpoint), never fail the call.
-            try:
-                _stat_model(
-                    Int(j["millfolio"]["prompt_tokens"].int_value()),
-                    Int(j["millfolio"]["gen_tokens"].int_value()),
-                    j["millfolio"]["prefill_ms"].float_value(),
-                    j["millfolio"]["decode_ms"].float_value())
-            except:
-                pass
+            # Engine prefill/gen stats ride in the non-standard `millfolio` field. The
+            # Mojo json lib crashes (uncatchable debug_assert) indexing that trailing
+            # nested object, so parse the numbers straight from the raw response text.
+            _stat_model_from_raw(raw)
             return out
         except:
             attempt += 1
@@ -332,16 +362,9 @@ def _batch_call(instruction: String, items: List[String]) raises -> List[String]
             req.headers.set("content-type", "application/json")
             var client = HttpClient()
             var resp = client.send(req)
-            var j = resp.json()
-            reply = j["choices"][0]["message"]["content"].string_value()
-            try:
-                _stat_model(
-                    Int(j["millfolio"]["prompt_tokens"].int_value()),
-                    Int(j["millfolio"]["gen_tokens"].int_value()),
-                    j["millfolio"]["prefill_ms"].float_value(),
-                    j["millfolio"]["decode_ms"].float_value())
-            except:
-                pass
+            var raw = resp.text()
+            reply = resp.json()["choices"][0]["message"]["content"].string_value()
+            _stat_model_from_raw(raw)  # millfolio stats from raw text (json lib aborts on it)
             break
         except:
             attempt += 1
