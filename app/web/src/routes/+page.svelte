@@ -238,6 +238,7 @@
       </span>
     {/if}
     <span class="spacer"></span>
+    <a class="barlink" href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener">Community ↗</a>
     <span class="ver" title="build">{__APP_VERSION__}</span>
   </footer>
 </main>
@@ -385,6 +386,14 @@
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .statusbar .barlink {
+    color: var(--text-dim);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .statusbar .barlink:hover {
+    color: var(--accent);
   }
   .statusbar .ver {
     opacity: 0.6;
