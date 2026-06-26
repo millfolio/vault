@@ -163,12 +163,13 @@ struct Orchestrator(Movable):
             + "\n\n===== OUTSIDE MODEL OUTPUT (program) =====\n" + code + "\n")
         return code
 
-    def vault_build(mut self, code: String) raises:
+    def vault_build(mut self, code: String) raises -> Int:
         """Step 3 — compile with the vault include paths, looping the fix on
         COMPILE errors ONLY (the code is aliased, so compiler errors are safe to
         feed back; a RUNTIME error could carry real content and is never sent
         upstream). Leaves the compiled binary in scratch; raises if it never
-        compiles."""
+        compiles. Returns the number of fix attempts (frontier fix calls made) so
+        the caller can surface it in the run stats."""
         log("• compiling the generated program…")
         var work = code.copy()
         var includes = vault_include_paths()
@@ -183,6 +184,7 @@ struct Orchestrator(Movable):
                 "vault: generated program did not compile after "
                 + String(self.max_fix_attempts) + " fix attempt(s). Last error:\n"
                 + compiled.output)
+        return attempt
 
     def vault_run(mut self, vault_dir: String) raises -> String:
         """Step 4 — run the compiled binary in the LOOPBACK sandbox over the REAL
@@ -270,5 +272,5 @@ struct Orchestrator(Movable):
         directly to stream status/debug and gate the run on user approval."""
         var manifest = self.vault_manifest(vault_dir)
         var code = self.vault_codegen(question, manifest)
-        self.vault_build(code)
+        _ = self.vault_build(code)
         return self.vault_run(vault_dir)

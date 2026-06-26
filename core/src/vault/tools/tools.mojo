@@ -144,11 +144,13 @@ def _resolve(file_id: String) raises -> FileInfo:
 def manifest() raises -> List[VaultFile]:
     """The aliased, frontier-visible file list — aliases, kinds, sizes, and the
     aliased CSV column schema. No paths, names, or contents."""
+    var t0 = perf_counter_ns()
     var infos = vault_files(_vault_dir())
     var out = List[VaultFile]()
     for i in range(len(infos)):
         ref fi = infos[i]
         out.append(VaultFile(fi.id.copy(), fi.kind.copy(), fi.size, fi.columns.copy()))
+    _stat("manifest", Float64(perf_counter_ns() - t0) / 1.0e6)
     return out^
 
 
@@ -166,34 +168,46 @@ def search(query: String, k: Int) raises -> List[Chunk]:
 def csv_rows(file_alias: String) raises -> List[List[String]]:
     """Rows of a CSV file (by alias); each row is its trimmed string fields.
     Header row included as row 0."""
+    var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
     if fi.kind != "csv":
         raise Error("vault.csv_rows: " + file_alias + " is not a csv (it's " + fi.kind + ")")
-    return readers.csv_rows(fi.path)
+    var r = readers.csv_rows(fi.path)
+    _stat("csv_rows", Float64(perf_counter_ns() - t0) / 1.0e6)
+    return r^
 
 
 def pdf_text(file_alias: String) raises -> String:
     """Extracted text of a PDF file (by alias)."""
+    var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
     if fi.kind != "pdf":
         raise Error("vault.pdf_text: " + file_alias + " is not a pdf (it's " + fi.kind + ")")
-    return readers.pdf_text(fi.path)
+    var r = readers.pdf_text(fi.path)
+    _stat("pdf_text", Float64(perf_counter_ns() - t0) / 1.0e6)
+    return r^
 
 
 def md_text(file_alias: String) raises -> String:
     """Text of a markdown file (by alias)."""
+    var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
     if fi.kind != "md":
         raise Error("vault.md_text: " + file_alias + " is not a md file (it's " + fi.kind + ")")
-    return readers.md_text(fi.path)
+    var r = readers.md_text(fi.path)
+    _stat("md_text", Float64(perf_counter_ns() - t0) / 1.0e6)
+    return r^
 
 
 def docx_text(file_alias: String) raises -> String:
     """Extracted text of a Word .docx file (by alias)."""
+    var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
     if fi.kind != "docx":
         raise Error("vault.docx_text: " + file_alias + " is not a docx (it's " + fi.kind + ")")
-    return readers.docx_text(fi.path)
+    var r = readers.docx_text(fi.path)
+    _stat("docx_text", Float64(perf_counter_ns() - t0) / 1.0e6)
+    return r^
 
 
 def file_chunks(file_alias: String) raises -> List[String]:
@@ -202,7 +216,10 @@ def file_chunks(file_alias: String) raises -> List[String]:
     which only sees ~k chunks and structurally undercounts aggregations. Reuses the
     text the index already extracted (no re-reading the file). Use this to scan an
     entire file's content. `[]` for an unknown alias or an unindexed vault."""
-    return index.file_chunks(file_alias)
+    var t0 = perf_counter_ns()
+    var r = index.file_chunks(file_alias)
+    _stat("file_chunks", Float64(perf_counter_ns() - t0) / 1.0e6)
+    return r^
 
 
 def transactions(file_alias: String) raises -> List[Txn]:
@@ -214,7 +231,10 @@ def transactions(file_alias: String) raises -> List[Txn]:
     these are exact — count = `len`, total = `sum(.amount)`, biggest = `max(.amount)`,
     no per-row model call. EMPTY when the file isn't a statement, has none, or
     couldn't be reconciled — then fall back to `file_chunks()` + `ask_local`."""
-    return index.file_transactions(file_alias)
+    var t0 = perf_counter_ns()
+    var r = index.file_transactions(file_alias)
+    _stat("transactions", Float64(perf_counter_ns() - t0) / 1.0e6)
+    return r^
 
 
 def ask_local(instruction: String, content: String) raises -> String:
