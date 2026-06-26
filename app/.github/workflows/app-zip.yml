@@ -40,6 +40,10 @@ jobs:
         with:
           repository: millfolio/jinja2.mojo
           path: jinja2.mojo
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/logging.mojo
+          path: logging.mojo
 
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
