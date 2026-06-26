@@ -1,5 +1,7 @@
 # Millfolio app
 
+> 💬 **Community:** questions, ideas, and show-and-tell live in [GitHub Discussions](https://github.com/millfolio/millfolio/discussions).
+
 The millfolio client surface — web, iOS, and Android apps plus the local backend
 server they talk to. All three apps present a **chat interface** alongside a
 **workflow panel** where you watch status, approve gated steps, and debug the
