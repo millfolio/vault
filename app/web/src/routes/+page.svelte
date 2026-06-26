@@ -215,7 +215,7 @@
 
 <main>
   <header class="topbar">
-    <div class="brand">{brandName}</div>
+    <a class="brand" href={`https://${brandName}.app`} title={`Go to ${brandName}.app`}>{brandName}</a>
     <nav class="tabs">
       <button class:active={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
       <button class:active={view === "vault"} onclick={() => (view = "vault")}>Vault</button>
@@ -260,6 +260,11 @@
   .brand {
     font-weight: 700;
     letter-spacing: 0.02em;
+    color: inherit;
+    text-decoration: none;
+  }
+  .brand:hover {
+    color: var(--accent);
   }
   .tabs {
     display: flex;
