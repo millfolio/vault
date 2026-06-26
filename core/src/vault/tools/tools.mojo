@@ -123,6 +123,26 @@ def _stat_model_from_raw(raw: String):
         Float64(pfms if pfms >= 0 else 0), Float64(decms if decms >= 0 else 0))
 
 
+def _basename(path: String) -> String:
+    """Last path component — the human filename, not the full local path."""
+    var parts = path.split("/")
+    return String(parts[len(parts) - 1]) if len(parts) > 0 else path
+
+
+def _stat_source(falias: String, name: String):
+    """Emit the SOURCE document a tool just read (`source\t<alias>\t<filename>`), fd 1
+    unbuffered. The server keeps the FIRST and surfaces it as 'the document used to
+    answer' — linking to /api/doc?alias=<alias> (alias-gated, no path leaks) with the
+    filename as the visible text. The real filename only travels the LOCAL answer path
+    (the frontier never sees it). No-op for an empty alias. (`alias` is a reserved word,
+    hence the `falias` param.)"""
+    if len(falias) == 0:
+        return
+    var line = String(STAT_SENTINEL) + "source\t" + falias + "\t" + name + "\n"
+    var b = line.as_bytes()
+    _ = external_call["write", Int](Int(1), b.unsafe_ptr(), Int(len(b)))
+
+
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
 
 @fieldwise_init
@@ -198,6 +218,11 @@ def search(query: String, k: Int) raises -> List[Chunk]:
     var t0 = perf_counter_ns()
     var r = index.search(query, k, _embed_url())
     _stat("search", Float64(perf_counter_ns() - t0) / 1.0e6)
+    if len(r) > 0:  # the top hit's file — the document most relevant to the question
+        try:
+            _stat_source(r[0].file_alias, _basename(_resolve(r[0].file_alias).path))
+        except:
+            pass
     return r^
 
 
@@ -206,6 +231,7 @@ def csv_rows(file_alias: String) raises -> List[List[String]]:
     Header row included as row 0."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
+    _stat_source(file_alias, _basename(fi.path))
     if fi.kind != "csv":
         raise Error("vault.csv_rows: " + file_alias + " is not a csv (it's " + fi.kind + ")")
     var r = readers.csv_rows(fi.path)
@@ -217,6 +243,7 @@ def pdf_text(file_alias: String) raises -> String:
     """Extracted text of a PDF file (by alias)."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
+    _stat_source(file_alias, _basename(fi.path))
     if fi.kind != "pdf":
         raise Error("vault.pdf_text: " + file_alias + " is not a pdf (it's " + fi.kind + ")")
     var r = readers.pdf_text(fi.path)
@@ -228,6 +255,7 @@ def md_text(file_alias: String) raises -> String:
     """Text of a markdown file (by alias)."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
+    _stat_source(file_alias, _basename(fi.path))
     if fi.kind != "md":
         raise Error("vault.md_text: " + file_alias + " is not a md file (it's " + fi.kind + ")")
     var r = readers.md_text(fi.path)
@@ -239,6 +267,7 @@ def docx_text(file_alias: String) raises -> String:
     """Extracted text of a Word .docx file (by alias)."""
     var t0 = perf_counter_ns()
     var fi = _resolve(file_alias)
+    _stat_source(file_alias, _basename(fi.path))
     if fi.kind != "docx":
         raise Error("vault.docx_text: " + file_alias + " is not a docx (it's " + fi.kind + ")")
     var r = readers.docx_text(fi.path)
@@ -255,6 +284,10 @@ def file_chunks(file_alias: String) raises -> List[String]:
     var t0 = perf_counter_ns()
     var r = index.file_chunks(file_alias)
     _stat("file_chunks", Float64(perf_counter_ns() - t0) / 1.0e6)
+    try:
+        _stat_source(file_alias, _basename(_resolve(file_alias).path))
+    except:
+        pass
     return r^
 
 
@@ -270,6 +303,10 @@ def transactions(file_alias: String) raises -> List[Txn]:
     var t0 = perf_counter_ns()
     var r = index.file_transactions(file_alias)
     _stat("transactions", Float64(perf_counter_ns() - t0) / 1.0e6)
+    try:
+        _stat_source(file_alias, _basename(_resolve(file_alias).path))
+    except:
+        pass
     return r^
 
 
