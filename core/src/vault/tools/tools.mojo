@@ -74,6 +74,19 @@ def _stat(tool: String, ms: Float64):
     _ = external_call["write", Int](Int(1), p, Int(n))
 
 
+def _stat_model(prefill_tok: Int, gen_tok: Int, prefill_ms: Float64, decode_ms: Float64):
+    """Emit a MODEL-stats line for one chat call — prefill/gen token counts + their
+    wall-clock — read from the engine response's non-standard `millfolio` field. Same
+    unbuffered fd-1 channel as `_stat`; the server aggregates these into the live
+    working line + the final prefill/gen throughput (tok/s). Format keeps `model` as
+    the first field so the server tells it apart from the 2-field API stat line."""
+    var line = (
+        String(STAT_SENTINEL) + "model\t" + String(prefill_tok) + "\t"
+        + String(gen_tok) + "\t" + String(prefill_ms) + "\t" + String(decode_ms) + "\n")
+    var b = line.as_bytes()
+    _ = external_call["write", Int](Int(1), b.unsafe_ptr(), Int(len(b)))
+
+
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
 
 @fieldwise_init
@@ -229,8 +242,19 @@ def ask_local(instruction: String, content: String) raises -> String:
             req.headers.set("content-type", "application/json")
             var client = HttpClient()
             var resp = client.send(req)
-            var out = resp.json()["choices"][0]["message"]["content"].string_value()
+            var j = resp.json()
+            var out = j["choices"][0]["message"]["content"].string_value()
             _stat("ask_local", Float64(perf_counter_ns() - t0) / 1.0e6)
+            # Engine prefill/gen stats ride in the non-standard `millfolio` field;
+            # best-effort (absent on a non-millfolio endpoint), never fail the call.
+            try:
+                _stat_model(
+                    Int(j["millfolio"]["prompt_tokens"].int_value()),
+                    Int(j["millfolio"]["gen_tokens"].int_value()),
+                    j["millfolio"]["prefill_ms"].float_value(),
+                    j["millfolio"]["decode_ms"].float_value())
+            except:
+                pass
             return out
         except:
             attempt += 1
@@ -288,7 +312,16 @@ def _batch_call(instruction: String, items: List[String]) raises -> List[String]
             req.headers.set("content-type", "application/json")
             var client = HttpClient()
             var resp = client.send(req)
-            reply = resp.json()["choices"][0]["message"]["content"].string_value()
+            var j = resp.json()
+            reply = j["choices"][0]["message"]["content"].string_value()
+            try:
+                _stat_model(
+                    Int(j["millfolio"]["prompt_tokens"].int_value()),
+                    Int(j["millfolio"]["gen_tokens"].int_value()),
+                    j["millfolio"]["prefill_ms"].float_value(),
+                    j["millfolio"]["decode_ms"].float_value())
+            except:
+                pass
             break
         except:
             attempt += 1
