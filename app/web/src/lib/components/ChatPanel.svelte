@@ -43,6 +43,12 @@
     "what is the total of my transactions",
     "what kinds of files are in my vault",
     "how much did I spend",
+    "when does my car insurance renew",
+    "what kind of car do I have",
+    "what is my license plate number",
+    "when does my vehicle registration expire",
+    "what is my insurance policy number",
+    "what does my insurance cover",
   ];
 
   let draft = $state("");
