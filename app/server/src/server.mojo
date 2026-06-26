@@ -37,6 +37,7 @@ from flare.http import Handler
 from flare.ws import WsConnection, WsOpcode, WsCloseCode
 
 from std.ffi import external_call, c_char
+from std.time import perf_counter_ns
 
 from settings import load_config
 from wiring import build_vault_orchestrator
@@ -558,14 +559,31 @@ def _rate1(n: Float64, ms: Float64) -> String:
     return String(tenths // 10) + "." + String(tenths % 10)
 
 
-def _live_stats(n_search: Int, n_ask: Int, pf_tok: Int, gen_tok: Int) -> String:
-    """The running stats appended to the live 'working' line — only the non-zero
-    categories, so a tools-only run stays clean."""
+def _ms_since(t0: UInt) -> Float64:
+    """Milliseconds elapsed since a perf_counter_ns() timestamp."""
+    return Float64(perf_counter_ns() - t0) / 1.0e6
+
+
+def _bump(mut names: List[String], mut counts: List[Int], mut ms: List[Float64],
+          name: String, n: Int, dt: Float64):
+    """Accumulate `n` calls (+ `dt` ms) under `name` in the parallel api-stat lists
+    — find-or-append, so any tool/codegen name aggregates without a fixed schema."""
+    for i in range(len(names)):
+        if names[i] == name:
+            counts[i] += n
+            ms[i] += dt
+            return
+    names.append(name)
+    counts.append(n)
+    ms.append(dt)
+
+
+def _live_stats(names: List[String], counts: List[Int], pf_tok: Int, gen_tok: Int) -> String:
+    """Running per-api call counts + model token tallies appended to the live
+    working line — only the categories seen so far (empty stays clean)."""
     var s = String("")
-    if n_search > 0:
-        s += " · search ×" + String(n_search)
-    if n_ask > 0:
-        s += " · ask ×" + String(n_ask)
+    for i in range(len(names)):
+        s += " · " + names[i] + " ×" + String(counts[i])
     if pf_tok > 0:
         s += " · prefill " + String(pf_tok) + " tok"
     if gen_tok > 0:
@@ -605,13 +623,28 @@ def on_connect(mut conn: WsConnection) raises:
         var vault_dir = resolve_vault_dir()
         var orch = build_vault_orchestrator(cfg, vault_dir)
 
+        # Run-stats accumulator — api call counts (codegen-phase + the vault tools the
+        # generated program calls) and the model's prefill/gen tokens. Declared here so
+        # the codegen/fix calls below feed the SAME tallies the run loop extends.
+        var api_names = List[String]()
+        var api_count = List[Int]()
+        var api_ms = List[Float64]()
+        var pf_tok = 0
+        var gen_tok = 0
+        var pf_ms = 0.0
+        var dec_ms = 0.0
+
         conn.send_text(status("manifest", "Aliasing vault manifest", "running"))
+        var _t = perf_counter_ns()
         var manifest = orch.vault_manifest(vault_dir)
+        _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
         conn.send_text(debug_event("manifest", "Frontier-safe manifest (aliases only)", manifest, "text"))
         conn.send_text(status("manifest", "Aliasing vault manifest", "done"))
 
         conn.send_text(status("codegen", "Writing the program", "running"))
+        _t = perf_counter_ns()
         var code = orch.vault_codegen(question, manifest)
+        _bump(api_names, api_count, api_ms, "codegen", 1, _ms_since(_t))
         conn.send_text(debug_event("codegen", "Generated program", code, "mojo"))
         conn.send_text(status("codegen", "Writing the program", "done"))
 
@@ -655,22 +688,15 @@ def on_connect(mut conn: WsConnection) raises:
         # stepId, so the UI updates ONE line in place) instead of a frozen spinner.
         conn.send_text(status("run", "Approved — running", "done"))
         conn.send_text(status("compile", "Compiling the generated program", "running"))
-        orch.vault_build(code)
+        var fixes = orch.vault_build(code)
+        if fixes > 0:
+            _bump(api_names, api_count, api_ms, "fix", fixes, 0.0)
         conn.send_text(status("compile", "Compiling the generated program", "done"))
         conn.send_text(status("execute",
             "Running it locally over your vault…",
             "running"))
         var h = orch.vault_run_start(vault_dir)
         log("[run] poll start: pid=" + String(Int(h.pid)))
-        var n_ask = 0
-        var ms_ask = 0.0
-        var n_search = 0
-        var ms_search = 0.0
-        # Model stats from the engine's `millfolio` response field (prefill/gen).
-        var pf_tok = 0
-        var gen_tok = 0
-        var pf_ms = 0.0
-        var dec_ms = 0.0
         var cur_label = String("Running it locally over your vault…")
         var running = True
         var iters = 0
@@ -700,18 +726,14 @@ def on_connect(mut conn: WsConnection) raises:
                         dec_ms += atof(String(parts[4]))
                         dirty = True
                     elif len(parts) == 2:
-                        # "<tool>\t<ms>" — per-engine-call API count + duration.
-                        var ms = atof(String(parts[1]))
-                        if String(parts[0]) == "search":
-                            n_search += 1; ms_search += ms
-                        else:
-                            n_ask += 1; ms_ask += ms
+                        # "<tool>\t<ms>" — one vault-tool API call + its duration.
+                        _bump(api_names, api_count, api_ms, String(parts[0]), 1, atof(String(parts[1])))
                         dirty = True
             # Update the ONE 'working' line in place with the latest progress label
             # + running api/model tallies, whenever a progress or stat line arrived.
             if dirty:
                 conn.send_text(status("execute",
-                    cur_label + _live_stats(n_search, n_ask, pf_tok, gen_tok), "running"))
+                    cur_label + _live_stats(api_names, api_count, pf_tok, gen_tok), "running"))
             if running:
                 iters += 1
                 if iters > _RUN_MAX_ITERS:
@@ -730,14 +752,14 @@ def on_connect(mut conn: WsConnection) raises:
                     _usleep(120_000)  # 120 ms between polls
 
         log("[run] poll done: iters=" + String(iters) + " timed_out=" + String(timed_out))
-        # Final per-category summary: total + throughput (number/sec) for each of the
-        # API calls (search/ask_local) and the model (prefill/gen tokens).
-        if n_search + n_ask + pf_tok + gen_tok > 0:
+        # Final per-category summary: total + throughput (number/sec) for every API
+        # category (codegen-phase + vault tools) and the model (prefill/gen tokens).
+        if len(api_names) > 0 or pf_tok + gen_tok > 0:
             var sum = String("Stats:")
-            if n_search > 0:
-                sum += "  search " + String(n_search) + " (" + _rate1(Float64(n_search), ms_search) + "/s)"
-            if n_ask > 0:
-                sum += "  ask_local " + String(n_ask) + " (" + _rate1(Float64(n_ask), ms_ask) + "/s)"
+            for i in range(len(api_names)):
+                sum += "  " + api_names[i] + " " + String(api_count[i])
+                if api_ms[i] > 0.0:  # timed calls get a rate; count-only ones (fix) don't
+                    sum += " (" + _rate1(Float64(api_count[i]), api_ms[i]) + "/s)"
             if pf_tok > 0:
                 sum += "  prefill " + String(pf_tok) + " tok (" + _irate(Float64(pf_tok), pf_ms) + " tok/s)"
             if gen_tok > 0:
