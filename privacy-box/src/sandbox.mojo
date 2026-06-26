@@ -718,7 +718,20 @@ struct Sandbox(Movable):
                 berr = _read(build_out)
             except:
                 berr = String("")
-            return RunResult(brc, _strip_compiler_noise(berr^))
+            # Normalize host-specific paths in the compiler error. The error embeds the
+            # absolute scratch + home paths (…/gen.mojo, the -I pkgs dir), which differ
+            # per machine (/Users/bgent vs /Users/<dev>). Since this error is fed to
+            # fix_code and thus becomes part of the replay-cache KEY, a host-specific
+            # path makes a fix captured on one machine never replay on another (the demo
+            # fell back on any program that needed a fix). Map both to fixed tokens so
+            # the fix request is identical everywhere.
+            var clean = _strip_compiler_noise(berr^)
+            clean = _replace_all(clean, scratch_c, "@SCRATCH@")
+            try:
+                clean = _replace_all(clean, _canonical(getenv("HOME", "/")), "@HOME@")
+            except:
+                pass
+            return RunResult(brc, clean^)
         return RunResult(0, String(""))
 
     def compile_and_run(
