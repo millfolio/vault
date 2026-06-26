@@ -1,5 +1,5 @@
 <script lang="ts">
-  
+  import { onMount } from "svelte";
   import type { StepState } from "$lib/protocol";
 
   // One inline timeline: chat bubbles (user/assistant), plus the workflow events
@@ -35,21 +35,26 @@
     onreject: (id: string, stepId: string) => void;
   } = $props();
 
-  // The curated demo questions — the ONLY ones the replay cache can answer. Keep in
-  // sync with scripts/prime-cache.sh in the demo repo (those captures ARE the demo).
-  const SUGGESTED = [
+  // The curated demo questions — the ONLY ones the replay cache can answer. The
+  // authoritative list is the primed questions.json (the survivors of prime-cache.sh),
+  // fetched at runtime so the dropdown stays in sync with the cache without duplicating
+  // it here. The inline list is just a fallback when /questions.json can't be fetched.
+  let SUGGESTED = $state<string[]>([
     "how many transactions do I have",
     "what is my biggest transaction",
     "what is the total of my transactions",
     "what kinds of files are in my vault",
     "how much did I spend",
-    "when does my car insurance renew",
-    "what kind of car do I have",
-    "what is my license plate number",
-    "when does my vehicle registration expire",
-    "what is my insurance policy number",
-    "what does my insurance cover",
-  ];
+  ]);
+  onMount(() => {
+    if (!demo) return;
+    fetch("/questions.json")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((qs) => {
+        if (Array.isArray(qs) && qs.length) SUGGESTED = qs as string[];
+      })
+      .catch(() => {}); // keep the fallback list
+  });
 
   let draft = $state("");
   let picked = $state("");
