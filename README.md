@@ -1,5 +1,7 @@
 # vault
 
+> 💬 **Community:** questions, ideas, and show-and-tell live in [GitHub Discussions](https://github.com/millfolio/millfolio/discussions).
+
 The millfolio personal data vault — index your own PDFs, CSVs, and Markdown and
 ask open-ended questions, answered **locally**. A frontier model writes the code
 that runs on your data; the data never leaves the machine. The `mill` CLI is the
