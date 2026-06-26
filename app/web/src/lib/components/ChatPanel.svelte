@@ -330,7 +330,10 @@
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    overflow-x: auto;
+    /* Cap tall programs at half the viewport and scroll (both axes) so a long
+       generated program can't push the approve/reject buttons off-screen. */
+    max-height: 50vh;
+    overflow: auto;
     font-size: 12.5px;
   }
   .actions {
