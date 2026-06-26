@@ -208,10 +208,7 @@
 
 <main>
   <header class="topbar">
-    <div class="brand">
-      <img class="brand-logo" src="/logo.png" alt="" width="22" height="22" />
-      {brandName}
-    </div>
+    <div class="brand">{brandName}</div>
     <nav class="tabs">
       <button class:active={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
       <button class:active={view === "vault"} onclick={() => (view = "vault")}>Vault</button>
@@ -242,17 +239,8 @@
     background: var(--surface);
   }
   .brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
     font-weight: 700;
     letter-spacing: 0.02em;
-  }
-  .brand-logo {
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
-    display: block;
   }
   .tabs {
     display: flex;
