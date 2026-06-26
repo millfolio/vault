@@ -8,7 +8,7 @@ frontier model; only alias/kind/size/columns are.
 """
 
 from std.os import listdir, makedirs
-from std.os.path import isfile, getsize
+from std.os.path import isfile, isdir, getsize
 
 
 @fieldwise_init
@@ -79,26 +79,45 @@ def _sort_names(mut names: List[String]):
             j -= 1
 
 
-def build_manifest(data_dir: String) raises -> List[FileInfo]:
-    """Scan `data_dir` (top level) and build the aliased manifest. Files that
-    aren't CSV/PDF/Markdown are skipped; aliases are assigned in sorted-name
-    order for stability. A missing vault dir is created (empty) rather than an
-    error — a clean machine has no vault yet."""
-    makedirs(data_dir, exist_ok=True)
-    var raw = listdir(data_dir)
-    var names = List[String]()
+def _name_of(path: String) -> String:
+    """Last path component (filename) of `path`."""
+    var parts = path.split("/")
+    return String(parts[len(parts) - 1])
+
+
+def _collect_files(dir: String, mut out: List[String]) raises:
+    """Recursively collect every regular file under `dir`, depth-first. Hidden
+    entries (leading `.` — `.git`, `.DS_Store`, dotfiles/dirs) are skipped so the
+    index doesn't pull in VCS/system cruft."""
+    var raw = listdir(dir)
     for i in range(len(raw)):
-        names.append(String(raw[i]))
-    _sort_names(names)
+        var name = String(raw[i])
+        if name.startswith("."):
+            continue
+        var p = dir + "/" + name
+        if isdir(p):
+            _collect_files(p, out)
+        elif isfile(p):
+            out.append(p.copy())
+
+
+def build_manifest(data_dir: String) raises -> List[FileInfo]:
+    """Scan `data_dir` RECURSIVELY (subfolders included) and build the aliased
+    manifest. Files that aren't CSV/PDF/Markdown/DOCX are skipped; aliases are
+    assigned in sorted-path order for stability. `FileInfo.path` is the full real
+    path (local-only); a file's identity within the vault is its path RELATIVE to
+    `data_dir` (e.g. `reports/q1.pdf`), so same-named files in different subfolders
+    don't collide. A missing vault dir is created (empty) rather than an error."""
+    makedirs(data_dir, exist_ok=True)
+    var paths = List[String]()
+    _collect_files(data_dir, paths)
+    _sort_names(paths)   # full paths share the data_dir prefix → sorts like relpaths
 
     var infos = List[FileInfo]()
     var idx = 0
-    for i in range(len(names)):
-        var name = names[i].copy()
-        var path = data_dir + "/" + name
-        if not isfile(path):
-            continue
-        var kind = _kind_for(_ext(name))
+    for i in range(len(paths)):
+        var path = paths[i].copy()
+        var kind = _kind_for(_ext(_name_of(path)))
         if kind == "":
             continue
         var cols = List[String]()

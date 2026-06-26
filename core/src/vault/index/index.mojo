@@ -56,9 +56,10 @@ struct Chunk(Copyable, Movable):
 
 @fieldwise_init
 struct FileEntry(Copyable, Movable):
-    """One indexed file in the manifest. `name` is the real basename (LOCAL-ONLY);
-    `alias` is the stable, frontier-safe token. `[id_start, id_start+chunk_count)`
-    is this file's contiguous chunk-id range in LanceDB."""
+    """One indexed file in the manifest. `name` is the real path RELATIVE to the
+    vault root (LOCAL-ONLY; e.g. `reports/q1.pdf`); `alias` is the stable,
+    frontier-safe token. `[id_start, id_start+chunk_count)` is this file's
+    contiguous chunk-id range in LanceDB."""
     var falias: String
     var name: String
     var kind: String
@@ -160,6 +161,14 @@ def _atoi(s: String) -> Int:
 def _basename(path: String) raises -> String:
     var parts = path.split("/")
     return String(parts[len(parts) - 1])
+
+
+def _relpath(path: String, base: String) raises -> String:
+    """`path` made relative to `base` — the file's full name within the vault
+    (e.g. `reports/q1.pdf`). This is a file's stable identity for the index diff,
+    so same-named files in different subfolders don't collide. Falls back to the
+    basename if `path` isn't under `base` (shouldn't happen)."""
+    return String(String(path).removeprefix(base + "/"))
 
 
 # ── chunking ──────────────────────────────────────────────────────────────────
@@ -505,10 +514,15 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     for i in range(len(infos)):
         ref fi = infos[i]
         cur_paths.append(fi.path.copy())
-        cur_names.append(_basename(fi.path))
+        # Identity = full name relative to the vault root (recursion-safe: two
+        # `report.pdf` in different subfolders stay distinct).
+        cur_names.append(_relpath(fi.path, data_dir))
         cur_kinds.append(fi.kind.copy())
         cur_sizes.append(fi.size)
         cur_shas.append(sha256_file_hex(fi.path))
+        # Name every file the scan found (the embed step below logs only the
+        # new/changed ones, so unchanged files would otherwise be invisible).
+        print("  • " + _relpath(fi.path, data_dir) + " [" + fi.kind + "]")
 
     # Diff current vs old (by name + hash).
     var new_entries = List[FileEntry]()   # unchanged carried over; embedded added below
