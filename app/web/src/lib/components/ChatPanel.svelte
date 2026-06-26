@@ -41,7 +41,6 @@
   // it here. The inline list is just a fallback when /questions.json can't be fetched.
   let SUGGESTED = $state<string[]>([
     "how many transactions do I have",
-    "what is my biggest transaction",
     "what is the total of my transactions",
     "what kinds of files are in my vault",
     "how much did I spend",
