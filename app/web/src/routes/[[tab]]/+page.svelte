@@ -84,15 +84,28 @@
   // in-browser mock (:5173, no backend) — the bar just omits it then.
   let modelName = $state("");
 
-  // Intro disclaimer shown when the demo starts. Remembered per browser session so a
-  // reload within the same tab doesn't nag, but every new visitor sees it once.
+  // Intro disclaimer — ONLY the public demo shows it (it explains the replay/queue
+  // caveats that don't apply to a real local install). Remembered per browser session
+  // so a reload within the same tab doesn't nag, but every new visitor sees it once.
   const INTRO_KEY = "millfolio-demo-intro-dismissed";
   let showIntro = $state(false);
+  // Outside the demo: true when the on-device vault has nothing indexed yet, so we can
+  // prompt the user to run `mill index` instead of dropping them into an empty chat.
+  let vaultEmpty = $state(false);
   onMount(() => {
-    try {
-      showIntro = sessionStorage.getItem(INTRO_KEY) !== "1";
-    } catch {
-      showIntro = true; // sessionStorage unavailable (private mode etc.) — still show it
+    if (isDemo) {
+      try {
+        showIntro = sessionStorage.getItem(INTRO_KEY) !== "1";
+      } catch {
+        showIntro = true; // sessionStorage unavailable (private mode etc.) — still show it
+      }
+    } else {
+      // Real install: is anything indexed? An empty/unindexed vault → show the
+      // "run mill index" notice rather than an empty, answer-less chat.
+      fetch("/api/vault", { headers: { accept: "application/json" } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d) vaultEmpty = !d.indexed || (d.indexedFileCount ?? 0) === 0; })
+        .catch(() => {});
     }
     // Ask the server which model it's serving (best-effort; mock has no backend).
     fetch("/api/model")
@@ -228,6 +241,15 @@
       <a class:active={view === "stats"} href="/stats">Stats</a>
     </nav>
   </header>
+  {#if vaultEmpty && view === "chat"}
+    <div class="notice" role="status">
+      <strong>No documents in your vault yet.</strong>
+      <span>
+        Index a folder with <code>mill index &lt;dir&gt;</code>, then come back and ask away.
+      </span>
+      <a href="https://millfolio.app/get-started#index" target="_blank" rel="noopener">Getting started →</a>
+    </div>
+  {/if}
   <div class="single">
     {#if view === "chat"}
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
@@ -300,6 +322,38 @@
     flex: 1;
     min-height: 0;
     display: grid;
+  }
+  .notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .notice strong {
+    color: var(--text);
+  }
+  .notice code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .notice a {
+    margin-left: auto;
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .notice a:hover {
+    text-decoration: underline;
   }
   .intro-backdrop {
     position: fixed;
