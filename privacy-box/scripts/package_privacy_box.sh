@@ -27,6 +27,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLARE="${FLARE:-$ROOT/../flare}"
 JSON="${JSON:-$ROOT/../json}"
 JINJA2="${JINJA2:-$ROOT/../jinja2.mojo}"
+LOGGING="${LOGGING:-$ROOT/../logging.mojo}"   # `from logging import log` (orchestrator/sandbox)
 OUT="${1:-$ROOT/privacy_box.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac   # zip runs from a temp dir — need absolute
 PREFIX="${CONDA_PREFIX:?run via pixi — need CONDA_PREFIX for the flare FFI shims + their deps}"
@@ -76,14 +77,15 @@ for f in "$H"/build/*.so "$H"/build/*.dylib; do
     codesign --force --sign - "$f" 2>/dev/null || true
 done
 
-echo "==> staging flare + json + jinja2.mojo" >&2
-mkdir -p "$STAGE/flare" "$STAGE/json" "$STAGE/jinja2.mojo"
+echo "==> staging flare + json + jinja2.mojo + logging.mojo" >&2
+mkdir -p "$STAGE/flare" "$STAGE/json" "$STAGE/jinja2.mojo" "$STAGE/logging.mojo"
 cp -R "$FLARE/flare" "$STAGE/flare/flare"
 cp -R "$JSON/json" "$STAGE/json/json"
 cp -R "$JINJA2/src" "$STAGE/jinja2.mojo/src"
+cp -R "$LOGGING/src" "$STAGE/logging.mojo/src"   # orchestrator/sandbox: `from logging import log`
 
 echo "==> zipping -> $OUT" >&2
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr -X "$OUT" privacy_box flare json jinja2.mojo )
+( cd "$STAGE" && zip -qr -X "$OUT" privacy_box flare json jinja2.mojo logging.mojo )
 echo "==> done" >&2
 ls -lh "$OUT" >&2

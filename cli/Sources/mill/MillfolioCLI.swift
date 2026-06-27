@@ -31,6 +31,8 @@ struct Install: AsyncParsableCommand {
         """)
     @MainActor func run() async throws {
         let boot = streaming()
+        print("Logging to \(boot.logFileURL.path)")
+        print("  (if a step fails, the full timestamped output is there)")
         try await boot.installVault()
         print("✓ millfolio installed (inference server + privacy_box + millfolio web app)")
     }

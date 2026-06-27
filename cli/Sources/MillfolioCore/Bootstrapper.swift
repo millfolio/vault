@@ -221,28 +221,54 @@ public final class Bootstrapper: ObservableObject {
     public var canStartServer: Bool { isServerInstalled && weightsPresent && !serverRunning }
 
     // ── logging ──────────────────────────────────────────────────────────────
-    /// Ensure the log file (and its directory) exist; returns the path.
+    /// Cap on the install log; past this we keep the (most-useful) tail. Bounds the
+    /// file across repeated `mill install`/`mill update` runs.
+    private static let maxLogBytes = 5 * 1024 * 1024   // 5 MB
+
+    /// Ensure the log file (and its directory) exist; returns the path. When the log
+    /// has grown past `maxLogBytes`, truncate it to its tail (recent lines are the ones
+    /// worth keeping for diagnosis) behind a marker.
     @discardableResult
     private func ensureLog() -> URL {
         let fm = FileManager.default
         try? fm.createDirectory(at: support, withIntermediateDirectories: true)
         if !fm.fileExists(atPath: logFileURL.path) {
             fm.createFile(atPath: logFileURL.path, contents: nil)
+        } else if let size = (try? fm.attributesOfItem(atPath: logFileURL.path)[.size]) as? Int,
+                  size > Self.maxLogBytes,
+                  let fh = try? FileHandle(forReadingFrom: logFileURL) {
+            defer { try? fh.close() }
+            fh.seek(toFileOffset: UInt64(max(0, size - Self.maxLogBytes / 2)))
+            let tail = fh.readDataToEndOfFile()
+            let header = Data("===== log truncated (was \(size / 1024) KB) — \(Self.stamp()) =====\n".utf8)
+            try? (header + tail).write(to: logFileURL)
         }
         return logFileURL
     }
 
-    /// Append text to the log (best-effort; never throws).
+    /// Append text to the log (best-effort; never throws). Each line is prefixed with a
+    /// `[HH:MM:SS.mmm]` timestamp — the same format as the Mojo `logging` library — so
+    /// the log carries timing for every step and every subprocess line.
     private func appendLog(_ text: String) {
         ensureLog()
         guard let fh = try? FileHandle(forWritingTo: logFileURL) else { return }
         defer { try? fh.close() }
         fh.seekToEndOfFile()
-        if let d = text.data(using: .utf8) { fh.write(d) }
+        let ts = Self.tstamp()
+        let stamped = text.components(separatedBy: "\n")
+            .map { $0.isEmpty ? "" : "\(ts) \($0)" }
+            .joined(separator: "\n")
+        if let d = stamped.data(using: .utf8) { fh.write(d) }
     }
 
     private func logHeader(_ what: String) {
         appendLog("\n===== \(what) — \(Self.stamp()) =====\n")
+    }
+
+    /// `[HH:MM:SS.mmm]` per-line stamp — mirrors the Mojo `logging` library's format.
+    private static func tstamp() -> String {
+        let f = DateFormatter(); f.dateFormat = "[HH:mm:ss.SSS]"
+        return f.string(from: Date())
     }
 
     private static func stamp() -> String {
@@ -813,6 +839,7 @@ public final class Bootstrapper: ObservableObject {
         let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
         try run(mojo, ["build", "src/privacy_box.mojo",
                        "-I", "../flare", "-I", "../json", "-I", "../jinja2.mojo/src",
+                       "-I", "../logging.mojo/src",  // orchestrator/sandbox: from logging import log
                        "-o", "build/privacy_box"],
                 cwd: privacy_boxDir, env: privacy_boxMojoEnv(python: python))
         // The millfolio web UI is served by the app server (millfolio-server +
@@ -1116,6 +1143,7 @@ public final class Bootstrapper: ObservableObject {
             "-I", privacy_boxRoot.appendingPathComponent("flare").path,
             "-I", privacy_boxRoot.appendingPathComponent("json").path,
             "-I", privacy_boxRoot.appendingPathComponent("jinja2.mojo/src").path,
+            "-I", privacy_boxRoot.appendingPathComponent("logging.mojo/src").path,  // server.mojo: from logging import log
         ]
         let env = privacy_boxMojoEnv(python: python)
         // `mojo build -o build/…` won't create the output dir, and the app bundle

@@ -26,6 +26,7 @@ ZIPS="$WORK/zips"; STAGE="$WORK/bundle"; mkdir -p "$ZIPS" "$STAGE"
 # The component packagers reference the mojo libs by env override (default ../<lib>);
 # point them at the umbrella-level checkouts so the consolidated layout resolves.
 export FLARE="$UMBRELLA/flare" JSON="$UMBRELLA/json" JINJA2="$UMBRELLA/jinja2.mojo"
+export LOGGING="$UMBRELLA/logging.mojo"   # privacy_box + app server: `from logging import log`
 export LANCEDB="$UMBRELLA/lancedb.mojo" PDFTOTEXT="$UMBRELLA/pdftotext.mojo"
 export ZLIB="$UMBRELLA/zlib.mojo" CSV="$UMBRELLA/csv.mojo" DOCX="$UMBRELLA/docx.mojo"
 
