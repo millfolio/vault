@@ -645,13 +645,29 @@ public final class Bootstrapper: ObservableObject {
     /// update` that removed runner/), which would skip the re-unpack and then fail
     /// later on a missing inference-server. `unpackZip` sanity-checks the subtree.
     private func ensureBundle() async throws {
-        if FileManager.default.fileExists(
-            atPath: backendDir.appendingPathComponent("src/server.mojo").path) { return }
-        set("Downloading millfolio sources…")
+        let fm = FileManager.default
+        let stampURL = bundleRoot.appendingPathComponent(".bundle-version")
+        let contentPresent = fm.fileExists(
+            atPath: backendDir.appendingPathComponent("src/server.mojo").path)
+        // The release this CLI belongs to (from Homebrew). The bundle is `releases/latest`,
+        // so after `brew upgrade mill` this changes and the on-disk bundle is stale even
+        // though its content is still "present" — re-fetch instead of forcing the user to
+        // delete it by hand. Empty (non-brew install) → fall back to content-only so we
+        // don't loop re-downloading with no version signal.
+        let want = brewCliVersion()
+        let have = (try? String(contentsOf: stampURL, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if contentPresent && (want.isEmpty || have == want) { return }
+        set(contentPresent && have != want
+            ? "Refreshing millfolio sources for \(want)…" : "Downloading millfolio sources…")
         let zip = try await download(bundleURL, name: "millfolio.zip")
         set("Unpacking sources…")
-        try FileManager.default.createDirectory(at: bundleRoot, withIntermediateDirectories: true)
+        // Wipe the old tree first so a version change can't leave stale files behind
+        // (unzip -o only overwrites; it never deletes files dropped from the new bundle).
+        try? fm.removeItem(at: bundleRoot)
+        try fm.createDirectory(at: bundleRoot, withIntermediateDirectories: true)
         try unpackZip(zip, into: bundleRoot)
+        try? want.write(to: stampURL, atomically: true, encoding: .utf8)
     }
 
     /// A `.conda` is a zip containing `pkg-*.tar.zst` (the files) + `info-*.tar.zst`.

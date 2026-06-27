@@ -41,6 +41,8 @@ jobs:
         with: { repository: millfolio/csv.mojo, path: csv.mojo }
       - uses: actions/checkout@v6
         with: { repository: millfolio/docx.mojo, path: docx.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/logging.mojo, path: logging.mojo }   # privacy_box: from logging import log
 
       # ── caches: skip re-downloading the Mojo toolchain + recompiling the Rust shim ──
       - name: Cache pixi/conda packages (Mojo toolchain + deps)

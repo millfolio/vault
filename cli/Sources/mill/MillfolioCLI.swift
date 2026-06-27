@@ -15,7 +15,7 @@ struct Millfolio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mill",
         abstract: "The millfolio personal data vault — install, start, stop, index, and ask.",
-        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self]
+        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self, Doctor.self]
     )
 }
 
@@ -137,6 +137,89 @@ struct Status: AsyncParsableCommand {
     }
 }
 
+// ── mill doctor ─────────────────────────────────────────────────────────────
+struct Doctor: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Diagnose the environment + install; optionally file a report on GitHub Discussions.")
+    @Flag(name: .customLong("no-prompt"), help: "Print the report only; skip the bug-report prompt.")
+    var noPrompt = false
+
+    @MainActor func run() async throws {
+        let boot = Bootstrapper()
+        let fm = FileManager.default
+        var checks: [(String, Bool, String)] = []   // (label, ok, hint-when-failing)
+
+        // ── environment ──
+        let osVer = sh("/usr/bin/sw_vers", ["-productVersion"]).out
+        let arch  = sh("/usr/bin/uname", ["-m"]).out
+        checks.append(("Apple Silicon — \(arch), macOS \(osVer)", arch == "arm64",
+                       "millfolio requires an Apple-Silicon Mac"))
+        let clt = sh("/usr/bin/xcode-select", ["-p"])
+        checks.append(("Xcode command-line tools", clt.code == 0 && !clt.out.isEmpty,
+                       "install: xcode-select --install"))
+        let metal = sh("/usr/bin/xcrun", ["--find", "metal"])
+        checks.append(("Metal toolchain", metal.code == 0 && !metal.out.isEmpty,
+                       "install: xcodebuild -downloadComponent MetalToolchain"))
+        checks.append(("Homebrew",
+                       ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].contains { fm.isExecutableFile(atPath: $0) },
+                       "https://brew.sh"))
+        let py = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
+            .first { fm.isExecutableFile(atPath: $0) }
+        checks.append(("Python 3 — \(py.map { sh($0, ["--version"]).out } ?? "not found")",
+                       py != nil, "Python ≥ 3.10 is required"))
+        let vals = try? URL(fileURLWithPath: NSHomeDirectory())
+            .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        let freeGB = Double(vals?.volumeAvailableCapacityForImportantUsage ?? 0) / 1e9
+        checks.append((String(format: "Free disk — %.0f GB", freeGB), freeGB >= 10,
+                       "a fresh install needs ~8 GB (toolchain + weights)"))
+
+        // ── install state ──
+        checks.append(("Inference server built", boot.isServerInstalled, "run: mill install"))
+        checks.append(("Chat model weights", boot.weightsPresent, "run: mill install"))
+        checks.append(("Embedding model weights", boot.embedWeightsPresent, "run: mill install"))
+        checks.append(("privacy_box built", boot.isPrivacyBoxInstalled, "run: mill install"))
+        checks.append(("Vault tools built", boot.isMillfolioInstalled, "run: mill install"))
+        checks.append(("App web server built", boot.isAppServerInstalled, "run: mill install"))
+        checks.append(("Inference server responding (:8000)", boot.inferenceVersion() != nil, "run: mill start"))
+
+        // ── render to the console ──
+        print("mill doctor — environment + install\n")
+        var failures = 0
+        for (label, ok, hint) in checks {
+            print(ok ? "  ✓ \(label)" : "  ✗ \(label)  — \(hint)")
+            if !ok { failures += 1 }
+        }
+        print("\nVersions:")
+        printVersions(boot.componentVersions())
+        print("\nLog: \(boot.logFileURL.path)")
+        print(failures == 0 ? "\n✓ all checks passed" : "\n✗ \(failures) issue(s) found")
+
+        // ── assemble a markdown report (also copied to the clipboard) ──
+        let logTail = (try? String(contentsOf: boot.logFileURL, encoding: .utf8))
+            .map { $0.components(separatedBy: "\n").suffix(40).joined(separator: "\n") } ?? "(no log)"
+        var md = "### `mill doctor` report\n\n_Describe what you were doing / what failed:_\n\n\n"
+        md += "| check | status |\n|---|---|\n"
+        for (label, ok, hint) in checks { md += "| \(label) | \(ok ? "✓" : "✗ — \(hint)") |\n" }
+        md += "\n**Versions**\n\n"
+        for (n, v) in boot.componentVersions() { md += "- \(n): \(v)\n" }
+        md += "\n<details><summary>Recent log tail</summary>\n\n```\n\(logTail)\n```\n</details>\n"
+
+        // ── offer to file a report ──
+        if noPrompt { return }
+        print("\nFile a report on GitHub Discussions? (pre-fills your environment; also copied to your clipboard) [y/N] ", terminator: "")
+        let ans = readLine()?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        guard ans == "y" || ans == "yes" else { return }
+        pbcopy(md)
+        let title = failures == 0 ? "mill doctor: all checks passed" : "mill doctor: \(failures) issue(s) on macOS \(osVer)"
+        // The Discussions new-form accepts category/title/body; cap the body to keep the
+        // URL sane — the full report is on the clipboard regardless.
+        let url = "https://github.com/millfolio/millfolio/discussions/new?category=q-a"
+            + "&title=\(enc(title))&body=\(enc(String(md.prefix(5500))))"
+        openURL(url)
+        print("Opened GitHub Discussions — paste the report into the body (⌘V) if it didn't pre-fill.")
+    }
+}
+
 // ── mill index <folder> ───────────────────────────────────────────────────
 struct Index: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -219,3 +302,43 @@ struct Ask: AsyncParsableCommand {
 }
 
 private func mark(_ ok: Bool) -> String { ok ? "yes" : "no" }
+
+// ── mill doctor helpers ───────────────────────────────────────────────────────
+/// Run a process, capture combined stdout/stderr (trimmed) + its exit code.
+@discardableResult
+private func sh(_ launch: String, _ args: [String]) -> (out: String, code: Int32) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: launch)
+    p.arguments = args
+    let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+    guard (try? p.run()) != nil else { return ("", -1) }
+    let d = pipe.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return (String(data: d, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            p.terminationStatus)
+}
+
+/// Copy a string to the macOS clipboard via pbcopy.
+private func pbcopy(_ s: String) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/pbcopy")
+    let pipe = Pipe(); p.standardInput = pipe
+    guard (try? p.run()) != nil else { return }
+    pipe.fileHandleForWriting.write(Data(s.utf8))
+    try? pipe.fileHandleForWriting.close()
+    p.waitUntilExit()
+}
+
+/// Open a URL in the default browser (via /usr/bin/open — no AppKit dependency).
+private func openURL(_ url: String) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    p.arguments = [url]
+    try? p.run()
+    p.waitUntilExit()
+}
+
+/// Percent-encode a query value (encode everything non-alphanumeric — safe for URLs).
+private func enc(_ s: String) -> String {
+    s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? s
+}
