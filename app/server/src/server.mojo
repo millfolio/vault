@@ -360,7 +360,7 @@ struct Api(Handler, Copyable, Movable):
             var lines = raw.split("\n")
             for i in range(len(lines)):
                 var ln = String(lines[i]).strip()
-                if len(ln) == 0:
+                if ln.byte_length() == 0:
                     continue
                 if not first:
                     recs += ","

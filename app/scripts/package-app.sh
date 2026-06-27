@@ -23,8 +23,11 @@ OUT="${1:-$ROOT/millfolio-app.zip}"
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/src" "$STAGE/web/dist"
 
-cp "$ROOT/server/src/server.mojo" "$STAGE/src/"
-cp "$ROOT/server/src/events.mojo" "$STAGE/src/"   # server.mojo imports this (WS events)
+# Copy ALL of the app server's own modules — server.mojo + everything it imports from
+# its own src (events.mojo, runqueue.mojo, …). Cherry-picking individual files here is
+# exactly how a needed module (runqueue) silently went missing from the bundle and broke
+# the install-time build; copy the whole src so a new module is never forgotten.
+cp -R "$ROOT/server/src/." "$STAGE/src/"
 cp -R "$ROOT/web/build/." "$STAGE/web/dist/"
 
 ( cd "$STAGE" && zip -qr -X "$OUT" src web )

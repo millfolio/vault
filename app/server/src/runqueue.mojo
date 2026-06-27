@@ -24,7 +24,7 @@ comptime _LOCK_UN: Int = 0x0008
 def runq_path() -> String:
     """The per-port state file. MILLFOLIO_RUNQ_PATH overrides it (tests use that)."""
     var override = String(getenv("MILLFOLIO_RUNQ_PATH", ""))
-    if len(override) > 0:
+    if override.byte_length() > 0:
         return override
     return String("/tmp/millfolio-runq-") + String(getenv("MILLFOLIO_PORT", "0"))
 

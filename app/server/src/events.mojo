@@ -87,7 +87,7 @@ def message(text: String, source: String = String(""), source_alias: String = St
     # used to answer. The UI renders the filename as a link to /api/doc?alias=<alias>
     # (alias-gated; no real path leaves). Omitted when empty.
     var src = String("")
-    if len(source) > 0 and len(source_alias) > 0:
+    if source.byte_length() > 0 and source_alias.byte_length() > 0:
         src = ',"source":' + json_escape(source) + ',"sourceAlias":' + json_escape(source_alias)
     return (
         '{"type":"message","id":"msg","role":"assistant","text":'
