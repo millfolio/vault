@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { page } from "$app/state";
   import ChatPanel from "$lib/components/ChatPanel.svelte";
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import StatsPanel from "$lib/components/StatsPanel.svelte";
@@ -71,7 +72,12 @@
   let items = $state<ChatItem[]>([]);
   let busy = $state(false);
   let session: Session | undefined;
-  let view = $state<"chat" | "vault" | "stats">("chat");
+  // The active tab is driven by the URL ([[tab]] optional-param route): "/" → chat,
+  // "/vault" → vault, "/stats" → stats. One component serves all three, so switching
+  // tabs is a same-route param change (no remount) — the chat session survives.
+  const view = $derived<"chat" | "vault" | "stats">(
+    page.params.tab === "vault" ? "vault" : page.params.tab === "stats" ? "stats" : "chat",
+  );
   // Run-queue position — shown as a floating bottom-right badge, not inline.
   let queueMsg = $state<string | null>(null);
   // The on-device model the server serves (bottom status bar). Empty under the
@@ -217,9 +223,9 @@
   <header class="topbar">
     <a class="brand" href={`https://${brandName}.app`} title={`Go to ${brandName}.app`}>{brandName}</a>
     <nav class="tabs">
-      <button class:active={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
-      <button class:active={view === "vault"} onclick={() => (view = "vault")}>Vault</button>
-      <button class:active={view === "stats"} onclick={() => (view = "stats")}>Stats</button>
+      <a class:active={view === "chat"} href="/">Chat</a>
+      <a class:active={view === "vault"} href="/vault">Vault</a>
+      <a class:active={view === "stats"} href="/stats">Stats</a>
     </nav>
   </header>
   <div class="single">
@@ -271,7 +277,7 @@
     display: flex;
     gap: 4px;
   }
-  .tabs button {
+  .tabs a {
     padding: 5px 12px;
     border-radius: var(--radius);
     border: 1px solid transparent;
@@ -279,11 +285,13 @@
     color: var(--text-dim);
     font-weight: 600;
     font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
   }
-  .tabs button:hover {
+  .tabs a:hover {
     color: var(--text);
   }
-  .tabs button.active {
+  .tabs a.active {
     background: var(--surface-2);
     border-color: var(--border);
     color: var(--text);
