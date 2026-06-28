@@ -10,7 +10,12 @@ Checks the FIFO ticket invariants the multi-worker app server relies on:
   - reset() zeroes the queue
 """
 from runqueue import (
-    runq_reset, runq_take, runq_peek, runq_done, runq_read, runq_path,
+    runq_reset,
+    runq_take,
+    runq_peek,
+    runq_done,
+    runq_read,
+    runq_path,
 )
 
 
@@ -40,7 +45,10 @@ def main() raises:
     var t2 = runq_take()
     fails += expect(t2 == 2, "take #3 → ticket 2")
     var st = runq_peek()
-    fails += expect(st[0] == 0 and st[1] == 3, "peek → head=0 tail=3 (3 queued, ticket 0 running)")
+    fails += expect(
+        st[0] == 0 and st[1] == 3,
+        "peek → head=0 tail=3 (3 queued, ticket 0 running)",
+    )
 
     # position of each ticket = ticket - head + 1
     fails += expect((t0 - st[0] + 1) == 1, "ticket 0 is position 1 (its turn)")
@@ -53,7 +61,9 @@ def main() raises:
     fails += expect(runq_peek()[0] == 2, "done(1) → head advances to 2")
     runq_done(t2)
     var fin = runq_peek()
-    fails += expect(fin[0] == 3 and fin[1] == 3, "done(2) → head==tail==3 (queue drained)")
+    fails += expect(
+        fin[0] == 3 and fin[1] == 3, "done(2) → head==tail==3 (queue drained)"
+    )
 
     # done() never moves head backwards (a stale/duplicate done is a no-op)
     runq_done(0)

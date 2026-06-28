@@ -22,11 +22,14 @@ comptime _LOCK_UN: Int = 0x0008
 
 
 def runq_path() -> String:
-    """The per-port state file. MILLFOLIO_RUNQ_PATH overrides it (tests use that)."""
+    """The per-port state file. MILLFOLIO_RUNQ_PATH overrides it (tests use that).
+    """
     var override = String(getenv("MILLFOLIO_RUNQ_PATH", ""))
     if override.byte_length() > 0:
         return override
-    return String("/tmp/millfolio-runq-") + String(getenv("MILLFOLIO_PORT", "0"))
+    return String("/tmp/millfolio-runq-") + String(
+        getenv("MILLFOLIO_PORT", "0")
+    )
 
 
 def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
@@ -41,7 +44,9 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
 
 def _lock() -> Int32:
     var cpath = _cstr(runq_path() + ".lock")
-    var fd = external_call["open", Int32](cpath, Int32(_O_RDWR | _O_CREAT), Int32(0o600))
+    var fd = external_call["open", Int32](
+        cpath, Int32(_O_RDWR | _O_CREAT), Int32(0o600)
+    )
     cpath.free()
     if fd >= Int32(0):
         _ = external_call["flock", Int32](fd, Int32(_LOCK_EX))
@@ -67,9 +72,12 @@ def runq_read() -> Tuple[Int, Int]:
         for i in range(len(b)):
             var c = Int(b[i])
             if c >= 48 and c <= 57:
-                cur = cur * 10 + (c - 48); indig = True
+                cur = cur * 10 + (c - 48)
+                indig = True
             elif indig:
-                vals.append(cur); cur = 0; indig = False
+                vals.append(cur)
+                cur = 0
+                indig = False
         if indig:
             vals.append(cur)
     except:
@@ -98,7 +106,8 @@ def runq_take() -> Int:
 
 
 def runq_peek() -> Tuple[Int, Int]:
-    """(head, tail) snapshot — head = ticket now running, tail = next to hand out."""
+    """(head, tail) snapshot — head = ticket now running, tail = next to hand out.
+    """
     var lk = _lock()
     var ht = runq_read()
     _unlock(lk)
@@ -106,7 +115,8 @@ def runq_peek() -> Tuple[Int, Int]:
 
 
 def runq_done(my: Int):
-    """Leave the run slot: advance head past our ticket so the next waiter proceeds."""
+    """Leave the run slot: advance head past our ticket so the next waiter proceeds.
+    """
     var lk = _lock()
     var ht = runq_read()
     var nh = ht[0]
@@ -117,7 +127,8 @@ def runq_done(my: Int):
 
 
 def runq_reset():
-    """Reset to (0, 0) — at startup, so stale head/tail from a prior process don't stall."""
+    """Reset to (0, 0) — at startup, so stale head/tail from a prior process don't stall.
+    """
     var lk = _lock()
     runq_write(0, 0)
     _unlock(lk)

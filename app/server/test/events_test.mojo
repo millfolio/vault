@@ -5,7 +5,15 @@ Asserts the exact ServerEvent JSON encodings and the field parser, so a change
 to the wire format that drifts from ../../protocol/events.ts fails CI.
 """
 
-from events import json_escape, field, status, debug_event, approval, message, error_event
+from events import (
+    json_escape,
+    field,
+    status,
+    debug_event,
+    approval,
+    message,
+    error_event,
+)
 
 
 def expect(cond: Bool, what: String) raises:
@@ -23,15 +31,18 @@ def main() raises:
     expect_eq(
         status("run", "Go", "running"),
         '{"type":"status","stepId":"run","label":"Go","state":"running"}',
-        "status encoding")
+        "status encoding",
+    )
     expect_eq(
         message("hi"),
         '{"type":"message","id":"msg","role":"assistant","text":"hi"}',
-        "message encoding")
+        "message encoding",
+    )
     expect_eq(
         error_event("boom"),
         '{"type":"error","message":"boom"}',
-        "error encoding")
+        "error encoding",
+    )
 
     # debug / approval: check structure + payload shape
     var d = debug_event("codegen", "Generated program", "x", "mojo")
@@ -43,7 +54,7 @@ def main() raises:
     expect(a.find('"body":"code"') != -1, "approval payload body")
 
     # json_escape: quotes, backslashes, control chars
-    expect(json_escape("a\"b").find('\\"') != -1, "escape double-quote")
+    expect(json_escape('a"b').find('\\"') != -1, "escape double-quote")
     expect(json_escape("a\nb").find("\\n") != -1, "escape newline")
     expect(json_escape("a\tb").find("\\t") != -1, "escape tab")
 

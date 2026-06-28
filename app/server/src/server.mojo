@@ -46,7 +46,15 @@ from runqueue import runq_take, runq_peek, runq_done, runq_reset
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
 from logging import log
-from events import field, status, debug_event, approval, message, error_event, json_escape
+from events import (
+    field,
+    status,
+    debug_event,
+    approval,
+    message,
+    error_event,
+    json_escape,
+)
 from json import loads
 
 comptime DEFAULT_PORT = 10000
@@ -55,7 +63,8 @@ comptime EMBED_DIM = 1024  # Qwen3-Embedding-0.6B — mirrors vault/core embed.m
 
 def _port() raises -> Int:
     """The HTTP/WS listen port — MILLFOLIO_PORT (digits) overrides, else 10000. Lets a
-    second instance (e.g. the demo) coexist on the same box without a rebuild."""
+    second instance (e.g. the demo) coexist on the same box without a rebuild.
+    """
     var s = String(getenv("MILLFOLIO_PORT", "").strip())
     if s == "":
         return DEFAULT_PORT
@@ -130,7 +139,8 @@ def _json_escape(s: String) -> String:
 
 
 def _extract_message(body: String) -> String:
-    """Pull `message` out of a `{ "message": ... }` body (empty on any failure)."""
+    """Pull `message` out of a `{ "message": ... }` body (empty on any failure).
+    """
     try:
         var j = loads(body)
         return j["message"].string_value()
@@ -152,6 +162,7 @@ def _web_root() -> String:
 # names, csv/pdf/md only, alias = "file_<i>") so per-file chunk counts line up
 # with the aliases the indexer wrote into chunks.tsv.
 
+
 def _config_dir() -> String:
     """Where the index lives — mirrors vault/core index.mojo (_config_dir)."""
     return getenv("HOME", ".") + "/.config/millfolio"
@@ -169,7 +180,8 @@ def _atoi(s: String) -> Int:
 
 
 def _tsv_unescape(s: String) raises -> String:
-    """Inverse of vault/core's TSV escaping (manifest stores escaped name/dir)."""
+    """Inverse of vault/core's TSV escaping (manifest stores escaped name/dir).
+    """
     var out = String("")
     var bytes = s.as_bytes()
     var i = 0
@@ -178,13 +190,21 @@ def _tsv_unescape(s: String) raises -> String:
         if c == 92 and i + 1 < len(bytes):  # backslash
             var n = Int(bytes[i + 1])
             if n == 116:
-                out += "\t"; i += 2; continue
+                out += "\t"
+                i += 2
+                continue
             elif n == 110:
-                out += "\n"; i += 2; continue
+                out += "\n"
+                i += 2
+                continue
             elif n == 114:
-                out += "\r"; i += 2; continue
+                out += "\r"
+                i += 2
+                continue
             elif n == 92:
-                out += "\\"; i += 2; continue
+                out += "\\"
+                i += 2
+                continue
         out += chr(c)
         i += 1
     return out^
@@ -221,7 +241,8 @@ def _kind_for_name(name: String) -> String:
 
 
 def _sort_names(mut names: List[String]):
-    """In-place insertion sort so aliases are stable across runs (as manifest)."""
+    """In-place insertion sort so aliases are stable across runs (as manifest).
+    """
     for i in range(1, len(names)):
         var j = i
         while j > 0 and names[j - 1] > names[j]:
@@ -291,7 +312,7 @@ def _cors(var resp: Response) -> Response:
 
 
 @fieldwise_init
-struct Api(Handler, Copyable, Movable):
+struct Api(Copyable, Handler, Movable):
     var st: UnsafePointer[MillfolioState, MutUntrackedOrigin]
 
     def serve(self, req: Request) raises -> Response:
@@ -313,7 +334,9 @@ struct Api(Handler, Copyable, Movable):
             return _cors(ok("millfolio ok"))
         # The on-device model name — the UI shows it in the bottom bar.
         if path == "/api/model":
-            return _cors(ok_json('{"model":' + json_escape(_model_label()) + "}"))
+            return _cors(
+                ok_json('{"model":' + json_escape(_model_label()) + "}")
+            )
         # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
         if path == "/api/stats":
             return self.handle_stats()
@@ -322,11 +345,15 @@ struct Api(Handler, Copyable, Movable):
         if path.find("..") == -1:
             var root = _web_root()
             if path == "/" or path == "/index.html":
-                return _serve_file(root + "/index.html", "text/html; charset=utf-8")
+                return _serve_file(
+                    root + "/index.html", "text/html; charset=utf-8"
+                )
             # A client-side route (no file extension, e.g. /stats) → serve the SPA
             # entry so SvelteKit's router can render it (adapter-static fallback).
             if path.find(".") == -1:
-                return _serve_file(root + "/index.html", "text/html; charset=utf-8")
+                return _serve_file(
+                    root + "/index.html", "text/html; charset=utf-8"
+                )
             # Any other path is a built asset — SvelteKit emits /_app/immutable/…
             # (JS/CSS), /_app/version.json, /favicon.svg, etc. Serve it from the web
             # root (404 only if it genuinely isn't there).
@@ -350,7 +377,8 @@ struct Api(Handler, Copyable, Movable):
     def handle_stats(self) raises -> Response:
         """Return the usage log as {"model": <label>, "records": [<obj>, …]}. The file
         is JSONL (each line is already a valid object), so we comma-join the non-empty
-        lines into an array — no server-side JSON parsing. Missing file → empty list."""
+        lines into an array — no server-side JSON parsing. Missing file → empty list.
+        """
         var recs = String("")
         var first = True
         try:
@@ -368,8 +396,15 @@ struct Api(Handler, Copyable, Movable):
                 first = False
         except:
             pass
-        return _cors(ok_json('{"model":' + json_escape(_model_label())
-                             + ',"records":[' + recs + "]}"))
+        return _cors(
+            ok_json(
+                '{"model":'
+                + json_escape(_model_label())
+                + ',"records":['
+                + recs
+                + "]}"
+            )
+        )
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
@@ -425,7 +460,9 @@ struct Api(Handler, Copyable, Movable):
         files_json += "]"
 
         var has_index = indexed and file_count > 0
-        var mismatch = has_index and source_dir != "" and source_dir != served_dir
+        var mismatch = (
+            has_index and source_dir != "" and source_dir != served_dir
+        )
 
         var out = String("{")
         out += '"vaultDir":' + _json_escape(served_dir) + ","
@@ -505,7 +542,9 @@ struct Api(Handler, Copyable, Movable):
         try:
             r.headers.set("Content-Type", ctype)
             # inline -> render in the viewer rather than triggering a download.
-            r.headers.set("Content-Disposition", 'inline; filename="' + name + '"')
+            r.headers.set(
+                "Content-Disposition", 'inline; filename="' + name + '"'
+            )
         except:
             pass
         return _cors(r^)
@@ -531,7 +570,12 @@ struct Api(Handler, Copyable, Movable):
             return _cors(bad_request('{"error":"empty query","hits":[]}'))
         var run_script = getenv("MILLFOLIO_RUN_SCRIPT", "")
         if run_script == "":
-            return _cors(ok_json('{"error":"search unavailable — engine runner not configured","hits":[]}'))
+            return _cors(
+                ok_json(
+                    '{"error":"search unavailable — engine runner not'
+                    ' configured","hits":[]}'
+                )
+            )
 
         var cfg = _config_dir()
         var out_json = cfg + "/.search_out.json"
@@ -547,9 +591,13 @@ struct Api(Handler, Copyable, Movable):
         argv.append(out_json)
         var rc = _spawn_capture(argv, cap)
         if rc != 0:
-            return _cors(ok_json(
-                '{"error":"search failed (exit ' + String(rc) + ')","hits":[]}'
-            ))
+            return _cors(
+                ok_json(
+                    '{"error":"search failed (exit '
+                    + String(rc)
+                    + ')","hits":[]}'
+                )
+            )
         var hits = String("[]")
         try:
             with open(out_json, "r") as f:
@@ -561,7 +609,8 @@ struct Api(Handler, Copyable, Movable):
 
 def _usleep(usec: Int):
     """Sleep `usec` microseconds (libc usleep) — the gap between run-output polls
-    in the streaming loop, so we don't busy-spin while the sandboxed child runs."""
+    in the streaming loop, so we don't busy-spin while the sandboxed child runs.
+    """
     _ = external_call["usleep", Int](Int(usec))
 
 
@@ -586,7 +635,8 @@ def _irate(n: Float64, ms: Float64) -> String:
 
 
 def _rate1(n: Float64, ms: Float64) -> String:
-    """Throughput per second with one decimal — for the lower call rates (calls/s)."""
+    """Throughput per second with one decimal — for the lower call rates (calls/s).
+    """
     if ms <= 0.0:
         return String("0.0")
     var tenths = Int(n * 10000.0 / ms + 0.5)
@@ -608,8 +658,11 @@ def _ms_since(t0: UInt) -> Float64:
 
 def _epoch_s() -> Int64:
     """Unix epoch seconds, right now — time(2) with a NULL arg. For stats timestamps
-    (perf_counter_ns is monotonic, not wall-clock, so it can't date a record)."""
-    var null = UnsafePointer[NoneType, MutUntrackedOrigin](unsafe_from_address=Int(0))
+    (perf_counter_ns is monotonic, not wall-clock, so it can't date a record).
+    """
+    var null = UnsafePointer[NoneType, MutUntrackedOrigin](
+        unsafe_from_address=Int(0)
+    )
     return external_call["time", Int64](null)
 
 
@@ -623,20 +676,35 @@ def _model_label() -> String:
 def _app_version() -> String:
     """The deployed build label (matches the UI's bottom-bar stamp: '<sha> · <date>').
     Stamped on each stats record so the Stats page can average per deployed version.
-    MILLFOLIO_VERSION is set by run-demo.sh from the deploy stamp; 'dev' otherwise."""
+    MILLFOLIO_VERSION is set by run-demo.sh from the deploy stamp; 'dev' otherwise.
+    """
     return String(getenv("MILLFOLIO_VERSION", "dev"))
 
 
 def _stats_path() -> String:
     """Where per-question usage records accumulate (JSONL). MILLFOLIO_STATS_FILE
-    overrides; defaults under the config dir (which `cp -R` deploys never delete)."""
-    return String(getenv("MILLFOLIO_STATS_FILE", _config_dir() + "/stats.jsonl"))
+    overrides; defaults under the config dir (which `cp -R` deploys never delete).
+    """
+    return String(
+        getenv("MILLFOLIO_STATS_FILE", _config_dir() + "/stats.jsonl")
+    )
 
 
-def _append_stats(epoch: Int64, question: String, label: String, version: String,
-                  ok: Bool, total_ms: Float64, pf_tok: Int, gen_tok: Int,
-                  pf_ms: Float64, dec_ms: Float64,
-                  names: List[String], counts: List[Int], ms: List[Float64]):
+def _append_stats(
+    epoch: Int64,
+    question: String,
+    label: String,
+    version: String,
+    ok: Bool,
+    total_ms: Float64,
+    pf_tok: Int,
+    gen_tok: Int,
+    pf_ms: Float64,
+    dec_ms: Float64,
+    names: List[String],
+    counts: List[Int],
+    ms: List[Float64],
+):
     """Append ONE self-contained JSON object (a usage record) to the stats file.
     JSONL — one object per line — so /api/stats can return the file verbatim and the
     browser does the averaging (the Mojo json lib is avoided on this path). Best-effort:
@@ -645,21 +713,39 @@ def _append_stats(epoch: Int64, question: String, label: String, version: String
     for i in range(len(names)):
         if i > 0:
             api += ","
-        api += ("[" + json_escape(names[i]) + "," + String(counts[i])
-                + "," + String(Int(ms[i] + 0.5)) + "]")
+        api += (
+            "["
+            + json_escape(names[i])
+            + ","
+            + String(counts[i])
+            + ","
+            + String(Int(ms[i] + 0.5))
+            + "]"
+        )
     api += "]"
     var line = (
-        '{"ts":' + String(epoch)
-        + ',"q":' + json_escape(question)
-        + ',"model":' + json_escape(label)
-        + ',"version":' + json_escape(version)
-        + ',"ok":' + ("true" if ok else "false")
-        + ',"total_ms":' + String(Int(total_ms + 0.5))
-        + ',"prefill_tok":' + String(pf_tok)
-        + ',"gen_tok":' + String(gen_tok)
-        + ',"prefill_ms":' + String(Int(pf_ms + 0.5))
-        + ',"decode_ms":' + String(Int(dec_ms + 0.5))
-        + ',"api":' + api
+        '{"ts":'
+        + String(epoch)
+        + ',"q":'
+        + json_escape(question)
+        + ',"model":'
+        + json_escape(label)
+        + ',"version":'
+        + json_escape(version)
+        + ',"ok":'
+        + ("true" if ok else "false")
+        + ',"total_ms":'
+        + String(Int(total_ms + 0.5))
+        + ',"prefill_tok":'
+        + String(pf_tok)
+        + ',"gen_tok":'
+        + String(gen_tok)
+        + ',"prefill_ms":'
+        + String(Int(pf_ms + 0.5))
+        + ',"decode_ms":'
+        + String(Int(dec_ms + 0.5))
+        + ',"api":'
+        + api
         + "}\n"
     )
     try:
@@ -669,10 +755,17 @@ def _append_stats(epoch: Int64, question: String, label: String, version: String
         log("[stats] append failed (non-fatal)")
 
 
-def _bump(mut names: List[String], mut counts: List[Int], mut ms: List[Float64],
-          name: String, n: Int, dt: Float64):
+def _bump(
+    mut names: List[String],
+    mut counts: List[Int],
+    mut ms: List[Float64],
+    name: String,
+    n: Int,
+    dt: Float64,
+):
     """Accumulate `n` calls (+ `dt` ms) under `name` in the parallel api-stat lists
-    — find-or-append, so any tool/codegen name aggregates without a fixed schema."""
+    — find-or-append, so any tool/codegen name aggregates without a fixed schema.
+    """
     for i in range(len(names)):
         if names[i] == name:
             counts[i] += n
@@ -683,7 +776,9 @@ def _bump(mut names: List[String], mut counts: List[Int], mut ms: List[Float64],
     ms.append(dt)
 
 
-def _live_stats(names: List[String], counts: List[Int], pf_tok: Int, gen_tok: Int) -> String:
+def _live_stats(
+    names: List[String], counts: List[Int], pf_tok: Int, gen_tok: Int
+) -> String:
     """Running per-api call counts + model token tallies appended to the live
     working line — only the categories seen so far (empty stays clean)."""
     var s = String("")
@@ -706,7 +801,7 @@ def _live_stats(names: List[String], counts: List[Int], pf_tok: Int, gen_tok: In
 # test/runqueue_test.mojo. A run is ALSO time-bounded here (the child is killed past
 # _RUN_MAX_ITERS) so one slow/stuck program can't stall the whole queue.
 comptime _SIGKILL: Int = 9
-comptime _RUN_MAX_ITERS: Int = 1000   # ~120s at 120ms/poll — kill a run past this
+comptime _RUN_MAX_ITERS: Int = 1000  # ~120s at 120ms/poll — kill a run past this
 
 
 def on_connect(mut conn: WsConnection) raises:
@@ -726,7 +821,9 @@ def on_connect(mut conn: WsConnection) raises:
         conn.send_text(error_event("empty or malformed ask"))
         conn.close(WsCloseCode.NORMAL)
         return
-    var ticket = -1  # our run-queue ticket; >= 0 once we've entered (see runqueue.mojo)
+    var ticket = (
+        -1
+    )  # our run-queue ticket; >= 0 once we've entered (see runqueue.mojo)
     try:
         var cfg = load_config()
         var vault_dir = resolve_vault_dir()
@@ -751,23 +848,50 @@ def on_connect(mut conn: WsConnection) raises:
         var _t = perf_counter_ns()
         var manifest = orch.vault_manifest(vault_dir)
         _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
-        conn.send_text(debug_event("manifest", "Frontier-safe manifest (aliases only)", manifest, "text"))
+        conn.send_text(
+            debug_event(
+                "manifest",
+                "Frontier-safe manifest (aliases only)",
+                manifest,
+                "text",
+            )
+        )
         conn.send_text(status("manifest", "Aliasing vault manifest", "done"))
 
         conn.send_text(status("codegen", "Writing the program", "running"))
         _t = perf_counter_ns()
         var code = orch.vault_codegen(question, manifest)
         _bump(api_names, api_count, api_ms, "codegen", 1, _ms_since(_t))
-        conn.send_text(debug_event("codegen", "Generated program", code, "mojo"))
+        conn.send_text(
+            debug_event("codegen", "Generated program", code, "mojo")
+        )
         conn.send_text(status("codegen", "Writing the program", "done"))
-        pre_ms = _ms_since(t_total0)  # manifest + codegen, before the approval pause
+        pre_ms = _ms_since(
+            t_total0
+        )  # manifest + codegen, before the approval pause
 
-        conn.send_text(status("run", "Run the generated program over your vault?", "awaiting-approval"))
-        conn.send_text(approval("run", "Run the generated program over your vault?", code))
+        conn.send_text(
+            status(
+                "run",
+                "Run the generated program over your vault?",
+                "awaiting-approval",
+            )
+        )
+        conn.send_text(
+            approval("run", "Run the generated program over your vault?", code)
+        )
         var decision = conn.recv()
-        if decision.opcode == WsOpcode.CLOSE or field(decision.text_payload(), "type") != "approve":
+        if (
+            decision.opcode == WsOpcode.CLOSE
+            or field(decision.text_payload(), "type") != "approve"
+        ):
             conn.send_text(status("run", "Run rejected", "error"))
-            conn.send_text(message("Okay — I won't run that. Tell me how you'd like to adjust it."))
+            conn.send_text(
+                message(
+                    "Okay — I won't run that. Tell me how you'd like to"
+                    " adjust it."
+                )
+            )
             conn.close(WsCloseCode.NORMAL)
             return
 
@@ -781,16 +905,25 @@ def on_connect(mut conn: WsConnection) raises:
         # serial run-queue is visible, and update it live while we wait our turn.
         var waited = 0
         while True:
-            var ahead = ticket - st[0]   # people in front of us
+            var ahead = ticket - st[0]  # people in front of us
             if ahead <= 0:
-                conn.send_text(status("queue", "You're next — running now", "done"))
+                conn.send_text(
+                    status("queue", "You're next — running now", "done")
+                )
                 break
             waited += 1
-            if waited > 600:  # ~300s — assume the queue stalled; take our turn anyway
+            if (
+                waited > 600
+            ):  # ~300s — assume the queue stalled; take our turn anyway
                 conn.send_text(status("queue", "Starting now", "done"))
                 break
-            conn.send_text(status("queue",
-                "There are " + String(ahead) + " ahead of you", "running"))
+            conn.send_text(
+                status(
+                    "queue",
+                    "There are " + String(ahead) + " ahead of you",
+                    "running",
+                )
+            )
             _usleep(500_000)  # re-check twice a second
             st = runq_peek()
 
@@ -801,21 +934,29 @@ def on_connect(mut conn: WsConnection) raises:
         # line the generated program emits as a live "execute" status update (same
         # stepId, so the UI updates ONE line in place) instead of a frozen spinner.
         conn.send_text(status("run", "Approved — running", "done"))
-        var t_run0 = perf_counter_ns()  # compile + run wall-clock (post-approval/queue)
-        conn.send_text(status("compile", "Compiling the generated program", "running"))
+        var t_run0 = (
+            perf_counter_ns()
+        )  # compile + run wall-clock (post-approval/queue)
+        conn.send_text(
+            status("compile", "Compiling the generated program", "running")
+        )
         _t = perf_counter_ns()
         var fixes = orch.vault_build(code)
         _bump(api_names, api_count, api_ms, "compile", 1, _ms_since(_t))
         if fixes > 0:
             _bump(api_names, api_count, api_ms, "fix", fixes, 0.0)
-        conn.send_text(status("compile", "Compiling the generated program", "done"))
-        conn.send_text(status("execute",
-            "Running it locally over your vault…",
-            "running"))
+        conn.send_text(
+            status("compile", "Compiling the generated program", "done")
+        )
+        conn.send_text(
+            status("execute", "Running it locally over your vault…", "running")
+        )
         var h = orch.vault_run_start(vault_dir)
         log("[run] poll start: pid=" + String(Int(h.pid)))
         var cur_label = String("Running it locally over your vault…")
-        var src_file = String("")   # first document a tool read — surfaced as the source
+        var src_file = String(
+            ""
+        )  # first document a tool read — surfaced as the source
         var src_alias = String("")  # …its alias, for the /api/doc?alias= link
         var running = True
         var iters = 0
@@ -826,9 +967,18 @@ def on_connect(mut conn: WsConnection) raises:
             var reap = orch.vault_run_reap(h)
             running = reap == -1  # -1 = still running
             var lines = orch.vault_run_poll(h)
-            if iters % 16 == 0:  # ~every 2s: prove the loop's alive + where it's stuck
-                log("[run] poll iter=" + String(iters) + " reap=" + String(reap)
-                    + " captured=" + String(h.cursor) + "B")
+            if (
+                iters % 16 == 0
+            ):  # ~every 2s: prove the loop's alive + where it's stuck
+                log(
+                    "[run] poll iter="
+                    + String(iters)
+                    + " reap="
+                    + String(reap)
+                    + " captured="
+                    + String(h.cursor)
+                    + "B"
+                )
             var dirty = False
             for i in range(len(lines)):
                 var ln = lines[i].copy()
@@ -836,7 +986,9 @@ def on_connect(mut conn: WsConnection) raises:
                     cur_label = _progress_label(ln)
                     dirty = True
                 elif ln.startswith(STAT_SENTINEL):
-                    var parts = String(ln.removeprefix(STAT_SENTINEL)).split("\t")
+                    var parts = String(ln.removeprefix(STAT_SENTINEL)).split(
+                        "\t"
+                    )
                     if len(parts) >= 5 and String(parts[0]) == "model":
                         # "model\t<pf_tok>\t<gen_tok>\t<pf_ms>\t<dec_ms>" — engine prefill/gen.
                         pf_tok += Int(atof(String(parts[1])))
@@ -851,13 +1003,26 @@ def on_connect(mut conn: WsConnection) raises:
                             src_file = String(parts[2])
                     elif len(parts) == 2:
                         # "<tool>\t<ms>" — one vault-tool API call + its duration.
-                        _bump(api_names, api_count, api_ms, String(parts[0]), 1, atof(String(parts[1])))
+                        _bump(
+                            api_names,
+                            api_count,
+                            api_ms,
+                            String(parts[0]),
+                            1,
+                            atof(String(parts[1])),
+                        )
                         dirty = True
             # Update the ONE 'working' line in place with the latest progress label
             # + running api/model tallies, whenever a progress or stat line arrived.
             if dirty:
-                conn.send_text(status("execute",
-                    cur_label + _live_stats(api_names, api_count, pf_tok, gen_tok), "running"))
+                conn.send_text(
+                    status(
+                        "execute",
+                        cur_label
+                        + _live_stats(api_names, api_count, pf_tok, gen_tok),
+                        "running",
+                    )
+                )
             if running:
                 iters += 1
                 if iters > _RUN_MAX_ITERS:
@@ -875,7 +1040,12 @@ def on_connect(mut conn: WsConnection) raises:
                 else:
                     _usleep(120_000)  # 120 ms between polls
 
-        log("[run] poll done: iters=" + String(iters) + " timed_out=" + String(timed_out))
+        log(
+            "[run] poll done: iters="
+            + String(iters)
+            + " timed_out="
+            + String(timed_out)
+        )
         # Final per-category summary: total + throughput (number/sec) for every API
         # category (codegen-phase + vault tools) and the model (prefill/gen tokens).
         if len(api_names) > 0 or pf_tok + gen_tok > 0:
@@ -889,11 +1059,27 @@ def on_connect(mut conn: WsConnection) raises:
                 else:
                     sum += "  " + api_names[i] + " ×" + String(api_count[i])
                     if api_ms[i] > 0.0:  # repeated timed calls → a rate
-                        sum += " (" + _rate1(Float64(api_count[i]), api_ms[i]) + "/s)"
+                        sum += (
+                            " ("
+                            + _rate1(Float64(api_count[i]), api_ms[i])
+                            + "/s)"
+                        )
             if pf_tok > 0:
-                sum += "  prefill " + String(pf_tok) + " tok (" + _irate(Float64(pf_tok), pf_ms) + " tok/s)"
+                sum += (
+                    "  prefill "
+                    + String(pf_tok)
+                    + " tok ("
+                    + _irate(Float64(pf_tok), pf_ms)
+                    + " tok/s)"
+                )
             if gen_tok > 0:
-                sum += "  gen " + String(gen_tok) + " tok (" + _irate(Float64(gen_tok), dec_ms) + " tok/s)"
+                sum += (
+                    "  gen "
+                    + String(gen_tok)
+                    + " tok ("
+                    + _irate(Float64(gen_tok), dec_ms)
+                    + " tok/s)"
+                )
             conn.send_text(status("engine", sum, "done"))
 
         # Past `poll done` the run is over, so a perceived "hang" on the SECOND
@@ -903,19 +1089,44 @@ def on_connect(mut conn: WsConnection) raises:
         var reply = orch.vault_run_finish(h)
         log("[run] finish: reply " + String(reply.byte_length()) + "B")
         if timed_out:
-            conn.send_text(status("execute", "Stopped — the run exceeded the time limit", "error"))
-            conn.send_text(message("That took too long and was stopped. Please try another question."))
+            conn.send_text(
+                status(
+                    "execute",
+                    "Stopped — the run exceeded the time limit",
+                    "error",
+                )
+            )
+            conn.send_text(
+                message(
+                    "That took too long and was stopped. Please try another"
+                    " question."
+                )
+            )
         else:
-            conn.send_text(status("execute", "Running it locally over your vault", "done"))
+            conn.send_text(
+                status("execute", "Running it locally over your vault", "done")
+            )
             conn.send_text(message(reply, src_file, src_alias))
         log("[run] reply sent; releasing queue slot ticket=" + String(ticket))
         # Persist this question's usage (JSONL) for the Stats page — still inside the
         # run slot, so writes across workers are serialized. total = work time only
         # (pre-approval manifest+codegen + post-approval compile+run); the human pause
         # and queue wait are excluded so the average reflects the machine, not the user.
-        _append_stats(_epoch_s(), question, _model_label(), _app_version(), not timed_out,
-                      pre_ms + _ms_since(t_run0), pf_tok, gen_tok, pf_ms, dec_ms,
-                      api_names, api_count, api_ms)
+        _append_stats(
+            _epoch_s(),
+            question,
+            _model_label(),
+            _app_version(),
+            not timed_out,
+            pre_ms + _ms_since(t_run0),
+            pf_tok,
+            gen_tok,
+            pf_ms,
+            dec_ms,
+            api_names,
+            api_count,
+            api_ms,
+        )
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")
         ticket = -1
@@ -946,7 +1157,9 @@ def main() raises:
     print('  POST /chat   { "message": ... } -> { "reply": ... }')
     print("  GET  /api/vault  -> vault files + index stats")
     print("  POST /api/search { query, k } -> ranked hits")
-    print("  WS   (Upgrade)   -> streaming chat (status/approval/message events)")
+    print(
+        "  WS   (Upgrade)   -> streaming chat (status/approval/message events)"
+    )
     # One listener serves both: the unary HTTP `Api` handler AND, for requests with
     # the WebSocket Upgrade headers, the streaming `on_connect` chat — no second port.
     # (The 2-arg serve overload is plain-function-only; we use a stateful Handler
@@ -957,8 +1170,12 @@ def main() raises:
     var workers = _workers()
     if workers > 1:
         print(
-            "  workers: ", workers,
-            " (concurrent connections; the sandboxed run stays serial via the run-queue)",
+            "  workers: ",
+            workers,
+            (
+                " (concurrent connections; the sandboxed run stays serial via"
+                " the run-queue)"
+            ),
             sep="",
         )
     # num_workers=1 (default) → single-threaded reactor (real product). >1 → N pthread

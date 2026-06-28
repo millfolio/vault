@@ -34,7 +34,8 @@ def json_escape(s: String) -> String:
 
 
 def field(body: String, key: String) -> String:
-    """Pull a top-level string field out of a JSON message (empty on any failure)."""
+    """Pull a top-level string field out of a JSON message (empty on any failure).
+    """
     try:
         var j = loads(body)
         return j[key].string_value()
@@ -54,7 +55,9 @@ def status(step: String, label: String, state: String) -> String:
     )
 
 
-def debug_event(step: String, title: String, body: String, language: String) -> String:
+def debug_event(
+    step: String, title: String, body: String, language: String
+) -> String:
     return (
         '{"type":"debug","stepId":'
         + json_escape(step)
@@ -75,20 +78,29 @@ def approval(step: String, label: String, body: String) -> String:
         + ',"label":'
         + json_escape(label)
         + ',"payload":{"title":'
-        + json_escape("Sandboxed run — reads your real data locally, no network")
+        + json_escape(
+            "Sandboxed run — reads your real data locally, no network"
+        )
         + ',"body":'
         + json_escape(body)
         + ',"language":"mojo"}}'
     )
 
 
-def message(text: String, source: String = String(""), source_alias: String = String("")) -> String:
+def message(
+    text: String, source: String = String(""), source_alias: String = String("")
+) -> String:
     # `source`/`source_alias` (optional) — the filename + alias of the first document
     # used to answer. The UI renders the filename as a link to /api/doc?alias=<alias>
     # (alias-gated; no real path leaves). Omitted when empty.
     var src = String("")
     if source.byte_length() > 0 and source_alias.byte_length() > 0:
-        src = ',"source":' + json_escape(source) + ',"sourceAlias":' + json_escape(source_alias)
+        src = (
+            ',"source":'
+            + json_escape(source)
+            + ',"sourceAlias":'
+            + json_escape(source_alias)
+        )
     return (
         '{"type":"message","id":"msg","role":"assistant","text":'
         + json_escape(text)
