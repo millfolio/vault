@@ -7,8 +7,8 @@ template with canonical paths and runs a binary under `sandbox-exec`, FROM MOJO.
 
 This is the first vertical slice filled in end-to-end: profile render
 (file I/O + substitution) -> path canonicalization (realpath) -> exec under the
-sandbox (system(3)) -> capture exit code + output. The loopback-only VAULT run
-profile is verified by `pixi run vault-spike`.
+sandbox (system(3)) -> capture exit code + output. The VAULT run profile is
+verified by the sandbox unit test (`pixi run test-sandbox`).
 
 Per pi's thesis (PRIOR-ART.md): isolation lives OUTSIDE the agent, at the OS
 level. The harness owns confidentiality; this sandbox owns containment.
