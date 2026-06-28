@@ -22,6 +22,7 @@ from egress import EgressGuard
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _replace_all(s: String, old: String, new: String) raises -> String:
     var parts = s.split(old)
     var out = String("")
@@ -43,7 +44,8 @@ def _json_escape(s: String) raises -> String:
 
 def _strip_fences(var s: String) raises -> String:
     """If the model wrapped code in a ```...``` block, return the inside (minus
-    the optional leading language tag). String has no slicing, so split + rejoin."""
+    the optional leading language tag). String has no slicing, so split + rejoin.
+    """
     if s.find("```") == -1:
         return s^
     var parts = s.split("```")
@@ -54,7 +56,7 @@ def _strip_fences(var s: String) raises -> String:
         return block^
     var lines = block.split("\n")
     var out = String("")
-    for i in range(1, len(lines)):   # drop the language-tag line
+    for i in range(1, len(lines)):  # drop the language-tag line
         if i > 1:
             out += "\n"
         out += String(lines[i])
@@ -82,22 +84,38 @@ def _default_codegen_system() -> String:
     """Built-in fallback prompt, used only if the resource file can't be read.
     The model's training predates current Mojo, so it emits removed syntax (`let`,
     `fn`, `alias`, `from pathlib import`). Teach the current dialect + give a
-    known-good example to pattern-match. (Static, no private data — safe to send.)"""
+    known-good example to pattern-match. (Static, no private data — safe to send.)
+    """
     var s = String(
         "You generate ONE self-contained Mojo program. Output ONLY Mojo code —"
         " no prose, no markdown fences.\n\n"
     )
-    s += "Mojo has CHANGED since your training data. Follow these rules EXACTLY:\n"
-    s += "- Use `def`, never `fn` (removed). `def` does NOT imply raising; write `def main() raises:`.\n"
+    s += (
+        "Mojo has CHANGED since your training data. Follow these rules"
+        " EXACTLY:\n"
+    )
+    s += (
+        "- Use `def`, never `fn` (removed). `def` does NOT imply raising; write"
+        " `def main() raises:`.\n"
+    )
     s += "- Use `var`, never `let` (removed).\n"
     s += "- Use `comptime`, never `alias` (removed).\n"
-    s += "- Stdlib imports need the `std.` prefix (e.g. `from std.os import ...`). Avoid pathlib — read files with `open()`.\n"
-    s += "- No String slicing (`s[a:b]` is invalid). Use `s.split(sep)` and wrap parts with `String(...)`.\n"
-    s += "- `len(x)` for lists; `s.byte_length()` for a String's length; `String(s.strip())` to trim.\n\n"
+    s += (
+        "- Stdlib imports need the `std.` prefix (e.g. `from std.os import"
+        " ...`). Avoid pathlib — read files with `open()`.\n"
+    )
+    s += (
+        "- No String slicing (`s[a:b]` is invalid). Use `s.split(sep)` and wrap"
+        " parts with `String(...)`.\n"
+    )
+    s += (
+        "- `len(x)` for lists; `s.byte_length()` for a String's length;"
+        " `String(s.strip())` to trim.\n\n"
+    )
     s += (
         "TASK: read the CSV at the literal path __DATA_CSV__ (first row is a"
-        " header), compute the requested result, and `print` it. Refer to columns"
-        " by their aliases (col_0, col_1, ...).\n\n"
+        " header), compute the requested result, and `print` it. Refer to"
+        " columns by their aliases (col_0, col_1, ...).\n\n"
     )
     s += "COMPLETE VALID EXAMPLE — match this exact style and API:\n"
     s += _mock_program()
@@ -118,7 +136,8 @@ def _codegen_system() -> String:
     """System prompt for the remote (and fallback local) code generator. Loaded at
     runtime from `resources/privacy_box-system.md` so the agent's contract — the
     confidentiality rules, the vault tool API, the Mojo dialect — can be edited
-    without recompiling. Falls back to the built-in prompt if the file is absent."""
+    without recompiling. Falls back to the built-in prompt if the file is absent.
+    """
     try:
         with open(_prompt_path(), "r") as f:
             var text = f.read()
@@ -129,8 +148,8 @@ def _codegen_system() -> String:
     return _default_codegen_system()
 
 
-struct ChatMessage(Movable, Copyable):
-    var role: String     # "system" | "user" | "assistant"
+struct ChatMessage(Copyable, Movable):
+    var role: String  # "system" | "user" | "assistant"
     var content: String
 
     def __init__(out self, var role: String, var content: String):
@@ -139,8 +158,10 @@ struct ChatMessage(Movable, Copyable):
 
 
 struct LocalClient(Movable):
-    """Local model via inference-server, OpenAI /chat/completions over plain HTTP."""
-    var base_url: String   # e.g. http://127.0.0.1:8000/v1
+    """Local model via inference-server, OpenAI /chat/completions over plain HTTP.
+    """
+
+    var base_url: String  # e.g. http://127.0.0.1:8000/v1
     var model: String
 
     def __init__(out self, var base_url: String, var model: String):
@@ -150,7 +171,11 @@ struct LocalClient(Movable):
     def chat(self, messages: List[ChatMessage]) raises -> String:
         """POST the messages and return the assistant content. Local only — no
         egress guard. Requires inference-server running."""
-        var body = String('{"model":"') + self.model + '","max_tokens":4096,"messages":['
+        var body = (
+            String('{"model":"')
+            + self.model
+            + '","max_tokens":4096,"messages":['
+        )
         for i in range(len(messages)):
             if i > 0:
                 body += ","
@@ -179,11 +204,17 @@ struct LocalClient(Movable):
         return _strip_fences(self.chat(msgs))
 
     def fix_code(self, code: String, errors: String) raises -> String:
-        """Local model fixes failing code — used when the remote budget is depleted."""
-        var prompt = String(
-            "The Mojo program below FAILED. Fix it and output ONLY the corrected,"
-            " complete Mojo program.\n\nERRORS:\n"
-        ) + errors + "\n\nPROGRAM:\n" + code
+        """Local model fixes failing code — used when the remote budget is depleted.
+        """
+        var prompt = (
+            String(
+                "The Mojo program below FAILED. Fix it and output ONLY the"
+                " corrected, complete Mojo program.\n\nERRORS:\n"
+            )
+            + errors
+            + "\n\nPROGRAM:\n"
+            + code
+        )
         var msgs = List[ChatMessage]()
         msgs.append(ChatMessage(String("system"), _codegen_system()))
         msgs.append(ChatMessage(String("user"), prompt))
@@ -193,6 +224,7 @@ struct LocalClient(Movable):
 struct Generated(Movable):
     """A code-generation result: the code + the token cost (from the remote API's
     usage; 0 for mock). The orchestrator charges the Budget by `tokens`."""
+
     var code: String
     var tokens: Int
 
@@ -204,13 +236,21 @@ struct Generated(Movable):
 struct RemoteClient(Movable):
     """Frontier model (Anthropic Messages API, HTTPS). The guard gates the outbound
     path — enforced here, not left to callers, so it cannot be bypassed."""
-    var base_url: String   # e.g. https://api.anthropic.com/v1
+
+    var base_url: String  # e.g. https://api.anthropic.com/v1
     var api_key: String
     var model: String
-    var mock: Bool         # force the canned program (offline) instead of a real call
+    var mock: Bool  # force the canned program (offline) instead of a real call
     var guard: EgressGuard
 
-    def __init__(out self, var base_url: String, var api_key: String, var model: String, mock: Bool, var guard: EgressGuard):
+    def __init__(
+        out self,
+        var base_url: String,
+        var api_key: String,
+        var model: String,
+        mock: Bool,
+        var guard: EgressGuard,
+    ):
         self.base_url = base_url^
         self.api_key = api_key^
         self.model = model^
@@ -222,7 +262,7 @@ struct RemoteClient(Movable):
         generated code + token cost. MOCK when configured or no key present."""
         var prompt = String("")
         for m in messages:
-            var checked = self.guard.check(m.content)   # raises -> aborts send
+            var checked = self.guard.check(m.content)  # raises -> aborts send
             prompt += m.role + ": " + checked + "\n"
 
         if self.mock or self.api_key == "":
@@ -235,11 +275,11 @@ struct RemoteClient(Movable):
         routed through the EgressGuard (fails closed). Offline (mock / no key):
         returns the code unchanged at 0 cost."""
         var prompt = String(
-            "The Mojo program below FAILED. Fix it and output ONLY the corrected,"
-            " complete Mojo program.\n\nERRORS:\n"
+            "The Mojo program below FAILED. Fix it and output ONLY the"
+            " corrected, complete Mojo program.\n\nERRORS:\n"
         )
         prompt += errors + "\n\nPROGRAM:\n" + code
-        var checked = self.guard.check(prompt)   # raises -> aborts the send
+        var checked = self.guard.check(prompt)  # raises -> aborts the send
         if self.mock or self.api_key == "":
             return Generated(code.copy(), 0)
         return self._anthropic(checked)
@@ -252,7 +292,11 @@ struct RemoteClient(Movable):
         # (and every fix attempt re-truncated at the same cap).
         var body = String('{"model":"') + self.model + '","max_tokens":8192,'
         body += '"system":"' + _json_escape(sys) + '",'
-        body += '"messages":[{"role":"user","content":"' + _json_escape(prompt) + '"}]}'
+        body += (
+            '"messages":[{"role":"user","content":"'
+            + _json_escape(prompt)
+            + '"}]}'
+        )
 
         var req = Request(
             method="POST",
@@ -276,12 +320,15 @@ struct RemoteClient(Movable):
             truncated = False
         if truncated:
             raise Error(
-                "codegen truncated: the model hit max_tokens before finishing the "
-                "program (stop_reason=max_tokens). Raise max_tokens or simplify the task.")
+                "codegen truncated: the model hit max_tokens before finishing"
+                " the program (stop_reason=max_tokens). Raise max_tokens or"
+                " simplify the task."
+            )
         var toks: Int
         try:
             toks = Int(v["usage"]["input_tokens"].int_value()) + Int(
-                v["usage"]["output_tokens"].int_value())
+                v["usage"]["output_tokens"].int_value()
+            )
         except:
             toks = 0
         return Generated(code^, toks)

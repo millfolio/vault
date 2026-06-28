@@ -37,7 +37,7 @@ comptime _O_WRONLY: c_int = 0x0001
 comptime _O_CREAT: c_int = 0x0200
 comptime _O_TRUNC: c_int = 0x0400
 comptime _OUT_MODE: c_int = 0o644  # rw-r--r-- for the capture file
-comptime _WNOHANG: c_int = 1       # waitpid(2) flag — return immediately if no child has exited (macOS)
+comptime _WNOHANG: c_int = 1  # waitpid(2) flag — return immediately if no child has exited (macOS)
 
 # A NULL `char*` / `void*` — argv terminator, attrp, etc.
 comptime _NULL_CHARP = UnsafePointer[c_char, MutUntrackedOrigin](
@@ -59,9 +59,9 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     return p
 
 
-def _environ() -> UnsafePointer[
-    UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin
-]:
+def _environ() -> (
+    UnsafePointer[UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
+):
     """The process `environ` (`char**`). On macOS the global isn't directly
     linkable, so go through `_NSGetEnviron()` which returns `char***`; deref
     once. Passing this (NOT NULL) is MANDATORY: compile() relies on the child
@@ -172,7 +172,8 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
     All C resources (argv array + strings, the file_actions) are freed before
     returning; the child has its own copy after the spawn, so this is safe.
 
-    Returns the child PID (> 0). Raises if argv is empty or any libc step fails."""
+    Returns the child PID (> 0). Raises if argv is empty or any libc step fails.
+    """
     var n = len(argv)
     if n == 0:
         raise Error("_spawn_async: empty argv")
@@ -216,7 +217,9 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
             _environ(),
         )
         if src == 0:
-            pid = pid_slot[0]  # capture the PID; DON'T waitpid — the caller reaps
+            pid = pid_slot[
+                0
+            ]  # capture the PID; DON'T waitpid — the caller reaps
         else:
             rc = src
 
@@ -237,9 +240,10 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
 
 def _reap_nohang(pid: c_int) -> Int:
     """Non-blocking `waitpid(pid, &status, WNOHANG)`. Returns:
-      -1  the child is still running (waitpid returned 0),
-      -2  waitpid errored (returned -1),
-      otherwise the child's exit code `(status>>8)&0xFF` — matching `_spawn_capture`."""
+    -1  the child is still running (waitpid returned 0),
+    -2  waitpid errored (returned -1),
+    otherwise the child's exit code `(status>>8)&0xFF` — matching `_spawn_capture`.
+    """
     var status_slot = stack_allocation[1, c_int]()
     status_slot[0] = 0
     var r = external_call["waitpid", c_int](
@@ -264,7 +268,9 @@ def _canonical(var path: String) raises -> String:
     if Int(buf[0]) == 0:
         raise Error("realpath failed (does it exist?): " + path)
     return String(
-        StringSlice(unsafe_from_utf8=CStringSlice(unsafe_from_ptr=buf.bitcast[Int8]()))
+        StringSlice(
+            unsafe_from_utf8=CStringSlice(unsafe_from_ptr=buf.bitcast[Int8]())
+        )
     )
 
 
@@ -289,13 +295,21 @@ def _tsv_unescape(s: String) raises -> String:
         if c == 92 and i + 1 < len(b):  # backslash
             var n = Int(b[i + 1])
             if n == 116:
-                out += "\t"; i += 2; continue
+                out += "\t"
+                i += 2
+                continue
             elif n == 110:
-                out += "\n"; i += 2; continue
+                out += "\n"
+                i += 2
+                continue
             elif n == 114:
-                out += "\r"; i += 2; continue
+                out += "\r"
+                i += 2
+                continue
             elif n == 92:
-                out += "\\"; i += 2; continue
+                out += "\\"
+                i += 2
+                continue
         out += chr(c)
         i += 1
     return out^
@@ -362,13 +376,14 @@ def _strip_compiler_noise(s: String) raises -> String:
 
 # ── policy + result ──────────────────────────────────────────────────────────
 
+
 struct SandboxPolicy(Movable):
-    var data_dir: String      # read-only mount of the task's private data
-    var scratch_dir: String   # the only writable location (results land here)
-    var network: String       # "deny" (CSV path) | "loopback" (vault path)
-    var index_dir: String     # the vault's LanceDB index dir (~/.config/millfolio);
-                              # read-allowed in the vault run profile so search()
-                              # can read the vector store + chunks.tsv side-table
+    var data_dir: String  # read-only mount of the task's private data
+    var scratch_dir: String  # the only writable location (results land here)
+    var network: String  # "deny" (CSV path) | "loopback" (vault path)
+    var index_dir: String  # the vault's LanceDB index dir (~/.config/millfolio);
+    # read-allowed in the vault run profile so search()
+    # can read the vector store + chunks.tsv side-table
 
     def __init__(out self, var data_dir: String, var scratch_dir: String):
         self.data_dir = data_dir^
@@ -376,9 +391,15 @@ struct SandboxPolicy(Movable):
         self.network = String("deny")
         self.index_dir = String("")
 
-    def __init__(out self, var data_dir: String, var scratch_dir: String,
-                 var index_dir: String, var network: String):
-        """Vault variant: carries the index dir + the network mode ("loopback")."""
+    def __init__(
+        out self,
+        var data_dir: String,
+        var scratch_dir: String,
+        var index_dir: String,
+        var network: String,
+    ):
+        """Vault variant: carries the index dir + the network mode ("loopback").
+        """
         self.data_dir = data_dir^
         self.scratch_dir = scratch_dir^
         self.network = network^
@@ -387,7 +408,7 @@ struct SandboxPolicy(Movable):
 
 struct RunResult(Movable):
     var exit_code: Int
-    var output: String   # combined stdout+stderr; passes the EgressGuard before reuse
+    var output: String  # combined stdout+stderr; passes the EgressGuard before reuse
 
     def __init__(out self, exit_code: Int, var output: String):
         self.exit_code = exit_code
@@ -399,12 +420,19 @@ struct RunHandle(Movable):
     a `RunResult`). `run_start` returns one; the caller loops `run_poll` (new
     complete lines since the last poll) + `run_reap` (still-running? exited?) and
     finishes with `run_finish` (the full captured stdout)."""
-    var pid: c_int          # the sandbox-exec child PID (reaped by run_reap)
-    var out_path: String    # the capture file (scratch/run.out)
-    var cursor: Int         # bytes of out_path already consumed by run_poll
-    var pending: String     # a trailing partial line (no '\n' yet) carried to the next poll
 
-    def __init__(out self, pid: c_int, var out_path: String, cursor: Int, var pending: String):
+    var pid: c_int  # the sandbox-exec child PID (reaped by run_reap)
+    var out_path: String  # the capture file (scratch/run.out)
+    var cursor: Int  # bytes of out_path already consumed by run_poll
+    var pending: String  # a trailing partial line (no '\n' yet) carried to the next poll
+
+    def __init__(
+        out self,
+        pid: c_int,
+        var out_path: String,
+        cursor: Int,
+        var pending: String,
+    ):
         self.pid = pid
         self.out_path = out_path^
         self.cursor = cursor
@@ -413,11 +441,14 @@ struct RunHandle(Movable):
 
 # ── the runner ───────────────────────────────────────────────────────────────
 
+
 struct Sandbox(Movable):
     var policy: SandboxPolicy
-    var template_path: String   # sandbox/privacy_box.sb.template
+    var template_path: String  # sandbox/privacy_box.sb.template
 
-    def __init__(out self, var policy: SandboxPolicy, var template_path: String):
+    def __init__(
+        out self, var policy: SandboxPolicy, var template_path: String
+    ):
         self.policy = policy^
         self.template_path = template_path^
 
@@ -428,14 +459,11 @@ struct Sandbox(Movable):
         (privacy_box-vault.sb.template) instead — same containment, plus a localhost-
         only network allowance + the index dir read-allow."""
         var is_vault = self.policy.network == "loopback"
-        var tmpl_path = (
-            _replace_all(
-                self.template_path,
-                String("privacy_box.sb.template"),
-                String("privacy_box-vault.sb.template"),
-            )
-            if is_vault else self.template_path
-        )
+        var tmpl_path = _replace_all(
+            self.template_path,
+            String("privacy_box.sb.template"),
+            String("privacy_box-vault.sb.template"),
+        ) if is_vault else self.template_path
         var tmpl = _read(tmpl_path)
         var data_c = _canonical(self.policy.data_dir)
         var home_c = _canonical(getenv("HOME", "/"))
@@ -451,8 +479,9 @@ struct Sandbox(Movable):
             # so the vault profile can re-allow reads of the vector store + the
             # chunks.tsv side-table that search() resolves hits through.
             var index_raw = (
-                self.policy.index_dir if self.policy.index_dir != ""
-                else (getenv("HOME", "/") + "/.config/millfolio"))
+                self.policy.index_dir if self.policy.index_dir
+                != "" else (getenv("HOME", "/") + "/.config/millfolio")
+            )
             var index_c = _canonical(index_raw)
             rendered = _replace_all(rendered, String("@INDEX_DIR@"), index_c)
             # Grant read to the dir the index was actually built from — the vault
@@ -467,7 +496,9 @@ struct Sandbox(Movable):
                 except:
                     source_c = data_c  # indexed dir gone → safe fallback
             rendered = _replace_all(rendered, String("@SOURCE_DIR@"), source_c)
-        var path = scratch_c + ("/privacy_box-vault.sb" if is_vault else "/privacy_box.sb")
+        var path = scratch_c + (
+            "/privacy_box-vault.sb" if is_vault else "/privacy_box.sb"
+        )
         _write(path, rendered)
         return path
 
@@ -592,7 +623,8 @@ struct Sandbox(Movable):
         which produces the aliased, frontier-SAFE manifest view. argv[0] must be
         an absolute path. This is trusted: it computes the alias mapping locally
         and never sends anything anywhere — the *output* is what becomes
-        frontier-visible, and it is aliases-only by construction (manifest.mojo)."""
+        frontier-visible, and it is aliases-only by construction (manifest.mojo).
+        """
         var scratch_c = _canonical(self.policy.scratch_dir)
         var outfile = scratch_c + "/capture.out"
         var code = _spawn_capture(argv, outfile)
@@ -603,7 +635,9 @@ struct Sandbox(Movable):
             out = String("")
         return RunResult(code, out^)
 
-    def _render_compile_profile(self, scratch_c: String, prefix: String) raises -> String:
+    def _render_compile_profile(
+        self, scratch_c: String, prefix: String
+    ) raises -> String:
         """Render compile.sb.template (sibling of the run template) with canonical
         paths; write to scratch; return its path.
 
@@ -618,9 +652,13 @@ struct Sandbox(Movable):
         per-query compile is cold (the ~20-line `from vault import *` program +
         its deps recompile from scratch each time). Canonicalizing here makes the
         write rule match the real cache path, so the cache PERSISTS across queries
-        and warm compiles drop from tens of seconds to a fraction of a second."""
+        and warm compiles drop from tens of seconds to a fraction of a second.
+        """
         var tmpl_path = _replace_all(
-            self.template_path, String("privacy_box.sb.template"), String("compile.sb.template"))
+            self.template_path,
+            String("privacy_box.sb.template"),
+            String("compile.sb.template"),
+        )
         var tmpl = _read(tmpl_path)
         var home_c = _canonical(getenv("HOME", "/"))
         var tmp_c = _canonical(getenv("TMPDIR", "/tmp"))
@@ -656,7 +694,9 @@ struct Sandbox(Movable):
         _write(path, r)
         return path
 
-    def compile(self, source: String, include_paths: List[String] = List[String]()) raises -> RunResult:
+    def compile(
+        self, source: String, include_paths: List[String] = List[String]()
+    ) raises -> RunResult:
         """Compile generated Mojo `source` to a binary in scratch (NO run).
         Returns RunResult(0, "") on success, or (rc, compiler errors) on failure.
         Used to VALIDATE code before dealiasing — so compiler errors fed back to the
@@ -674,7 +714,8 @@ struct Sandbox(Movable):
         broad (`allow file-read* file-map-executable` — the compiler needs its
         toolchain AND the -I sibling source dirs + the FFI shims under
         $CONDA_PREFIX/lib, all reachable under that broad read allow). The *run*
-        step is separately contained + read-scoped (privacy_box{,-vault}.sb.template)."""
+        step is separately contained + read-scoped (privacy_box{,-vault}.sb.template).
+        """
         var scratch_c = _canonical(self.policy.scratch_dir)
         var src_path = scratch_c + "/gen.mojo"
         var bin_path = scratch_c + "/gen"
@@ -692,7 +733,9 @@ struct Sandbox(Movable):
         # Absolute mojo path: the harness may be launched without pixi's PATH
         # activation (e.g. ./build/privacy_box), so don't rely on `mojo` being on PATH.
         var prefix = getenv("CONDA_PREFIX", "")
-        var mojo_bin = (prefix + "/bin/mojo") if prefix != "" else String("mojo")
+        var mojo_bin = (prefix + "/bin/mojo") if prefix != "" else String(
+            "mojo"
+        )
         var profile = self._render_compile_profile(scratch_c, prefix)
 
         # sandbox-exec -f <profile> <mojo> build <src> -I <p1> -I <p2> … -o <bin>
@@ -730,19 +773,25 @@ struct Sandbox(Movable):
             clean = _replace_all(clean, scratch_c, "@SCRATCH@")
             for ip in range(len(include_paths)):
                 try:
-                    clean = _replace_all(clean, _canonical(include_paths[ip]), "@INC@")
+                    clean = _replace_all(
+                        clean, _canonical(include_paths[ip]), "@INC@"
+                    )
                 except:
                     pass
                 clean = _replace_all(clean, include_paths[ip], "@INC@")
             var cprefix = getenv("CONDA_PREFIX", "")
             if cprefix != "":
                 try:
-                    clean = _replace_all(clean, _canonical(cprefix), "@TOOLCHAIN@")
+                    clean = _replace_all(
+                        clean, _canonical(cprefix), "@TOOLCHAIN@"
+                    )
                 except:
                     pass
                 clean = _replace_all(clean, cprefix, "@TOOLCHAIN@")
             try:
-                clean = _replace_all(clean, _canonical(getenv("HOME", "/")), "@HOME@")
+                clean = _replace_all(
+                    clean, _canonical(getenv("HOME", "/")), "@HOME@"
+                )
             except:
                 pass
             return RunResult(brc, clean^)
@@ -760,6 +809,8 @@ struct Sandbox(Movable):
         run() picks the vault profile automatically."""
         var c = self.compile(source, include_paths)
         if c.exit_code != 0:
-            return RunResult(c.exit_code, String("compile failed:\n") + c.output)
+            return RunResult(
+                c.exit_code, String("compile failed:\n") + c.output
+            )
         var scratch_c = _canonical(self.policy.scratch_dir)
         return self.run(scratch_c + "/gen", args)

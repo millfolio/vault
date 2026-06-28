@@ -67,7 +67,8 @@ def _json_escape(s: String) -> String:
 
 
 def _extract_message(body: String) -> String:
-    """Pull `message` out of a `{ "message": ... }` body (empty on any failure)."""
+    """Pull `message` out of a `{ "message": ... }` body (empty on any failure).
+    """
     try:
         var j = loads(body)
         return j["message"].string_value()
@@ -116,7 +117,7 @@ def _cors(var resp: Response) -> Response:
 
 
 @fieldwise_init
-struct Api(Handler, Copyable, Movable):
+struct Api(Copyable, Handler, Movable):
     var st: UnsafePointer[PrivacyBoxState, MutUntrackedOrigin]
 
     def serve(self, req: Request) raises -> Response:
@@ -132,7 +133,9 @@ struct Api(Handler, Copyable, Movable):
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
             if path == "/" or path == "/index.html":
-                return _serve_file("web/dist/index.html", "text/html; charset=utf-8")
+                return _serve_file(
+                    "web/dist/index.html", "text/html; charset=utf-8"
+                )
             if path == "/favicon.svg":
                 return _serve_file("web/dist/favicon.svg", "image/svg+xml")
             if path.find("/assets/") == 0:

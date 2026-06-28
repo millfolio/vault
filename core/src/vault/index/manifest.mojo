@@ -13,11 +13,11 @@ from std.os.path import isfile, isdir, getsize
 
 @fieldwise_init
 struct FileInfo(Copyable, Movable):
-    var id: String              # the alias, e.g. "file_0"
-    var path: String            # LOCAL ONLY — never sent to the frontier model
-    var kind: String            # "csv" | "pdf" | "md"
+    var id: String  # the alias, e.g. "file_0"
+    var path: String  # LOCAL ONLY — never sent to the frontier model
+    var kind: String  # "csv" | "pdf" | "md"
     var size: Int
-    var columns: List[String]   # aliased csv columns (col_0..); empty otherwise
+    var columns: List[String]  # aliased csv columns (col_0..); empty otherwise
 
 
 def _lower_ascii(s: String) -> String:
@@ -107,11 +107,14 @@ def build_manifest(data_dir: String) raises -> List[FileInfo]:
     assigned in sorted-path order for stability. `FileInfo.path` is the full real
     path (local-only); a file's identity within the vault is its path RELATIVE to
     `data_dir` (e.g. `reports/q1.pdf`), so same-named files in different subfolders
-    don't collide. A missing vault dir is created (empty) rather than an error."""
+    don't collide. A missing vault dir is created (empty) rather than an error.
+    """
     makedirs(data_dir, exist_ok=True)
     var paths = List[String]()
     _collect_files(data_dir, paths)
-    _sort_names(paths)   # full paths share the data_dir prefix → sorts like relpaths
+    _sort_names(
+        paths
+    )  # full paths share the data_dir prefix → sorts like relpaths
 
     var infos = List[FileInfo]()
     var idx = 0
@@ -124,7 +127,9 @@ def build_manifest(data_dir: String) raises -> List[FileInfo]:
         if kind == "csv":
             cols = _csv_columns(path)
         infos.append(
-            FileInfo(String("file_") + String(idx), path, kind, getsize(path), cols^)
+            FileInfo(
+                String("file_") + String(idx), path, kind, getsize(path), cols^
+            )
         )
         idx += 1
     return infos^

@@ -12,8 +12,8 @@ Semantics of `limit` (PRIVACY_BOX_REMOTE_TOKEN_BUDGET):
 """
 
 
-struct Budget(Movable, Copyable):
-    var limit: Int    # token budget; <0 unlimited, 0 always-local, >0 N tokens
+struct Budget(Copyable, Movable):
+    var limit: Int  # token budget; <0 unlimited, 0 always-local, >0 N tokens
     var spent: Int
 
     def __init__(out self, limit: Int):
@@ -44,7 +44,7 @@ def parse_budget(s: String) -> Int:
     var any = False
     for cp in s.codepoints():
         var v = Int(cp)
-        if i == 0 and v == 45:        # leading '-'
+        if i == 0 and v == 45:  # leading '-'
             neg = True
             i += 1
             continue

@@ -71,4 +71,7 @@ def main() raises:
     print('usage: privacy_box vault "<question>" [vault_dir]')
     print("  Answer a question about your private VAULT (CSV/PDF/Markdown).")
     print("  Index it first with `mill index <dir>` (embedding server live).")
-    print("  The vault dir defaults to $MILLFOLIO_VAULT, else $PRIVACY_BOX_DATA, else ~/millfolio.")
+    print(
+        "  The vault dir defaults to $MILLFOLIO_VAULT, else $PRIVACY_BOX_DATA,"
+        " else ~/millfolio."
+    )

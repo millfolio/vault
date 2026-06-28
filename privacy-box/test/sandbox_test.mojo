@@ -29,9 +29,9 @@ def _grants(profile: String, path: String) -> Bool:
 def main() raises:
     var all_ok = True
     var base = String("/tmp/pb_sandbox_test")
-    var idx = base + "/index"        # the LanceDB index dir (~/.config/millfolio)
-    var data = base + "/served"      # the served vault dir (@DATA_DIR@)
-    var src = base + "/indexed"      # the dir the index was built from
+    var idx = base + "/index"  # the LanceDB index dir (~/.config/millfolio)
+    var data = base + "/served"  # the served vault dir (@DATA_DIR@)
+    var src = base + "/indexed"  # the dir the index was built from
     var scratch = base + "/scratch"
     makedirs(idx, exist_ok=True)
     makedirs(data, exist_ok=True)
@@ -45,7 +45,13 @@ def main() raises:
     )
     var got = _index_source_dir(idx)
     var parse_ok = got == src
-    print("[" + ("PASS" if parse_ok else "FAIL") + "] _index_source_dir parses source_dir (got '" + got + "')")
+    print(
+        "["
+        + ("PASS" if parse_ok else "FAIL")
+        + "] _index_source_dir parses source_dir (got '"
+        + got
+        + "')"
+    )
     all_ok = all_ok and parse_ok
 
     var none_ok = _index_source_dir(base + "/does-not-exist") == ""
@@ -59,11 +65,19 @@ def main() raises:
     var prof = _read(sb._render_profile(scratch_c))
     var src_c = _canonical(src)
     var grants_src = _grants(prof, src_c)
-    print("[" + ("PASS" if grants_src else "FAIL") + "] vault profile grants source_dir read")
+    print(
+        "["
+        + ("PASS" if grants_src else "FAIL")
+        + "] vault profile grants source_dir read"
+    )
     all_ok = all_ok and grants_src
 
     var no_placeholder = prof.find("@SOURCE_DIR@") == -1
-    print("[" + ("PASS" if no_placeholder else "FAIL") + "] @SOURCE_DIR@ fully substituted")
+    print(
+        "["
+        + ("PASS" if no_placeholder else "FAIL")
+        + "] @SOURCE_DIR@ fully substituted"
+    )
     all_ok = all_ok and no_placeholder
 
     # ── no index -> @SOURCE_DIR@ falls back to the served vault dir (NOT empty) ─
@@ -73,13 +87,23 @@ def main() raises:
     var sb2 = Sandbox(pol2^, String(_TMPL))
     var prof2 = _read(sb2._render_profile(scratch_c))
     var data_c = _canonical(data)
-    var fallback_ok = (prof2.find("@SOURCE_DIR@") == -1) and _grants(prof2, data_c)
-    print("[" + ("PASS" if fallback_ok else "FAIL") + "] no index -> source grant falls back to vault dir")
+    var fallback_ok = (prof2.find("@SOURCE_DIR@") == -1) and _grants(
+        prof2, data_c
+    )
+    print(
+        "["
+        + ("PASS" if fallback_ok else "FAIL")
+        + "] no index -> source grant falls back to vault dir"
+    )
     all_ok = all_ok and fallback_ok
 
     # Guard against the catastrophic substitution: a bare-root or empty subpath.
-    var no_root = (prof.find('(subpath "")') == -1) and (prof.find('(subpath "/")') == -1) \
-        and (prof2.find('(subpath "")') == -1) and (prof2.find('(subpath "/")') == -1)
+    var no_root = (
+        (prof.find('(subpath "")') == -1)
+        and (prof.find('(subpath "/")') == -1)
+        and (prof2.find('(subpath "")') == -1)
+        and (prof2.find('(subpath "/")') == -1)
+    )
     print("[" + ("PASS" if no_root else "FAIL") + "] never grants '' or '/'")
     all_ok = all_ok and no_root
 

@@ -74,15 +74,27 @@ def _stat(tool: String, ms: Float64):
     _ = external_call["write", Int](Int(1), p, Int(n))
 
 
-def _stat_model(prefill_tok: Int, gen_tok: Int, prefill_ms: Float64, decode_ms: Float64):
+def _stat_model(
+    prefill_tok: Int, gen_tok: Int, prefill_ms: Float64, decode_ms: Float64
+):
     """Emit a MODEL-stats line for one chat call — prefill/gen token counts + their
     wall-clock — read from the engine response's non-standard `millfolio` field. Same
     unbuffered fd-1 channel as `_stat`; the server aggregates these into the live
     working line + the final prefill/gen throughput (tok/s). Format keeps `model` as
-    the first field so the server tells it apart from the 2-field API stat line."""
+    the first field so the server tells it apart from the 2-field API stat line.
+    """
     var line = (
-        String(STAT_SENTINEL) + "model\t" + String(prefill_tok) + "\t"
-        + String(gen_tok) + "\t" + String(prefill_ms) + "\t" + String(decode_ms) + "\n")
+        String(STAT_SENTINEL)
+        + "model\t"
+        + String(prefill_tok)
+        + "\t"
+        + String(gen_tok)
+        + "\t"
+        + String(prefill_ms)
+        + "\t"
+        + String(decode_ms)
+        + "\n"
+    )
     var b = line.as_bytes()
     _ = external_call["write", Int](Int(1), b.unsafe_ptr(), Int(len(b)))
 
@@ -119,8 +131,11 @@ def _stat_model_from_raw(raw: String):
     var pfms = _int_after(raw, '"prefill_ms"')
     var decms = _int_after(raw, '"decode_ms"')
     _stat_model(
-        pf if pf >= 0 else 0, gen,
-        Float64(pfms if pfms >= 0 else 0), Float64(decms if decms >= 0 else 0))
+        pf if pf >= 0 else 0,
+        gen,
+        Float64(pfms if pfms >= 0 else 0),
+        Float64(decms if decms >= 0 else 0),
+    )
 
 
 def _basename(path: String) -> String:
@@ -132,7 +147,8 @@ def _basename(path: String) -> String:
 def _relname(path: String) raises -> String:
     """The file's name RELATIVE to the vault root (e.g. `reports/q1.pdf`) — its full
     name within the vault, so files in subfolders read distinctly as the answer's
-    source. Falls back to the bare filename if `path` isn't under the vault dir."""
+    source. Falls back to the bare filename if `path` isn't under the vault dir.
+    """
     var pfx = _vault_dir() + "/"
     if String(path).startswith(pfx):
         return String(String(path).removeprefix(pfx))
@@ -155,18 +171,20 @@ def _stat_source(falias: String, name: String):
 
 # ── A frontier-visible file view (`.alias` per the contract; aliases manifest.id) ──
 
+
 @fieldwise_init
 struct VaultFile(Copyable, Movable):
     # `alias` is a reserved keyword, so the field is DECLARED with backticks; a
     # generated program reads it as plain `.alias` (member access doesn't need
     # the escape), matching the privacy_box-system.md contract exactly.
-    var `alias`: String         # the alias, e.g. "file_0" (== manifest FileInfo.id)
-    var kind: String            # "csv" | "pdf" | "md"
+    var `alias`: String  # the alias, e.g. "file_0" (== manifest FileInfo.id)
+    var kind: String  # "csv" | "pdf" | "md"
     var size: Int
-    var columns: List[String]   # aliased csv columns (col_0..); empty otherwise
+    var columns: List[String]  # aliased csv columns (col_0..); empty otherwise
 
 
 # ── config from env ───────────────────────────────────────────────────────────
+
 
 def _vault_dir() raises -> String:
     var d = getenv("MILLFOLIO_VAULT", "")
@@ -195,6 +213,7 @@ def _local_model() raises -> String:
 
 # ── alias resolution (internal — real paths never leave this function) ────────
 
+
 def _resolve(file_id: String) raises -> FileInfo:
     # vault_files() prefers the persisted index manifest (the same aliases search()
     # returns), falling back to a live walk of the served dir only when unindexed.
@@ -207,6 +226,7 @@ def _resolve(file_id: String) raises -> FileInfo:
 
 # ── tools ─────────────────────────────────────────────────────────────────────
 
+
 def manifest() raises -> List[VaultFile]:
     """The aliased, frontier-visible file list — aliases, kinds, sizes, and the
     aliased CSV column schema. No paths, names, or contents."""
@@ -215,7 +235,9 @@ def manifest() raises -> List[VaultFile]:
     var out = List[VaultFile]()
     for i in range(len(infos)):
         ref fi = infos[i]
-        out.append(VaultFile(fi.id.copy(), fi.kind.copy(), fi.size, fi.columns.copy()))
+        out.append(
+            VaultFile(fi.id.copy(), fi.kind.copy(), fi.size, fi.columns.copy())
+        )
     _stat("manifest", Float64(perf_counter_ns() - t0) / 1.0e6)
     return out^
 
@@ -228,9 +250,13 @@ def search(query: String, k: Int) raises -> List[Chunk]:
     var t0 = perf_counter_ns()
     var r = index.search(query, k, _embed_url())
     _stat("search", Float64(perf_counter_ns() - t0) / 1.0e6)
-    if len(r) > 0:  # the top hit's file — the document most relevant to the question
+    if (
+        len(r) > 0
+    ):  # the top hit's file — the document most relevant to the question
         try:
-            _stat_source(r[0].file_alias, _relname(_resolve(r[0].file_alias).path))
+            _stat_source(
+                r[0].file_alias, _relname(_resolve(r[0].file_alias).path)
+            )
         except:
             pass
     return r^
@@ -243,7 +269,13 @@ def csv_rows(file_alias: String) raises -> List[List[String]]:
     var fi = _resolve(file_alias)
     _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "csv":
-        raise Error("vault.csv_rows: " + file_alias + " is not a csv (it's " + fi.kind + ")")
+        raise Error(
+            "vault.csv_rows: "
+            + file_alias
+            + " is not a csv (it's "
+            + fi.kind
+            + ")"
+        )
     var r = readers.csv_rows(fi.path)
     _stat("csv_rows", Float64(perf_counter_ns() - t0) / 1.0e6)
     return r^
@@ -255,7 +287,13 @@ def pdf_text(file_alias: String) raises -> String:
     var fi = _resolve(file_alias)
     _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "pdf":
-        raise Error("vault.pdf_text: " + file_alias + " is not a pdf (it's " + fi.kind + ")")
+        raise Error(
+            "vault.pdf_text: "
+            + file_alias
+            + " is not a pdf (it's "
+            + fi.kind
+            + ")"
+        )
     var r = readers.pdf_text(fi.path)
     _stat("pdf_text", Float64(perf_counter_ns() - t0) / 1.0e6)
     return r^
@@ -267,7 +305,13 @@ def md_text(file_alias: String) raises -> String:
     var fi = _resolve(file_alias)
     _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "md":
-        raise Error("vault.md_text: " + file_alias + " is not a md file (it's " + fi.kind + ")")
+        raise Error(
+            "vault.md_text: "
+            + file_alias
+            + " is not a md file (it's "
+            + fi.kind
+            + ")"
+        )
     var r = readers.md_text(fi.path)
     _stat("md_text", Float64(perf_counter_ns() - t0) / 1.0e6)
     return r^
@@ -279,7 +323,13 @@ def docx_text(file_alias: String) raises -> String:
     var fi = _resolve(file_alias)
     _stat_source(file_alias, _relname(fi.path))
     if fi.kind != "docx":
-        raise Error("vault.docx_text: " + file_alias + " is not a docx (it's " + fi.kind + ")")
+        raise Error(
+            "vault.docx_text: "
+            + file_alias
+            + " is not a docx (it's "
+            + fi.kind
+            + ")"
+        )
     var r = readers.docx_text(fi.path)
     _stat("docx_text", Float64(perf_counter_ns() - t0) / 1.0e6)
     return r^
@@ -331,7 +381,11 @@ def ask_local(instruction: String, content: String) raises -> String:
     ONLY tool that sees real content as text; it runs locally and never egresses.
     Mirrors privacy_box transport.LocalClient.chat."""
     var msg = instruction + "\n\n" + content
-    var body = String('{"model":"') + _local_model() + '","messages":[{"role":"user","content":"'
+    var body = (
+        String('{"model":"')
+        + _local_model()
+        + '","messages":[{"role":"user","content":"'
+    )
     body += _json_escape(msg) + '"}]}'
     # One retry, then give up gracefully: the local server can return a transient,
     # garbled, or truncated response (it was busy, mid-restart, or the body framing
@@ -351,7 +405,9 @@ def ask_local(instruction: String, content: String) raises -> String:
             var client = HttpClient()
             var resp = client.send(req)
             var raw = resp.text()
-            var out = resp.json()["choices"][0]["message"]["content"].string_value()
+            var out = resp.json()["choices"][0]["message"][
+                "content"
+            ].string_value()
             _stat("ask_local", Float64(perf_counter_ns() - t0) / 1.0e6)
             # Engine prefill/gen stats ride in the non-standard `millfolio` field. The
             # Mojo json lib crashes (uncatchable debug_assert) indexing that trailing
@@ -380,9 +436,12 @@ def _lead_int(s: String) -> Int:
     return n if any else -1
 
 
-def _batch_call(instruction: String, items: List[String]) raises -> List[String]:
+def _batch_call(
+    instruction: String, items: List[String]
+) raises -> List[String]:
     """One on-device model call for a SMALL group (≤ _BATCH) of snippets — returns
-    one answer per item, aligned by index. Internal; callers use `ask_local_batch`."""
+    one answer per item, aligned by index. Internal; callers use `ask_local_batch`.
+    """
     var n = len(items)
     var out = List[String]()
     var k = 0
@@ -393,14 +452,24 @@ def _batch_call(instruction: String, items: List[String]) raises -> List[String]
         return out^
     # One numbered prompt: the model answers each snippet on its own `<n>: <answer>` line.
     var prompt = instruction
-    prompt += "\n\nApply the instruction to EACH numbered snippet below. Reply with"
-    prompt += " EXACTLY one line per snippet, formatted `<n>: <answer>` (use 'none'"
+    prompt += (
+        "\n\nApply the instruction to EACH numbered snippet below. Reply with"
+    )
+    prompt += (
+        " EXACTLY one line per snippet, formatted `<n>: <answer>` (use 'none'"
+    )
     prompt += " when it does not apply). Output nothing else.\n\n"
     for i in range(n):
-        prompt += String(i + 1) + ": " + _replace_all(items[i], "\n", " ") + "\n"
+        prompt += (
+            String(i + 1) + ": " + _replace_all(items[i], "\n", " ") + "\n"
+        )
 
     var t0 = perf_counter_ns()
-    var body = String('{"model":"') + _local_model() + '","messages":[{"role":"user","content":"'
+    var body = (
+        String('{"model":"')
+        + _local_model()
+        + '","messages":[{"role":"user","content":"'
+    )
     body += _json_escape(prompt) + '"}]}'
     var reply = String("")
     var attempt = 0
@@ -415,8 +484,12 @@ def _batch_call(instruction: String, items: List[String]) raises -> List[String]
             var client = HttpClient()
             var resp = client.send(req)
             var raw = resp.text()
-            reply = resp.json()["choices"][0]["message"]["content"].string_value()
-            _stat_model_from_raw(raw)  # millfolio stats from raw text (json lib aborts on it)
+            reply = resp.json()["choices"][0]["message"][
+                "content"
+            ].string_value()
+            _stat_model_from_raw(
+                raw
+            )  # millfolio stats from raw text (json lib aborts on it)
             break
         except:
             attempt += 1
@@ -442,10 +515,12 @@ def _batch_call(instruction: String, items: List[String]) raises -> List[String]
     return out^
 
 
-comptime _BATCH = 10   # snippets per on-device model call
+comptime _BATCH = 10  # snippets per on-device model call
 
 
-def ask_local_batch(instruction: String, items: List[String]) raises -> List[String]:
+def ask_local_batch(
+    instruction: String, items: List[String]
+) raises -> List[String]:
     """Apply `instruction` to MANY snippets and return one answer per item, aligned by
     index — but in just ⌈len(items)/10⌉ on-device model calls instead of one per item
     (each `ask_local` is slow). Pass ALL your candidate texts; this batches them
@@ -518,6 +593,7 @@ def money(x: Float64) raises -> String:
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _replace_all(s: String, old: String, new: String) raises -> String:
     var parts = s.split(old)

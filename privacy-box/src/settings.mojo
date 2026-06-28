@@ -67,7 +67,10 @@ def _env_or(key: String, var current: String) -> String:
 
 
 def config_path() -> String:
-    return getenv("PRIVACY_BOX_CONFIG", getenv("HOME", "") + "/.config/privacy_box/config.json")
+    return getenv(
+        "PRIVACY_BOX_CONFIG",
+        getenv("HOME", "") + "/.config/privacy_box/config.json",
+    )
 
 
 def load_config() -> Config:
@@ -85,24 +88,42 @@ def load_config() -> Config:
     # 2. config file overrides defaults (best-effort: missing/bad file -> defaults)
     try:
         var j = loads(_read(config_path()))
-        try: local_url = j["local_url"].string_value()
-        except: pass
-        try: local_model = j["local_model"].string_value()
-        except: pass
-        try: remote_base_url = j["remote_base_url"].string_value()
-        except: pass
-        try: remote_model = j["remote_model"].string_value()
-        except: pass
-        try: token_budget = Int(j["remote_token_budget"].int_value())
-        except: pass
-        try: api_key = j["anthropic_api_key"].string_value()
-        except: pass
-        try: mock = j["mock"].bool_value()
-        except: pass
-        try: use_local_summary = j["use_local_summary"].bool_value()
-        except: pass
-        try: data_dir = j["data_dir"].string_value()
-        except: pass
+        try:
+            local_url = j["local_url"].string_value()
+        except:
+            pass
+        try:
+            local_model = j["local_model"].string_value()
+        except:
+            pass
+        try:
+            remote_base_url = j["remote_base_url"].string_value()
+        except:
+            pass
+        try:
+            remote_model = j["remote_model"].string_value()
+        except:
+            pass
+        try:
+            token_budget = Int(j["remote_token_budget"].int_value())
+        except:
+            pass
+        try:
+            api_key = j["anthropic_api_key"].string_value()
+        except:
+            pass
+        try:
+            mock = j["mock"].bool_value()
+        except:
+            pass
+        try:
+            use_local_summary = j["use_local_summary"].bool_value()
+        except:
+            pass
+        try:
+            data_dir = j["data_dir"].string_value()
+        except:
+            pass
     except:
         pass
 
@@ -113,7 +134,9 @@ def load_config() -> Config:
     remote_model = _env_or("PRIVACY_BOX_MODEL", remote_model^)
     api_key = _env_or("ANTHROPIC_API_KEY", api_key^)
     if getenv("PRIVACY_BOX_REMOTE_TOKEN_BUDGET", "") != "":
-        token_budget = parse_budget(getenv("PRIVACY_BOX_REMOTE_TOKEN_BUDGET", ""))
+        token_budget = parse_budget(
+            getenv("PRIVACY_BOX_REMOTE_TOKEN_BUDGET", "")
+        )
     if getenv("PRIVACY_BOX_MOCK", "") != "":
         mock = True
     if getenv("PRIVACY_BOX_LOCAL", "") != "":
@@ -131,5 +154,14 @@ def load_config() -> Config:
     if api_key == "" and not mock:
         token_budget = 0
 
-    return Config(local_url^, local_model^, remote_base_url^, remote_model^,
-                  token_budget, api_key^, mock, use_local_summary, data_dir^)
+    return Config(
+        local_url^,
+        local_model^,
+        remote_base_url^,
+        remote_model^,
+        token_budget,
+        api_key^,
+        mock,
+        use_local_summary,
+        data_dir^,
+    )

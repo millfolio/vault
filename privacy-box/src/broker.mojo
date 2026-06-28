@@ -12,14 +12,14 @@ Keep this list minimal and capability-based — every entry is attack surface.
 
 
 struct Result(Movable):
-    var json: String   # the code's output, written to the sandbox scratch dir
+    var json: String  # the code's output, written to the sandbox scratch dir
 
     def __init__(out self, var json: String):
         self.json = json^
 
 
 struct CapabilityBroker(Movable):
-    var allowed: List[String]   # e.g. ["read_table", "write_result", "log"]
+    var allowed: List[String]  # e.g. ["read_table", "write_result", "log"]
 
     def __init__(out self, var allowed: List[String]):
         self.allowed = allowed^
@@ -40,5 +40,6 @@ struct CapabilityBroker(Movable):
         pass  # TODO
 
     def log(self, msg: String):
-        """Captured locally; scrubbed by the EgressGuard before any reuse. TODO."""
+        """Captured locally; scrubbed by the EgressGuard before any reuse. TODO.
+        """
         pass  # TODO

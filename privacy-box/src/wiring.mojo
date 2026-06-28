@@ -30,29 +30,35 @@ def scratch_dir() -> String:
     return getenv("HOME", "") + "/.config/privacy_box/scratch"
 
 
-def build_vault_orchestrator(cfg: Config, vault_dir: String) raises -> Orchestrator:
+def build_vault_orchestrator(
+    cfg: Config, vault_dir: String
+) raises -> Orchestrator:
     """Wire the orchestrator for the VAULT path (run_vault_task):
 
-      - the sandbox policy is in "loopback" network mode with the vault dir as the
-        (read-only) data dir + the LanceDB index dir read-allowed, so the run
-        profile renders privacy_box-vault.sb.template (loopback-only egress);
-      - the EgressGuard is fingerprinted from NO real content — the vault path
-        never reads real values into the guard; it sends only the ALIASED
-        manifest. The guard still blocks canary tokens and any configured secret,
-        and the manifest is aliases-only by construction (millfolio/manifest.mojo),
-        so confidentiality holds without per-file fingerprints. (search/ask_local
-        results never go upstream — they print locally.)"""
+    - the sandbox policy is in "loopback" network mode with the vault dir as the
+      (read-only) data dir + the LanceDB index dir read-allowed, so the run
+      profile renders privacy_box-vault.sb.template (loopback-only egress);
+    - the EgressGuard is fingerprinted from NO real content — the vault path
+      never reads real values into the guard; it sends only the ALIASED
+      manifest. The guard still blocks canary tokens and any configured secret,
+      and the manifest is aliases-only by construction (millfolio/manifest.mojo),
+      so confidentiality holds without per-file fingerprints. (search/ask_local
+      results never go upstream — they print locally.)"""
     var scratch = scratch_dir()
     mkdirs(scratch)
 
     var guard = EgressGuard(List[String](), List[String]())
     var local = LocalClient(cfg.local_url.copy(), cfg.local_model.copy())
     var remote = RemoteClient(
-        cfg.remote_base_url.copy(), cfg.api_key.copy(), cfg.remote_model.copy(),
-        cfg.mock, guard^,
+        cfg.remote_base_url.copy(),
+        cfg.api_key.copy(),
+        cfg.remote_model.copy(),
+        cfg.mock,
+        guard^,
     )
     var policy = SandboxPolicy(
-        vault_dir.copy(), scratch.copy(), vault_index_dir(), String("loopback"))
+        vault_dir.copy(), scratch.copy(), vault_index_dir(), String("loopback")
+    )
     var sandbox = Sandbox(policy^, String("sandbox/privacy_box.sb.template"))
 
     var allowed = List[String]()
@@ -62,5 +68,5 @@ def build_vault_orchestrator(cfg: Config, vault_dir: String) raises -> Orchestra
 
     var budget = Budget(cfg.remote_token_budget)
     return Orchestrator(
-        local^, remote^, sandbox^, broker^, budget^,
-        cfg.use_local_summary)
+        local^, remote^, sandbox^, broker^, budget^, cfg.use_local_summary
+    )

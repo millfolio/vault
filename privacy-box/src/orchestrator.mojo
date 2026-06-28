@@ -42,7 +42,9 @@ def _strip_progress(out_text: String) raises -> String:
     var first = True
     for i in range(len(lines)):
         var ln = String(lines[i])
-        if ln.startswith(String(PROGRESS_SENTINEL)) or ln.startswith(String(STAT_SENTINEL)):
+        if ln.startswith(String(PROGRESS_SENTINEL)) or ln.startswith(
+            String(STAT_SENTINEL)
+        ):
             continue
         if not first:
             kept += "\n"
@@ -54,12 +56,13 @@ def _strip_progress(out_text: String) raises -> String:
 def _session_append(text: String):
     """Append `text` to the session transcript at $MILLFOLIO_SESSION_LOG (set by the
     CLI per `ask`), best-effort. Captures the full outside-model exchange — prompt
-    + program — for after-the-fact inspection. No-op when the env var is unset."""
+    + program — for after-the-fact inspection. No-op when the env var is unset.
+    """
     var path = getenv("MILLFOLIO_SESSION_LOG", "")
     if path == "":
         return
     try:
-        with open(path, "a") as f:   # append mode (validated); creates if absent
+        with open(path, "a") as f:  # append mode (validated); creates if absent
             f.write(text)
     except:
         pass
@@ -70,9 +73,9 @@ struct Orchestrator(Movable):
     var remote: RemoteClient
     var sandbox: Sandbox
     var broker: CapabilityBroker
-    var budget: Budget               # remote-API token budget; routes to local when depleted
-    var use_local_summary: Bool      # have the local model summarize the result
-    var max_fix_attempts: Int        # compile-feedback retries (compile errors only) before giving up
+    var budget: Budget  # remote-API token budget; routes to local when depleted
+    var use_local_summary: Bool  # have the local model summarize the result
+    var max_fix_attempts: Int  # compile-feedback retries (compile errors only) before giving up
 
     def __init__(
         out self,
@@ -102,7 +105,8 @@ struct Orchestrator(Movable):
         return g.code.copy()
 
     def _fix(mut self, code: String, errors: String) raises -> String:
-        """Route a fix the same way — remote while budget remains, else local."""
+        """Route a fix the same way — remote while budget remains, else local.
+        """
         if self.budget.depleted():
             return self.local.fix_code(code, errors)
         var g = self.remote.fix_code(code, errors)
@@ -118,15 +122,19 @@ struct Orchestrator(Movable):
     def vault_manifest(mut self, vault_dir: String) raises -> String:
         """Step 1 — the ALIASED, frontier-safe manifest. Shell out to the trusted
         `mill manifest <vault_dir>` and capture its stdout. This is the ONLY
-        vault info that reaches the remote model, aliases-only by construction."""
+        vault info that reaches the remote model, aliases-only by construction.
+        """
         log("• aliasing the vault manifest (the frontier-safe view)…")
         var dac = millfolio_bin()
         var manifest_argv: List[String] = [dac, String("manifest"), vault_dir]
         var m = self.sandbox.capture(manifest_argv)
         if m.exit_code != 0:
             raise Error(
-                "vault: `mill manifest` failed (is millfolio built at " + dac
-                + "? try `pixi run build` in millfolio). Output:\n" + m.output)
+                "vault: `mill manifest` failed (is millfolio built at "
+                + dac
+                + "? try `pixi run build` in millfolio). Output:\n"
+                + m.output
+            )
         # Strip the leading "vault: <abs path>" line `mill manifest` prints. That path
         # is host-specific (…/<dev-home>/… vs …/<demo-account>/…) and the manifest is
         # embedded verbatim in the codegen prompt — so leaking it (a) violates the
@@ -143,24 +151,37 @@ struct Orchestrator(Movable):
             return out^
         return m.output.copy()
 
-    def vault_codegen(mut self, question: String, manifest: String) raises -> String:
+    def vault_codegen(
+        mut self, question: String, manifest: String
+    ) raises -> String:
         """Step 2 — ask the model (budget-routed; EgressGuard-checked inside
         _codegen) for a `from vault import *` program from the question + the
-        aliased manifest. The system prompt is resources/privacy_box-system.md."""
+        aliased manifest. The system prompt is resources/privacy_box-system.md.
+        """
         log("• asking the outside model to write the program…")
         var user_msg = (
-            String("Question: ") + question
-            + "\n\nVault manifest (aliases only — you never see real content):\n"
+            String("Question: ")
+            + question
+            + "\n\nVault manifest (aliases only — you never see real"
+            " content):\n"
             + manifest
-            + "\n\nWrite the Mojo program (`from vault import *`) that answers it.")
+            + "\n\nWrite the Mojo program (`from vault import *`) that"
+            " answers it."
+        )
         var msgs = List[ChatMessage]()
         msgs.append(ChatMessage(String("user"), user_msg))
         var code = self._codegen(msgs)
         _session_append(
-            "QUESTION: " + question
-            + "\n\n===== SYSTEM PROMPT =====\n" + _codegen_system()
-            + "\n\n===== PROMPT TO THE OUTSIDE MODEL (user turn) =====\n" + user_msg
-            + "\n\n===== OUTSIDE MODEL OUTPUT (program) =====\n" + code + "\n")
+            "QUESTION: "
+            + question
+            + "\n\n===== SYSTEM PROMPT =====\n"
+            + _codegen_system()
+            + "\n\n===== PROMPT TO THE OUTSIDE MODEL (user turn) =====\n"
+            + user_msg
+            + "\n\n===== OUTSIDE MODEL OUTPUT (program) =====\n"
+            + code
+            + "\n"
+        )
         return code
 
     def vault_build(mut self, code: String) raises -> Int:
@@ -176,14 +197,18 @@ struct Orchestrator(Movable):
         var compiled = self.sandbox.compile(work, includes)
         var attempt = 0
         while compiled.exit_code != 0 and attempt < self.max_fix_attempts:
-            work = self._fix(work, compiled.output)   # budget-routed; guarded; aliased
+            work = self._fix(
+                work, compiled.output
+            )  # budget-routed; guarded; aliased
             compiled = self.sandbox.compile(work, includes)
             attempt += 1
         if compiled.exit_code != 0:
             raise Error(
                 "vault: generated program did not compile after "
-                + String(self.max_fix_attempts) + " fix attempt(s). Last error:\n"
-                + compiled.output)
+                + String(self.max_fix_attempts)
+                + " fix attempt(s). Last error:\n"
+                + compiled.output
+            )
         return attempt
 
     def vault_run(mut self, vault_dir: String) raises -> String:
@@ -201,7 +226,9 @@ struct Orchestrator(Movable):
             _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
         var bin = self.sandbox.scratch_bin()
         var out = self.sandbox.run(bin, List[String]()).output.copy()
-        _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")
+        _session_append(
+            "\n===== RESULT (local — never sent upstream) =====\n" + out + "\n"
+        )
         # Strip the internal progress/stat sentinel lines so the CLI reply is just
         # the program's answer (the WS path streams those live instead).
         return _strip_progress(out)
@@ -214,7 +241,8 @@ struct Orchestrator(Movable):
 
     def vault_run_start(mut self, vault_dir: String) raises -> RunHandle:
         """Step 4a — point the tools at the vault dir and SPAWN the compiled binary
-        in the loopback sandbox without blocking. Returns a handle to poll/reap."""
+        in the loopback sandbox without blocking. Returns a handle to poll/reap.
+        """
         log("• running it locally over your vault…")
         # setenv is process-global and NOT thread-safe: with multiple server workers a
         # per-run setenv races other threads' getenv and corrupts environ, hanging the
@@ -231,7 +259,8 @@ struct Orchestrator(Movable):
         return self.sandbox.run_poll(h)
 
     def vault_run_reap(self, h: RunHandle) -> Int:
-        """Step 4c — non-blocking reap: -1 still running, -2 error, else exit code."""
+        """Step 4c — non-blocking reap: -1 still running, -2 error, else exit code.
+        """
         return self.sandbox.run_reap(h)
 
     def vault_run_finish(self, h: RunHandle) raises -> String:
@@ -239,10 +268,14 @@ struct Orchestrator(Movable):
         reply. Mirrors `vault_run`'s session-log side effect (the FULL output,
         including progress, goes to the transcript for inspection)."""
         var out = self.sandbox.run_finish(h)
-        _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")
+        _session_append(
+            "\n===== RESULT (local — never sent upstream) =====\n" + out + "\n"
+        )
         return _strip_progress(out)
 
-    def run_vault_task(mut self, question: String, vault_dir: String) raises -> String:
+    def run_vault_task(
+        mut self, question: String, vault_dir: String
+    ) raises -> String:
         """Answer a question about the private vault by writing ONE Mojo program
         that does `from vault import *` and calls the vault tools, compiling it
         with the millfolio include paths, and running it in the loopback sandbox

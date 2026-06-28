@@ -34,21 +34,29 @@ import vault.index.readers as readers
 from vault.index.embed import embed, embed_batch, EMBED_DIM
 from vault.index.sha256 import sha256_file_hex
 from vault.extract.transactions import (
-    Txn, extract_transactions, TxnRow, txn_rows_to_tsv, tsv_to_txn_rows,
-    drop_aliases, select_txns, texts_for_alias,
+    Txn,
+    extract_transactions,
+    TxnRow,
+    txn_rows_to_tsv,
+    tsv_to_txn_rows,
+    drop_aliases,
+    select_txns,
+    texts_for_alias,
 )
 
 
-comptime CHUNK_SIZE = 512      # ~codepoints per chunk
-comptime CHUNK_OVERLAP = 64    # codepoints carried into the next chunk for context
+comptime CHUNK_SIZE = 512  # ~codepoints per chunk
+comptime CHUNK_OVERLAP = 64  # codepoints carried into the next chunk for context
 comptime TABLE = "chunks"
-comptime EMBED_BATCH = 64      # chunks per /v1/embeddings request
+comptime EMBED_BATCH = 64  # chunks per /v1/embeddings request
 
 
 @fieldwise_init
 struct Chunk(Copyable, Movable):
     """A search hit: which file (by alias), the chunk text, and its score
-    (smaller distance = closer; we expose it as `.score` per the tool contract)."""
+    (smaller distance = closer; we expose it as `.score` per the tool contract).
+    """
+
     var file_alias: String
     var text: String
     var score: Float32
@@ -60,6 +68,7 @@ struct FileEntry(Copyable, Movable):
     vault root (LOCAL-ONLY; e.g. `reports/q1.pdf`); `alias` is the stable,
     frontier-safe token. `[id_start, id_start+chunk_count)` is this file's
     contiguous chunk-id range in LanceDB."""
+
     var falias: String
     var name: String
     var kind: String
@@ -72,8 +81,8 @@ struct FileEntry(Copyable, Movable):
 @fieldwise_init
 struct Manifest(Copyable, Movable):
     var entries: List[FileEntry]
-    var next_id: Int       # next free chunk id (monotonic; ids are never reused)
-    var next_alias: Int    # next free alias number (monotonic)
+    var next_id: Int  # next free chunk id (monotonic; ids are never reused)
+    var next_alias: Int  # next free alias number (monotonic)
     var source_dir: String
 
 
@@ -81,12 +90,14 @@ struct Manifest(Copyable, Movable):
 struct SideTable(Copyable, Movable):
     """chunk_id -> (alias, text), as parallel lists. ids are sparse (deletes leave
     gaps), so lookups scan rather than index by position."""
+
     var ids: List[Int]
     var aliases: List[String]
     var texts: List[String]
 
 
 # ── paths ─────────────────────────────────────────────────────────────────────
+
 
 def _config_dir() raises -> String:
     return getenv("HOME", ".") + "/.config/millfolio"
@@ -105,6 +116,7 @@ def _manifest_path() raises -> String:
 
 
 # ── small helpers ─────────────────────────────────────────────────────────────
+
 
 def _replace_all(s: String, old: String, new: String) raises -> String:
     var parts = s.split(old)
@@ -126,7 +138,8 @@ def _tsv_escape(s: String) raises -> String:
 
 
 def _tsv_unescape(s: String) raises -> String:
-    """Inverse of `_tsv_escape` — left-to-right scan so escapes don't compound."""
+    """Inverse of `_tsv_escape` — left-to-right scan so escapes don't compound.
+    """
     var out = String("")
     var bytes = s.as_bytes()
     var i = 0
@@ -134,14 +147,22 @@ def _tsv_unescape(s: String) raises -> String:
         var c = Int(bytes[i])
         if c == 92 and i + 1 < len(bytes):  # backslash
             var n = Int(bytes[i + 1])
-            if n == 116:    # 't'
-                out += "\t"; i += 2; continue
+            if n == 116:  # 't'
+                out += "\t"
+                i += 2
+                continue
             elif n == 110:  # 'n'
-                out += "\n"; i += 2; continue
+                out += "\n"
+                i += 2
+                continue
             elif n == 114:  # 'r'
-                out += "\r"; i += 2; continue
-            elif n == 92:   # backslash
-                out += "\\"; i += 2; continue
+                out += "\r"
+                i += 2
+                continue
+            elif n == 92:  # backslash
+                out += "\\"
+                i += 2
+                continue
         out += chr(c)
         i += 1
     return out^
@@ -172,6 +193,7 @@ def _relpath(path: String, base: String) raises -> String:
 
 
 # ── chunking ──────────────────────────────────────────────────────────────────
+
 
 def _file_text(path: String, kind: String) raises -> String:
     """Read a file to plain text per its kind. CSV rows are joined back with
@@ -258,7 +280,8 @@ def _chunk_text(text: String) raises -> List[String]:
 
 
 def _rmtree(path: String) raises:
-    """Recursively delete `path` (file or directory). No-op if it doesn't exist."""
+    """Recursively delete `path` (file or directory). No-op if it doesn't exist.
+    """
     if not exists(path):
         return
     if isfile(path):
@@ -271,6 +294,7 @@ def _rmtree(path: String) raises:
 
 
 # ── side-table persistence (id-keyed; ids are sparse) ─────────────────────────
+
 
 def _load_sidetable() raises -> SideTable:
     var ids = List[Int]()
@@ -298,7 +322,14 @@ def _load_sidetable() raises -> SideTable:
 def _write_sidetable(st: SideTable) raises:
     var out = String("")
     for i in range(len(st.ids)):
-        out += String(st.ids[i]) + "\t" + _tsv_escape(st.aliases[i]) + "\t" + _tsv_escape(st.texts[i]) + "\n"
+        out += (
+            String(st.ids[i])
+            + "\t"
+            + _tsv_escape(st.aliases[i])
+            + "\t"
+            + _tsv_escape(st.texts[i])
+            + "\n"
+        )
     with open(_sidetable_path(), "w") as f:
         f.write(out)
 
@@ -326,6 +357,7 @@ def _drop_ranges(
 
 
 # ── manifest persistence ──────────────────────────────────────────────────────
+
 
 def _load_manifest() raises -> Manifest:
     var entries = List[FileEntry]()
@@ -386,8 +418,12 @@ def index_manifest() raises -> List[FileInfo]:
             try:
                 cols = _csv_columns(path)
             except:
-                cols = List[String]()  # unreadable header → no schema, still listed
-        infos.append(FileInfo(e.falias.copy(), path, e.kind.copy(), e.size, cols^))
+                cols = List[
+                    String
+                ]()  # unreadable header → no schema, still listed
+        infos.append(
+            FileInfo(e.falias.copy(), path, e.kind.copy(), e.size, cols^)
+        )
     return infos^
 
 
@@ -406,15 +442,31 @@ def vault_files(fallback_dir: String) raises -> List[FileInfo]:
 
 def _write_manifest(m: Manifest) raises:
     var out = (
-        String("#meta\t") + String(m.next_id) + "\t" + String(m.next_alias)
-        + "\t" + _tsv_escape(m.source_dir) + "\n"
+        String("#meta\t")
+        + String(m.next_id)
+        + "\t"
+        + String(m.next_alias)
+        + "\t"
+        + _tsv_escape(m.source_dir)
+        + "\n"
     )
     for i in range(len(m.entries)):
         ref e = m.entries[i]
         out += (
-            e.falias + "\t" + _tsv_escape(e.name) + "\t" + e.kind + "\t"
-            + String(e.size) + "\t" + e.sha + "\t" + String(e.id_start) + "\t"
-            + String(e.chunk_count) + "\n"
+            e.falias
+            + "\t"
+            + _tsv_escape(e.name)
+            + "\t"
+            + e.kind
+            + "\t"
+            + String(e.size)
+            + "\t"
+            + e.sha
+            + "\t"
+            + String(e.id_start)
+            + "\t"
+            + String(e.chunk_count)
+            + "\n"
         )
     with open(_manifest_path(), "w") as f:
         f.write(out)
@@ -434,7 +486,9 @@ def _total_chunks(entries: List[FileEntry]) -> Int:
     return n
 
 
-def _embed_chunks(base_url: String, chunks: List[String]) raises -> List[Float32]:
+def _embed_chunks(
+    base_url: String, chunks: List[String]
+) raises -> List[Float32]:
     """Embed `chunks` in batches of EMBED_BATCH; return the flat row-major vectors
     (len == len(chunks) * EMBED_DIM)."""
     var vectors = List[Float32]()
@@ -451,15 +505,23 @@ def _embed_chunks(base_url: String, chunks: List[String]) raises -> List[Float32
             vecs = embed_batch(base_url, batch)
         except err:
             raise Error(
-                "build_index: embedding chunks [" + String(start) + ".." + String(stop)
-                + ") failed (is the inference-server embedding model serving at "
-                + base_url + "?): " + String(err)
+                "build_index: embedding chunks ["
+                + String(start)
+                + ".."
+                + String(stop)
+                + ") failed (is the inference-server embedding model"
+                " serving at "
+                + base_url
+                + "?): "
+                + String(err)
             )
         for k in range(len(vecs)):
             if len(vecs[k]) != EMBED_DIM:
                 raise Error(
-                    "build_index: embedding dim " + String(len(vecs[k]))
-                    + " != expected " + String(EMBED_DIM)
+                    "build_index: embedding dim "
+                    + String(len(vecs[k]))
+                    + " != expected "
+                    + String(EMBED_DIM)
                 )
             for d in range(len(vecs[k])):
                 vectors.append(vecs[k][d])
@@ -468,6 +530,7 @@ def _embed_chunks(base_url: String, chunks: List[String]) raises -> List[Float32
 
 
 # ── build (incremental) ───────────────────────────────────────────────────────
+
 
 def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     """Incrementally bring the index in sync with `data_dir`: embed only new and
@@ -492,7 +555,11 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     # Start clean when forced, or there's no manifest (clean machine / upgrade from
     # the pre-manifest format), or the vault dir changed — so ids/aliases can't
     # collide with stale data.
-    var fresh = force or (not have_manifest) or (len(old) > 0 and man.source_dir != data_dir)
+    var fresh = (
+        force
+        or (not have_manifest)
+        or (len(old) > 0 and man.source_dir != data_dir)
+    )
     if fresh:
         _rmtree(_db_uri())
         if exists(_sidetable_path()):
@@ -505,7 +572,13 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
 
     # Current files (sorted, csv/pdf/md only) + their content hashes.
     var infos = build_manifest(data_dir)
-    print("scanning " + String(len(infos)) + " file(s) in " + data_dir + " for changes…")
+    print(
+        "scanning "
+        + String(len(infos))
+        + " file(s) in "
+        + data_dir
+        + " for changes…"
+    )
     var cur_paths = List[String]()
     var cur_names = List[String]()
     var cur_kinds = List[String]()
@@ -525,12 +598,16 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         print("  • " + _relpath(fi.path, data_dir) + " [" + fi.kind + "]")
 
     # Diff current vs old (by name + hash).
-    var new_entries = List[FileEntry]()   # unchanged carried over; embedded added below
-    var emb_idx = List[Int]()             # indices into cur_* needing embedding
-    var emb_alias = List[String]()        # the alias to assign each embedded file
+    var new_entries = List[
+        FileEntry
+    ]()  # unchanged carried over; embedded added below
+    var emb_idx = List[Int]()  # indices into cur_* needing embedding
+    var emb_alias = List[String]()  # the alias to assign each embedded file
     var del_starts = List[Int]()
     var del_counts = List[Int]()
-    var removed_aliases = List[String]()   # files dropped entirely (for txn eviction)
+    var removed_aliases = List[
+        String
+    ]()  # files dropped entirely (for txn eviction)
     var matched = List[Bool]()
     for _ in range(len(old)):
         matched.append(False)
@@ -540,27 +617,32 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         if oi >= 0:
             matched[oi] = True
             if old[oi].sha == cur_shas[i]:
-                new_entries.append(old[oi].copy())          # unchanged: keep as-is
+                new_entries.append(old[oi].copy())  # unchanged: keep as-is
             else:
-                del_starts.append(old[oi].id_start)         # changed: drop old range,
-                del_counts.append(old[oi].chunk_count)      # re-embed under same alias
+                del_starts.append(old[oi].id_start)  # changed: drop old range,
+                del_counts.append(
+                    old[oi].chunk_count
+                )  # re-embed under same alias
                 emb_idx.append(i)
                 emb_alias.append(old[oi].falias.copy())
         else:
-            emb_idx.append(i)                               # new: fresh alias
+            emb_idx.append(i)  # new: fresh alias
             emb_alias.append(String("file_") + String(next_alias))
             next_alias += 1
 
     for oi in range(len(old)):
-        if not matched[oi]:                                 # removed: drop its range
+        if not matched[oi]:  # removed: drop its range
             del_starts.append(old[oi].id_start)
             del_counts.append(old[oi].chunk_count)
             removed_aliases.append(old[oi].falias.copy())
 
     if len(emb_idx) == 0 and len(del_starts) == 0:
         print(
-            "index up to date — " + String(len(new_entries)) + " file(s), "
-            + String(_total_chunks(new_entries)) + " chunk(s); nothing changed"
+            "index up to date — "
+            + String(len(new_entries))
+            + " file(s), "
+            + String(_total_chunks(new_entries))
+            + " chunk(s); nothing changed"
         )
         return
 
@@ -570,8 +652,10 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     for r in range(len(del_starts)):
         if del_counts[r] > 0:
             store.delete(
-                String("id >= ") + String(del_starts[r])
-                + " AND id < " + String(del_starts[r] + del_counts[r])
+                String("id >= ")
+                + String(del_starts[r])
+                + " AND id < "
+                + String(del_starts[r] + del_counts[r])
             )
 
     var st = _load_sidetable()
@@ -586,9 +670,15 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     trows = drop_aliases(trows, txn_drop)
 
     print(
-        "embedding " + String(len(emb_idx)) + " new/changed file(s)"
-        + (" (the embedding model loads on first use — this can take a bit)…"
-           if len(old) == 0 else "…")
+        "embedding "
+        + String(len(emb_idx))
+        + " new/changed file(s)"
+        + (
+            " (the embedding model loads on first use — this can take a bit)…" if len(
+                old
+            )
+            == 0 else "…"
+        )
     )
 
     # Embed only new + changed files; append to LanceDB + the side-table.
@@ -607,21 +697,36 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
             # Transaction extraction needs COLUMN-ALIGNED text (date│desc│amount│
             # balance on one line); `body` is stream-order (good for chunks/search,
             # but it scatters a row's cells). For PDFs, re-extract layout-preserved.
-            var txn_src = readers.pdf_text_layout(cur_paths[i]) if cur_kinds[i] == "pdf" else body
+            var txn_src = (
+                readers.pdf_text_layout(cur_paths[i]) if cur_kinds[i]
+                == "pdf" else body
+            )
             var ext = extract_transactions(txn_src)
             if ext.reconciled:
                 for x in range(len(ext.txns)):
                     ref tx = ext.txns[x]
                     trows.append(
-                        TxnRow(falias.copy(), tx.date.copy(), tx.amount,
-                               tx.direction.copy(), tx.desc.copy())
+                        TxnRow(
+                            falias.copy(),
+                            tx.date.copy(),
+                            tx.amount,
+                            tx.direction.copy(),
+                            tx.desc.copy(),
+                        )
                     )
 
         var chunks = _chunk_text(body)
         # Print BEFORE the (slow) embed so a multi-page file isn't a silent stall.
         print(
-            "  " + falias + " [" + cur_kinds[i] + "] " + cur_names[i] + " — "
-            + String(len(chunks)) + " chunk(s), embedding…"
+            "  "
+            + falias
+            + " ["
+            + cur_kinds[i]
+            + "] "
+            + cur_names[i]
+            + " — "
+            + String(len(chunks))
+            + " chunk(s), embedding…"
         )
         var id_start = next_id
         var ids = List[Int64]()
@@ -636,8 +741,13 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         next_id += len(chunks)
         new_entries.append(
             FileEntry(
-                falias.copy(), cur_names[i].copy(), cur_kinds[i].copy(),
-                cur_sizes[i], cur_shas[i].copy(), id_start, len(chunks),
+                falias.copy(),
+                cur_names[i].copy(),
+                cur_kinds[i].copy(),
+                cur_sizes[i],
+                cur_shas[i].copy(),
+                id_start,
+                len(chunks),
             )
         )
 
@@ -649,13 +759,18 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     _write_txn_rows(trows)
     _write_manifest(Manifest(new_entries^, next_id, next_alias, data_dir))
     print(
-        "index updated — " + String(len(emb_idx)) + " file(s) embedded, "
-        + String(len(del_starts)) + " range(s) removed; "
-        + String(len(st.ids)) + " chunk(s) total"
+        "index updated — "
+        + String(len(emb_idx))
+        + " file(s) embedded, "
+        + String(len(del_starts))
+        + " range(s) removed; "
+        + String(len(st.ids))
+        + " chunk(s) total"
     )
 
 
 # ── search ────────────────────────────────────────────────────────────────────
+
 
 def search(query: String, k: Int, base_url: String) raises -> List[Chunk]:
     """Semantic search: embed `query`, k-NN over the LanceDB store, resolve each
@@ -663,16 +778,21 @@ def search(query: String, k: Int, base_url: String) raises -> List[Chunk]:
     first. Requires the index to exist and the embedding endpoint to be live."""
     if not exists(_sidetable_path()):
         raise Error(
-            "no index side-table at " + _sidetable_path() + " — run `mill index` first"
+            "no index side-table at "
+            + _sidetable_path()
+            + " — run `mill index` first"
         )
     var st = _load_sidetable()
 
     # Qwen3-Embedding is instruction-tuned: QUERIES get an instruction prefix,
     # documents (the indexed chunks) stay raw. This materially improves ranking.
-    var q_instructed = String(
-        "Instruct: Given a search query, retrieve relevant passages that answer"
-        " it.\nQuery: "
-    ) + query
+    var q_instructed = (
+        String(
+            "Instruct: Given a search query, retrieve relevant passages that"
+            " answer it.\nQuery: "
+        )
+        + query
+    )
     var qvec = embed(base_url, q_instructed)
     var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
     var result = store.search(qvec, k)
@@ -685,12 +805,15 @@ def search(query: String, k: Int, base_url: String) raises -> List[Chunk]:
         # ids are sparse — scan the side-table for this chunk id.
         for j in range(len(st.ids)):
             if st.ids[j] == cid:
-                hits.append(Chunk(st.aliases[j].copy(), st.texts[j].copy(), dists[i]))
+                hits.append(
+                    Chunk(st.aliases[j].copy(), st.texts[j].copy(), dists[i])
+                )
                 break
     return hits^
 
 
 # ── enumeration (complete coverage, not similarity-ranked) ────────────────────
+
 
 def file_chunks(file_alias: String) raises -> List[String]:
     """EVERY indexed chunk of one file, in document order — the complete text the
@@ -708,6 +831,7 @@ def file_chunks(file_alias: String) raises -> List[String]:
 # ── structured transactions (reconcile-validated, extracted at index time) ────
 # The row type + (de)serialization + selection live in vault.transactions (pure,
 # hermetically tested); here we only add the file I/O around them.
+
 
 def _txns_path() raises -> String:
     return _config_dir() + "/transactions.tsv"
@@ -731,5 +855,6 @@ def file_transactions(file_alias: String) raises -> List[Txn]:
     """The reconcile-VERIFIED transactions of one file (date/desc/amount/direction),
     extracted once at index time. EMPTY when the file has none or its transactions
     could not be reconciled against the statement's own totals — in which case the
-    caller should fall back to `file_chunks()` + `ask_local`, not trust a guess."""
+    caller should fall back to `file_chunks()` + `ask_local`, not trust a guess.
+    """
     return select_txns(_load_txn_rows(), file_alias)

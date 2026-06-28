@@ -73,7 +73,9 @@ def embed(base_url: String, text: String) raises -> List[Float32]:
     return vec^
 
 
-def embed_batch(base_url: String, texts: List[String]) raises -> List[List[Float32]]:
+def embed_batch(
+    base_url: String, texts: List[String]
+) raises -> List[List[Float32]]:
     """Embed many texts in ONE request and return one vector per input, in order.
 
     POSTs `{"input":[...]}` (the OpenAI array form the server already supports) to
@@ -121,7 +123,10 @@ def embed_batch(base_url: String, texts: List[String]) raises -> List[List[Float
         )
     if len(out) != len(texts):
         raise Error(
-            "embed_batch: server returned " + String(len(out))
-            + " embeddings for " + String(len(texts)) + " inputs"
+            "embed_batch: server returned "
+            + String(len(out))
+            + " embeddings for "
+            + String(len(texts))
+            + " inputs"
         )
     return out^

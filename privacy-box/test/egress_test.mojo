@@ -19,7 +19,7 @@ def _blocks(guard: EgressGuard, payload: String) -> Bool:
 
 def main() raises:
     var fps = List[String]()
-    fps.append(String("123-45-6789"))        # a real SSN-shaped value
+    fps.append(String("123-45-6789"))  # a real SSN-shaped value
     fps.append(String("alice@example.com"))  # a real email value
     var canaries = List[String]()
     canaries.append(String("HG_CANARY_7f3a"))  # seeded ONLY into real data
@@ -27,16 +27,28 @@ def main() raises:
 
     var all_ok = True
 
-    var clean_passes = not _blocks(guard, String("Aggregate col_1 grouped by col_0."))
+    var clean_passes = not _blocks(
+        guard, String("Aggregate col_1 grouped by col_0.")
+    )
     print("[" + ("PASS" if clean_passes else "FAIL") + "] clean payload passes")
     all_ok = all_ok and clean_passes
 
-    var fp_blocked = _blocks(guard, String("debug: offending row was 123-45-6789"))
-    print("[" + ("PASS" if fp_blocked else "FAIL") + "] real-value fingerprint blocked")
+    var fp_blocked = _blocks(
+        guard, String("debug: offending row was 123-45-6789")
+    )
+    print(
+        "["
+        + ("PASS" if fp_blocked else "FAIL")
+        + "] real-value fingerprint blocked"
+    )
     all_ok = all_ok and fp_blocked
 
-    var canary_blocked = _blocks(guard, String("stack trace mentions HG_CANARY_7f3a here"))
-    print("[" + ("PASS" if canary_blocked else "FAIL") + "] canary token blocked")
+    var canary_blocked = _blocks(
+        guard, String("stack trace mentions HG_CANARY_7f3a here")
+    )
+    print(
+        "[" + ("PASS" if canary_blocked else "FAIL") + "] canary token blocked"
+    )
     all_ok = all_ok and canary_blocked
 
     print()

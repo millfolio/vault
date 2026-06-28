@@ -35,14 +35,17 @@ def _redact_pii(var payload: String) -> String:
 
 struct EgressGuard(Movable):
     var fingerprints: List[String]  # fingerprints of real-data spans
-    var canaries: List[String]      # tokens that exist ONLY in the real data
+    var canaries: List[String]  # tokens that exist ONLY in the real data
 
-    def __init__(out self, var fingerprints: List[String], var canaries: List[String]):
+    def __init__(
+        out self, var fingerprints: List[String], var canaries: List[String]
+    ):
         self.fingerprints = fingerprints^
         self.canaries = canaries^
 
     def check(self, payload: String) raises -> String:
-        """Return a redaction-scrubbed payload safe to send, or raise. Fails closed."""
+        """Return a redaction-scrubbed payload safe to send, or raise. Fails closed.
+        """
         for c in self.canaries:
             if _contains(payload, c):
                 raise Error(
@@ -51,5 +54,7 @@ struct EgressGuard(Movable):
                 )
         for f in self.fingerprints:
             if _contains(payload, f):
-                raise Error("EgressBlocked: real-data fingerprint on outbound path")
+                raise Error(
+                    "EgressBlocked: real-data fingerprint on outbound path"
+                )
         return _redact_pii(payload.copy())

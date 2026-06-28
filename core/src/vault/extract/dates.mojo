@@ -12,7 +12,8 @@ surface and unit-tested by dates_test.mojo (`pixi run test-dates`).
 
 
 def _atoi(s: String) -> Int:
-    """Leading run of digits as an Int (skips surrounding spaces); -1 if none."""
+    """Leading run of digits as an Int (skips surrounding spaces); -1 if none.
+    """
     var n = 0
     var any = False
     var b = s.as_bytes()

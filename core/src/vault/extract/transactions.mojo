@@ -27,7 +27,7 @@ from vault.extract.amounts import parse_amount
 from vault.extract.dates import iso_date
 
 
-comptime _EPS = 0.005   # half-a-cent tolerance for money reconciliation
+comptime _EPS = 0.005  # half-a-cent tolerance for money reconciliation
 
 
 @fieldwise_init
@@ -35,6 +35,7 @@ struct Txn(Copyable, Movable):
     """One extracted transaction. `amount` is a non-negative MAGNITUDE; the sign of
     the money flow is in `direction` (`"credit"` = money in, `"debit"` = money out,
     `""` = unknown). `date` is the raw statement date token (e.g. `"4/20"`)."""
+
     var date: String
     var desc: String
     var amount: Float64
@@ -47,6 +48,7 @@ struct Extraction(Copyable, Movable):
     extracted set matched the statement's own arithmetic (`method` says how —
     `"balance-recurrence"` or `"sum-vs-total"`; `"unreconciled"` if neither closed).
     `note` is a short human-readable detail."""
+
     var txns: List[Txn]
     var reconciled: Bool
     var method: String
@@ -54,6 +56,7 @@ struct Extraction(Copyable, Movable):
 
 
 # ── format-agnostic token scanners ────────────────────────────────────────────
+
 
 def _is_digit(c: Int) -> Bool:
     return c >= 48 and c <= 57
@@ -66,7 +69,7 @@ def _has_cents(tok: String) -> Bool:
     var b = tok.as_bytes()
     var dot = -1
     for i in range(len(b)):
-        if Int(b[i]) == 46:   # '.'
+        if Int(b[i]) == 46:  # '.'
             dot = i
     if dot < 0 or len(b) - dot - 1 != 2:
         return False
@@ -88,14 +91,14 @@ def _money_tokens(line: String) raises -> List[String]:
             var j = i
             while j < n:
                 var d = Int(b[j])
-                if _is_digit(d) or d == 44 or d == 46:   # digit , .
+                if _is_digit(d) or d == 44 or d == 46:  # digit , .
                     tok += chr(d)
                     j += 1
                 else:
                     break
             if _has_cents(tok):
-                var neg = (i > 0 and Int(b[i - 1]) == 40)        # leading '('
-                if j < n and Int(b[j]) == 41:                    # trailing ')'
+                var neg = i > 0 and Int(b[i - 1]) == 40  # leading '('
+                if j < n and Int(b[j]) == 41:  # trailing ')'
                     neg = True
                     j += 1
                 out.append((String("(") + tok + ")") if neg else tok)
@@ -106,14 +109,15 @@ def _money_tokens(line: String) raises -> List[String]:
 
 
 @fieldwise_init
-struct _Money(Copyable, Movable, ImplicitlyCopyable):
+struct _Money(Copyable, ImplicitlyCopyable, Movable):
     """A money token with its parsed value AND its character offset (column) in the
     source line. On LAYOUT-PRESERVED statement text (columns aligned with spaces),
     the offset tells which column — deposit / withdrawal / running balance — a token
     sits in, which recovers per-transaction direction on intra-day rows where the
     balance alone is ambiguous."""
-    var value: Float64   # signed (accounting parens / leading '-' preserved)
-    var col: Int         # END offset of the token (right edge — columns are right-aligned)
+
+    var value: Float64  # signed (accounting parens / leading '-' preserved)
+    var col: Int  # END offset of the token (right edge — columns are right-aligned)
 
 
 def _money_with_cols(line: String) raises -> List[_Money]:
@@ -132,15 +136,15 @@ def _money_with_cols(line: String) raises -> List[_Money]:
             var j = i
             while j < n:
                 var d = Int(b[j])
-                if _is_digit(d) or d == 44 or d == 46:   # digit , .
+                if _is_digit(d) or d == 44 or d == 46:  # digit , .
                     tok += chr(d)
                     j += 1
                 else:
                     break
             if _has_cents(tok):
-                var neg = (i > 0 and Int(b[i - 1]) == 40)        # leading '('
+                var neg = i > 0 and Int(b[i - 1]) == 40  # leading '('
                 var end = j
-                if j < n and Int(b[j]) == 41:                    # trailing ')'
+                if j < n and Int(b[j]) == 41:  # trailing ')'
                     neg = True
                     end = j + 1
                 var v = parse_amount(tok)
@@ -157,19 +161,20 @@ def _money_with_cols(line: String) raises -> List[_Money]:
 
 def _leading_date(line: String) raises -> String:
     """The leading `M/D`(`/YY`) date token of `line` (after spaces), or `""`. Validated
-    via iso_date so check numbers / ref numbers (no valid month/day) are rejected."""
+    via iso_date so check numbers / ref numbers (no valid month/day) are rejected.
+    """
     var t = String(line.strip())
     var b = t.as_bytes()
     var i = 0
     var tok = String("")
     while i < len(b):
         var c = Int(b[i])
-        if _is_digit(c) or c == 47:   # digit or '/'
+        if _is_digit(c) or c == 47:  # digit or '/'
             tok += chr(c)
             i += 1
         else:
             break
-    if iso_date(2000, tok) != "":     # valid month/day shape
+    if iso_date(2000, tok) != "":  # valid month/day shape
         return tok^
     return String("")
 
@@ -210,11 +215,17 @@ def _strip_money_and_date(line: String, date: String) raises -> String:
     if date != "":
         var t = String(s.strip())
         if t.startswith(date):
-            s = String(String(unsafe_from_utf8=t.as_bytes()[date.byte_length():]))
+            s = String(
+                String(unsafe_from_utf8=t.as_bytes()[date.byte_length() :])
+            )
     for m in range(len(moneys)):
         var bare = moneys[m]
-        if bare.startswith("("):   # restore the digits-only form to blank it out
-            bare = String(String(unsafe_from_utf8=bare.as_bytes()[1:bare.byte_length() - 1]))
+        if bare.startswith("("):  # restore the digits-only form to blank it out
+            bare = String(
+                String(
+                    unsafe_from_utf8=bare.as_bytes()[1 : bare.byte_length() - 1]
+                )
+            )
         s = _replace(s, bare, String(" "))
     var parts = s.split()
     var out = String("")
@@ -227,6 +238,7 @@ def _strip_money_and_date(line: String, date: String) raises -> String:
 
 # ── section / summary classification (lowercased lines) ───────────────────────
 
+
 def _summary_phrases() raises -> List[String]:
     """Lines that are control totals / headers, NOT transactions — they close the
     current transaction run so their figures don't pollute a record."""
@@ -238,9 +250,13 @@ def _summary_phrases() raises -> List[String]:
     p.append(String("opening balance"))
     p.append(String("ending balance"))
     p.append(String("new balance"))
-    p.append(String("deposits/additions"))       # summary totals (may sit BELOW the
-    p.append(String("withdrawals/subtractions"))  # transaction list) — close the run
-    p.append(String("deposits and additions"))    # so they don't pollute the last record
+    p.append(String("deposits/additions"))  # summary totals (may sit BELOW the
+    p.append(
+        String("withdrawals/subtractions")
+    )  # transaction list) — close the run
+    p.append(
+        String("deposits and additions")
+    )  # so they don't pollute the last record
     p.append(String("withdrawals and subtractions"))
     p.append(String("minimum payment"))
     p.append(String("account summary"))
@@ -266,6 +282,7 @@ def _debit_header_phrases() raises -> List[String]:
 
 # ── printed control totals ────────────────────────────────────────────────────
 
+
 def _printed_total(text_lower: String, phrases: List[String]) raises -> Float64:
     """The amount on the FIRST line containing any of `phrases` (case-insensitive) —
     statements print these once, with the figure last on the line. Returns a magnitude,
@@ -285,7 +302,7 @@ def _credit_total_phrases() raises -> List[String]:
     var p = List[String]()
     p.append(String("total deposits"))
     p.append(String("deposits and other"))
-    p.append(String("deposits/additions"))      # Wells Fargo account summary
+    p.append(String("deposits/additions"))  # Wells Fargo account summary
     p.append(String("payments and other credits"))
     p.append(String("total credits"))
     p.append(String("total payments"))
@@ -309,8 +326,11 @@ def _begin_balance(text_lower: String) raises -> Float64:
     var lines = text_lower.split("\n")
     for i in range(len(lines)):
         var line = String(lines[i])
-        if (line.find("beginning balance") != -1 or line.find("previous balance") != -1
-                or line.find("opening balance") != -1):
+        if (
+            line.find("beginning balance") != -1
+            or line.find("previous balance") != -1
+            or line.find("opening balance") != -1
+        ):
             var moneys = _money_tokens(line)
             if len(moneys) > 0:
                 return parse_amount(moneys[len(moneys) - 1])
@@ -319,18 +339,20 @@ def _begin_balance(text_lower: String) raises -> Float64:
 
 # ── records → reconciled extraction ───────────────────────────────────────────
 
+
 @fieldwise_init
 struct _Record(Copyable, Movable):
     var date: String
     var desc: String
-    var moneys: List[String]   # money tokens in the record window, in order
-    var section: String        # "credit" | "debit" | "" — from the section header above it
+    var moneys: List[String]  # money tokens in the record window, in order
+    var section: String  # "credit" | "debit" | "" — from the section header above it
 
 
 def _parse_records(text: String) raises -> List[_Record]:
     """Walk lines; each date-led line opens a record that runs until the next date or
     a summary/header line. Section headers ("Payments and Other Credits", "Purchases…")
-    tag the records beneath them so direction is known without a running balance."""
+    tag the records beneath them so direction is known without a running balance.
+    """
     var recs = List[_Record]()
     var lines = text.split("\n")
     var summ = _summary_phrases()
@@ -352,7 +374,14 @@ def _parse_records(text: String) raises -> List[_Record]:
         # A summary/total line ends the current run (and isn't a transaction).
         if d == "" and _contains_any(ll, summ):
             if open:
-                recs.append(_Record(cur_date.copy(), String(cur_desc.strip()), cur_money.copy(), cur_section.copy()))
+                recs.append(
+                    _Record(
+                        cur_date.copy(),
+                        String(cur_desc.strip()),
+                        cur_money.copy(),
+                        cur_section.copy(),
+                    )
+                )
                 open = False
             continue
 
@@ -365,7 +394,14 @@ def _parse_records(text: String) raises -> List[_Record]:
 
         if d != "":
             if open:
-                recs.append(_Record(cur_date.copy(), String(cur_desc.strip()), cur_money.copy(), cur_section.copy()))
+                recs.append(
+                    _Record(
+                        cur_date.copy(),
+                        String(cur_desc.strip()),
+                        cur_money.copy(),
+                        cur_section.copy(),
+                    )
+                )
             open = True
             cur_date = d
             cur_desc = String("")
@@ -385,7 +421,14 @@ def _parse_records(text: String) raises -> List[_Record]:
             cur_desc += frag
 
     if open:
-        recs.append(_Record(cur_date.copy(), String(cur_desc.strip()), cur_money.copy(), cur_section.copy()))
+        recs.append(
+            _Record(
+                cur_date.copy(),
+                String(cur_desc.strip()),
+                cur_money.copy(),
+                cur_section.copy(),
+            )
+        )
     return recs^
 
 
@@ -396,10 +439,12 @@ def _close(a: Float64, b: Float64) -> Bool:
 
 # ── column-position direction detection (layout-preserved text) ────────────────
 
+
 @fieldwise_init
 struct _PosRecord(Copyable, Movable):
     """A transaction record that preserves each money token's column (right-edge
     offset) — the input for column-position direction detection."""
+
     var date: String
     var desc: String
     var moneys: List[_Money]
@@ -408,7 +453,8 @@ struct _PosRecord(Copyable, Movable):
 def _parse_pos_records(text: String) raises -> List[_PosRecord]:
     """Like `_parse_records` but keeps each money token's column. A date-led line opens
     a record that runs until the next date / a summary line; continuation lines (no date,
-    no totals) extend the description and contribute any money tokens they carry."""
+    no totals) extend the description and contribute any money tokens they carry.
+    """
     var recs = List[_PosRecord]()
     var lines = text.split("\n")
     var summ = _summary_phrases()
@@ -425,13 +471,25 @@ def _parse_pos_records(text: String) raises -> List[_PosRecord]:
 
         if d == "" and _contains_any(ll, summ):
             if open:
-                recs.append(_PosRecord(cur_date.copy(), String(cur_desc.strip()), cur_money.copy()))
+                recs.append(
+                    _PosRecord(
+                        cur_date.copy(),
+                        String(cur_desc.strip()),
+                        cur_money.copy(),
+                    )
+                )
                 open = False
             continue
 
         if d != "":
             if open:
-                recs.append(_PosRecord(cur_date.copy(), String(cur_desc.strip()), cur_money.copy()))
+                recs.append(
+                    _PosRecord(
+                        cur_date.copy(),
+                        String(cur_desc.strip()),
+                        cur_money.copy(),
+                    )
+                )
             open = True
             cur_date = d
             cur_desc = String("")
@@ -450,13 +508,20 @@ def _parse_pos_records(text: String) raises -> List[_PosRecord]:
             cur_desc += frag
 
     if open:
-        recs.append(_PosRecord(cur_date.copy(), String(cur_desc.strip()), cur_money.copy()))
+        recs.append(
+            _PosRecord(
+                cur_date.copy(), String(cur_desc.strip()), cur_money.copy()
+            )
+        )
     return recs^
 
 
 def _column_direction(
-    recs: List[_PosRecord], begin: Float64, ending: Float64,
-    credit_total: Float64, debit_total: Float64
+    recs: List[_PosRecord],
+    begin: Float64,
+    ending: Float64,
+    credit_total: Float64,
+    debit_total: Float64,
 ) raises -> Extraction:
     """Reconcile via column position + the running-balance recurrence, handling
     INTRA-DAY rows (several transactions share a day; only the last shows a balance).
@@ -474,7 +539,9 @@ def _column_direction(
     final balance matches the printed ending balance (or the per-direction sums match the
     printed deposit/withdrawal totals). Otherwise we abstain."""
     if begin < 0.0 or len(recs) == 0:
-        return Extraction(List[Txn](), False, String("unreconciled"), String(""))
+        return Extraction(
+            List[Txn](), False, String("unreconciled"), String("")
+        )
 
     # Gather amount-token columns (every non-balance token) to find the deposit |
     # withdrawal split. The balance token is the last on a ≥2-token record.
@@ -484,24 +551,26 @@ def _column_direction(
         var nm = len(r.moneys)
         if nm == 0:
             continue
-        var amt_n = nm - 1 if nm >= 2 else nm   # last token is balance when ≥2
+        var amt_n = nm - 1 if nm >= 2 else nm  # last token is balance when ≥2
         for k in range(amt_n):
             amt_cols.append(r.moneys[k].col)
     if len(amt_cols) == 0:
-        return Extraction(List[Txn](), False, String("unreconciled"), String(""))
+        return Extraction(
+            List[Txn](), False, String("unreconciled"), String("")
+        )
 
     # Split the amount columns into a left (deposit) and right (withdrawal) band at
     # the LARGEST gap among sorted right-edges. This is just the sign seed; wide
     # 5-digit amounts that drift across the boundary are corrected by the recurrence.
     var cols = amt_cols.copy()
-    for a in range(1, len(cols)):                 # insertion sort
+    for a in range(1, len(cols)):  # insertion sort
         var key = cols[a]
         var b = a - 1
         while b >= 0 and cols[b] > key:
             cols[b + 1] = cols[b]
             b -= 1
         cols[b + 1] = key
-    var split = cols[len(cols) - 1] + 1           # default: everything is "deposit"
+    var split = cols[len(cols) - 1] + 1  # default: everything is "deposit"
     var best_gap = 0
     for k in range(1, len(cols)):
         var g = cols[k] - cols[k - 1]
@@ -515,14 +584,16 @@ def _column_direction(
 
     # Walk records; reconcile the running balance through intra-day groups.
     var prev = begin
-    var pend_amt = List[Float64]()                # amount magnitudes pending a checkpoint
-    var pend_left = List[Bool]()                  # column hint: True = left/deposit band
+    var pend_amt = List[Float64]()  # amount magnitudes pending a checkpoint
+    var pend_left = List[Bool]()  # column hint: True = left/deposit band
     var pend_date = List[String]()
     var pend_desc = List[String]()
     var out = List[Txn]()
     var sum_credit = 0.0
     var sum_debit = 0.0
-    var done = False   # set once the running balance reaches the printed ending balance
+    var done = (
+        False  # set once the running balance reaches the printed ending balance
+    )
 
     for i in range(len(recs)):
         # Once the running balance has reached the statement's printed ending balance,
@@ -548,19 +619,23 @@ def _column_direction(
             var bal = r.moneys[nm - 1].value
             var target = bal - prev
             var ng = len(pend_amt)
-            if ng == 0 or ng > 16:                # nothing to place / refuse to brute-force huge groups
-                return Extraction(List[Txn](), False, String("unreconciled"), String(""))
+            if (
+                ng == 0 or ng > 16
+            ):  # nothing to place / refuse to brute-force huge groups
+                return Extraction(
+                    List[Txn](), False, String("unreconciled"), String("")
+                )
 
             # Seed from the column hint: deposits +, withdrawals −.
             var seed = 0
             for g in range(ng):
                 if pend_left[g]:
-                    seed |= (1 << g)              # bit set ⇒ positive (deposit)
+                    seed |= 1 << g  # bit set ⇒ positive (deposit)
             # Search sign assignments, the column-hint seed first, for one closing the group.
             var found = -1
             var limit = 1 << ng
             for s in range(limit):
-                var bits = seed ^ s               # explore around the seed
+                var bits = seed ^ s  # explore around the seed
                 var ssum = 0.0
                 for g in range(ng):
                     if (bits >> g) & 1:
@@ -571,16 +646,32 @@ def _column_direction(
                     found = bits
                     break
             if found < 0:
-                return Extraction(List[Txn](), False, String("unreconciled"), String(""))
+                return Extraction(
+                    List[Txn](), False, String("unreconciled"), String("")
+                )
 
             for g in range(ng):
                 var is_credit = ((found >> g) & 1) == 1
                 if is_credit:
                     sum_credit += pend_amt[g]
-                    out.append(Txn(pend_date[g].copy(), pend_desc[g].copy(), pend_amt[g], String("credit")))
+                    out.append(
+                        Txn(
+                            pend_date[g].copy(),
+                            pend_desc[g].copy(),
+                            pend_amt[g],
+                            String("credit"),
+                        )
+                    )
                 else:
                     sum_debit += pend_amt[g]
-                    out.append(Txn(pend_date[g].copy(), pend_desc[g].copy(), pend_amt[g], String("debit")))
+                    out.append(
+                        Txn(
+                            pend_date[g].copy(),
+                            pend_desc[g].copy(),
+                            pend_amt[g],
+                            String("debit"),
+                        )
+                    )
             prev = bal
             pend_amt = List[Float64]()
             pend_left = List[Bool]()
@@ -591,18 +682,28 @@ def _column_direction(
 
     # Any amounts left without a closing balance ⇒ the recurrence didn't fully close.
     if len(pend_amt) != 0:
-        return Extraction(List[Txn](), False, String("unreconciled"), String(""))
+        return Extraction(
+            List[Txn](), False, String("unreconciled"), String("")
+        )
 
     # Final trust gate: the recurrence must land on the printed ending balance, OR the
     # per-direction sums must match the printed deposit/withdrawal control totals.
     var ends_ok = ending >= 0.0 and _close(prev, ending)
-    var sums_ok = (credit_total >= 0.0 and debit_total >= 0.0
-                   and _close(sum_credit, credit_total) and _close(sum_debit, debit_total))
+    var sums_ok = (
+        credit_total >= 0.0
+        and debit_total >= 0.0
+        and _close(sum_credit, credit_total)
+        and _close(sum_debit, debit_total)
+    )
     if ends_ok or sums_ok:
         return Extraction(
-            out^, True, String("column-direction"),
+            out^,
+            True,
+            String("column-direction"),
             String("running balance + column directions reconcile across ")
-            + String(len(out)) + " transaction(s)")
+            + String(len(out))
+            + " transaction(s)",
+        )
     return Extraction(List[Txn](), False, String("unreconciled"), String(""))
 
 
@@ -611,8 +712,11 @@ def _ending_balance(text_lower: String) raises -> Float64:
     var lines = text_lower.split("\n")
     for i in range(len(lines)):
         var line = String(lines[i])
-        if (line.find("ending balance") != -1 or line.find("new balance") != -1
-                or line.find("ending daily balance") != -1):
+        if (
+            line.find("ending balance") != -1
+            or line.find("new balance") != -1
+            or line.find("ending daily balance") != -1
+        ):
             # skip the legalese sentence ("The Ending Daily Balance does not reflect…")
             var moneys = _money_tokens(line)
             if len(moneys) > 0:
@@ -653,17 +757,26 @@ def extract_transactions(text: String) raises -> Extraction:
                 amt = -amt
             var bal = parse_amount(r.moneys[len(r.moneys) - 1])
             if _close(prev + amt, bal):
-                bal_txns.append(Txn(r.date.copy(), r.desc.copy(), amt, String("credit")))
+                bal_txns.append(
+                    Txn(r.date.copy(), r.desc.copy(), amt, String("credit"))
+                )
             elif _close(prev - amt, bal):
-                bal_txns.append(Txn(r.date.copy(), r.desc.copy(), amt, String("debit")))
+                bal_txns.append(
+                    Txn(r.date.copy(), r.desc.copy(), amt, String("debit"))
+                )
             else:
                 ok = False
                 break
             prev = bal
         if ok:
             return Extraction(
-                bal_txns^, True, String("balance-recurrence"),
-                String("running balance closes across ") + String(len(recs)) + " record(s)")
+                bal_txns^,
+                True,
+                String("balance-recurrence"),
+                String("running balance closes across ")
+                + String(len(recs))
+                + " record(s)",
+            )
 
     # ── Method "column-direction": column position + recurrence over intra-day groups ─
     # On LAYOUT-PRESERVED text each money token carries its column; this resolves
@@ -700,28 +813,45 @@ def extract_transactions(text: String) raises -> Extraction:
     if credit_total >= 0.0 and debit_total >= 0.0:
         if _close(sum_credit, credit_total) and _close(sum_debit, debit_total):
             return Extraction(
-                txns^, True, String("sum-vs-total"),
-                String("credits + debits reconcile to printed totals"))
+                txns^,
+                True,
+                String("sum-vs-total"),
+                String("credits + debits reconcile to printed totals"),
+            )
     # Single total printed (e.g. a card statement's purchases only).
     elif debit_total >= 0.0 and _close(sum_all, debit_total):
         return Extraction(
-            txns^, True, String("sum-vs-total"),
-            String("transactions sum to the printed total ") + String(debit_total))
+            txns^,
+            True,
+            String("sum-vs-total"),
+            String("transactions sum to the printed total ")
+            + String(debit_total),
+        )
     elif credit_total >= 0.0 and _close(sum_all, credit_total):
         return Extraction(
-            txns^, True, String("sum-vs-total"),
-            String("transactions sum to the printed total ") + String(credit_total))
+            txns^,
+            True,
+            String("sum-vs-total"),
+            String("transactions sum to the printed total ")
+            + String(credit_total),
+        )
 
     # ── Couldn't reconcile: return best-effort, flagged untrusted. ─────────────
     return Extraction(
-        txns^, False, String("unreconciled"),
-        String("extracted ") + String(len(txns))
-        + " candidate(s) but they did not reconcile against the statement's totals")
+        txns^,
+        False,
+        String("unreconciled"),
+        String("extracted ")
+        + String(len(txns))
+        + " candidate(s) but they did not reconcile against the statement's"
+        " totals",
+    )
 
 
 # ── persistence + enumeration (PURE; index.mojo wraps these with I/O) ──────────
 # These live here, not in index.mojo, so the hermetic `pixi run test` suite can
 # exercise them without pulling in the lancedb FFI that index.mojo imports.
+
 
 def _esc(s: String) raises -> String:
     """Backslash-escape \\, tab, newline, CR so a value is a single TSV cell."""
@@ -738,16 +868,24 @@ def _unesc(s: String) raises -> String:
     var i = 0
     while i < len(b):
         var c = Int(b[i])
-        if c == 92 and i + 1 < len(b):   # backslash
+        if c == 92 and i + 1 < len(b):  # backslash
             var n = Int(b[i + 1])
-            if n == 116:    # 't'
-                out += "\t"; i += 2; continue
+            if n == 116:  # 't'
+                out += "\t"
+                i += 2
+                continue
             elif n == 110:  # 'n'
-                out += "\n"; i += 2; continue
+                out += "\n"
+                i += 2
+                continue
             elif n == 114:  # 'r'
-                out += "\r"; i += 2; continue
-            elif n == 92:   # backslash
-                out += "\\"; i += 2; continue
+                out += "\r"
+                i += 2
+                continue
+            elif n == 92:  # backslash
+                out += "\\"
+                i += 2
+                continue
         out += chr(c)
         i += 1
     return out^
@@ -758,6 +896,7 @@ struct TxnRow(Copyable, Movable):
     """A persisted, file-keyed transaction row. Only RECONCILED transactions are
     written, so every row is trusted; an empty `select_txns` result means "none /
     couldn't verify" → the caller falls back to reading chunks."""
+
     var falias: String
     var date: String
     var amount: Float64
@@ -766,13 +905,22 @@ struct TxnRow(Copyable, Movable):
 
 
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
-    """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc, one per line."""
+    """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc, one per line.
+    """
     var out = String("")
     for i in range(len(rows)):
         ref r = rows[i]
         out += (
-            _esc(r.falias) + "\t" + _esc(r.date) + "\t" + String(r.amount)
-            + "\t" + r.direction + "\t" + _esc(r.desc) + "\n"
+            _esc(r.falias)
+            + "\t"
+            + _esc(r.date)
+            + "\t"
+            + String(r.amount)
+            + "\t"
+            + r.direction
+            + "\t"
+            + _esc(r.desc)
+            + "\n"
         )
     return out^
 
@@ -788,8 +936,13 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
         if len(cols) < 5:
             continue
         rows.append(
-            TxnRow(_unesc(String(cols[0])), _unesc(String(cols[1])),
-                   atof(String(cols[2])), String(cols[3]), _unesc(String(cols[4])))
+            TxnRow(
+                _unesc(String(cols[0])),
+                _unesc(String(cols[1])),
+                atof(String(cols[2])),
+                String(cols[3]),
+                _unesc(String(cols[4])),
+            )
         )
     return rows^
 
@@ -815,22 +968,30 @@ def select_txns(rows: List[TxnRow], file_alias: String) raises -> List[Txn]:
     for i in range(len(rows)):
         ref r = rows[i]
         if r.falias == file_alias:
-            out.append(Txn(r.date.copy(), r.desc.copy(), r.amount, r.direction.copy()))
+            out.append(
+                Txn(r.date.copy(), r.desc.copy(), r.amount, r.direction.copy())
+            )
     return out^
 
 
 def texts_for_alias(
-    ids: List[Int], aliases: List[String], texts: List[String], file_alias: String
+    ids: List[Int],
+    aliases: List[String],
+    texts: List[String],
+    file_alias: String,
 ) raises -> List[String]:
     """All of `file_alias`'s chunk texts, ordered by chunk id (document order). Pure
-    over the side-table's parallel lists so it's unit-testable; `file_chunks` wraps it."""
+    over the side-table's parallel lists so it's unit-testable; `file_chunks` wraps it.
+    """
     var sids = List[Int]()
     var stexts = List[String]()
     for i in range(len(ids)):
         if i < len(aliases) and aliases[i] == file_alias:
             sids.append(ids[i])
             stexts.append(texts[i].copy())
-    for a in range(1, len(sids)):           # insertion sort by id (modest per-file counts)
+    for a in range(
+        1, len(sids)
+    ):  # insertion sort by id (modest per-file counts)
         var ki = sids[a]
         var kt = stexts[a].copy()
         var b = a - 1

@@ -8,7 +8,18 @@ machinery (indexer, vault tools, the privacy_box-driven ask loop) is wired in.
 from std.sys import argv
 from std.os import getenv
 
-from vault.index import build_manifest, FileInfo, csv_rows, md_text, pdf_text, embed, build_index, search, Chunk, vault_files
+from vault.index import (
+    build_manifest,
+    FileInfo,
+    csv_rows,
+    md_text,
+    pdf_text,
+    embed,
+    build_index,
+    search,
+    Chunk,
+    vault_files,
+)
 
 
 def _print_manifest(data_dir: String) raises:
@@ -35,7 +46,8 @@ def _print_manifest(data_dir: String) raises:
 
 
 def _resolve_alias(file_id: String, data_dir: String) raises -> FileInfo:
-    """Look up a file alias (file_0..) in the vault manifest. Raises if unknown."""
+    """Look up a file alias (file_0..) in the vault manifest. Raises if unknown.
+    """
     var infos = vault_files(data_dir)
     for i in range(len(infos)):
         if infos[i].id == file_id:
@@ -122,7 +134,7 @@ def main() raises:
         _read(file_id, data_dir)
     elif cmd == "embed":
         if len(args) < 3:
-            print("usage: millfolio embed \"<text>\"")
+            print('usage: millfolio embed "<text>"')
             return
         _embed(String(args[2]))
     elif cmd == "index":
@@ -137,7 +149,7 @@ def main() raises:
         build_index(data_dir, _embed_url(), force)
     elif cmd == "search":
         if len(args) < 3:
-            print("usage: millfolio search \"<query>\" [k] [--json]")
+            print('usage: millfolio search "<query>" [k] [--json]')
             return
         var query = String(args[2])
         var k = 8
@@ -178,11 +190,15 @@ def _embed(text: String) raises:
             print(vec[i], end="")
         print()
     except err:
-        print("embed failed (needs inference-server embeddings endpoint live): " + String(err))
+        print(
+            "embed failed (needs inference-server embeddings endpoint live): "
+            + String(err)
+        )
 
 
 def _search(query: String, k: Int) raises:
-    """Smoke-test semantic search. Requires an existing index + live embeddings."""
+    """Smoke-test semantic search. Requires an existing index + live embeddings.
+    """
     var hits = search(query, k, _embed_url())
     print(String(len(hits)) + " hit(s) for: " + query)
     for i in range(len(hits)):
