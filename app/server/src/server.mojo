@@ -1,4 +1,4 @@
-"""server — the millfolio app backend over HTTP (flare).
+"""Server — the millfolio app backend over HTTP (flare).
 
 Migrated from headgate/src/server.mojo. The vault brains stay in headgate; this
 server imports them as a library via `-I ../../headgate/src` (build wired in
@@ -555,7 +555,7 @@ struct Api(Copyable, Handler, Movable):
         shell the `millfolio` engine binary via its run-script (MILLFOLIO_RUN_SCRIPT,
         set by the launcher) and have it write the JSON to a file (so captured
         stderr noise can't corrupt it), then return that file's contents."""
-        var query = String("")
+        var query: String
         var k = 5
         try:
             var j = loads(req.text())
@@ -598,7 +598,7 @@ struct Api(Copyable, Handler, Movable):
                     + ')","hits":[]}'
                 )
             )
-        var hits = String("[]")
+        var hits: String
         try:
             with open(out_json, "r") as f:
                 hits = f.read()
@@ -843,7 +843,7 @@ def on_connect(mut conn: WsConnection) raises:
         # Wall-clock for the stats record: the WORK time (manifest+codegen, then
         # compile+run), deliberately EXCLUDING the human approval pause + queue wait.
         var t_total0 = perf_counter_ns()
-        var pre_ms = 0.0
+        var pre_ms: Float64
         conn.send_text(status("manifest", "Aliasing vault manifest", "running"))
         var _t = perf_counter_ns()
         var manifest = orch.vault_manifest(vault_dir)
@@ -1129,7 +1129,6 @@ def on_connect(mut conn: WsConnection) raises:
         )
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")
-        ticket = -1
     except e:
         conn.send_text(error_event(String(e)))
         if ticket >= 0:

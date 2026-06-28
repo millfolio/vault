@@ -1,4 +1,4 @@
-"""events_test — unit tests for the protocol wire helpers (events.mojo).
+"""Events_test — unit tests for the protocol wire helpers (events.mojo).
 
 Builds + runs as a plain Mojo program (no flare/headgate): `pixi run test`.
 Asserts the exact ServerEvent JSON encodings and the field parser, so a change
