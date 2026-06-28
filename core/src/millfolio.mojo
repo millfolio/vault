@@ -232,7 +232,7 @@ def _search_json(query: String, k: Int, out_path: String) raises:
         out += '"text":' + _json_str(h.text)
         out += "}"
     out += "]"
-    if len(out_path) > 0:
+    if out_path.byte_length() > 0:
         with open(out_path, "w") as f:
             f.write(out)
     else:

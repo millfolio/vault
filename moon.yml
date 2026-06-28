@@ -11,8 +11,17 @@ tasks:
     toolchain: 'system'
     inputs: ['core/**/*.mojo', 'privacy-box/**/*', 'pixi.toml', 'pixi.lock']
     outputs: ['build/**/*']
-  check:
-    command: 'pixi run build'
+    # Serialize with lancedb:check — both build the same liblancedbmojo.dylib via
+    # lancedb's ffi/build.sh; concurrent builds corrupt it. See lancedb/moon.yml.
+    options:
+      mutex: 'lancedb-shim'
+  test: # unit suite: sha256 + date/amount/transaction extractors + privacy-box sandbox/egress/budget
+    command: 'pixi run test'
+    toolchain: 'system'
+    inputs: ['core/**/*.mojo', 'privacy-box/**/*.mojo', 'pixi.toml', 'pixi.lock']
+  check: # build BOTH binaries (via the build dep), then run the unit suite
+    command: 'pixi run test'
+    deps: ['build']
     toolchain: 'system'
   build-cli: # the Swift `mill` umbrella CLI
     command: 'swift build --package-path cli --product mill'

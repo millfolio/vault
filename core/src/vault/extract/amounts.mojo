@@ -32,7 +32,7 @@ def parse_amount(s: String) raises -> Float64:
                 digits += "."
                 seen_dot = True
         elif c == 45:                    # '-'  — negative only if it leads the number
-            if len(digits) == 0:
+            if digits.byte_length() == 0:
                 neg = True
         elif c == 40:                    # '('  — accounting negative
             neg = True
