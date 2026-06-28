@@ -53,42 +53,13 @@ make_pkg_dir "$PDFTOTEXT/src/pdf.mojo"      pdf
 make_pkg_dir "$DOCX/src/docx.mojo"          docx
 
 # `mojo precompile` compiles EVERY file in a package dir (unlike `mojo build`,
-# which only pulls the submodules actually imported). The package-shaped libs
-# carry orphan submodules that the vault surface never imports and that don't
-# build under the pinned nightly — copy each package and prune those subtrees so
-# precompile sees only the reachable code. `json/gpu` is decoupled in this
-# CPU-only nightly port (its import is already commented out in parser.mojo) but
-# the broken source dir still ships; drop it.
-echo "==> assembling trimmed json/flare package dirs" >&2
-cp -R "$JSON/json"  "$ASM/json"
-rm -rf "$ASM/json/gpu"
-cp -R "$FLARE/flare" "$ASM/flare"
-
-# flare's SERVER-side reflective extractor (`Extracted[H].serve`, http/extract.mojo)
-# uses `reflect[Self.H]().field_count()` + `__struct_field_ref`, which `mojo build`
-# leaves un-elaborated (never instantiated) but `mojo precompile` eagerly
-# elaborates and fails to compile under the pinned nightly. The vault surface uses
-# only flare's HTTP *client* (HttpClient/Request), never this server adapter, so we
-# neutralise just that one method body in the assembled copy (the extractor TYPES it
-# re-exports stay importable, so http/__init__'s re-exports still resolve).
-python3 - "$ASM/flare/http/extract.mojo" <<'PY'
-import re, sys
-p = sys.argv[1]
-src = open(p).read()
-needle = "    def serve(self, req: Request) raises -> Response:\n        var h = Self.H()\n        comptime n = reflect[Self.H]().field_count()\n"
-i = src.index(needle)
-j = src.index("        return h.serve(req)\n", i)
-stub = ("    def serve(self, req: Request) raises -> Response:\n"
-        "        # Reflective extraction stubbed out for `mojo precompile` (the\n"
-        "        # original uses reflect()/__struct_field_ref, which precompile\n"
-        "        # cannot elaborate under the pinned nightly). The vault surface\n"
-        "        # uses only flare's HTTP client, never this server adapter.\n"
-        "        var h = Self.H()\n")
-src = src[:i] + stub + src[j:]
-open(p, "w").write(src)
-print("==> patched flare http/extract.mojo Extracted.serve for precompile", file=sys.stderr)
-PY
-
+# which only pulls the submodules actually imported). The sibling lib REPOS are
+# precompiled AS-IS: this script patches, trims, or deletes NOTHING. The
+# package-shaped libs (json, flare) compile straight from their sibling checkouts
+# under the pinned nightly — json ships its full backend including the GPU path
+# (Apple Metal / CUDA), and flare's reflective `Extracted[H].serve` precompiles
+# cleanly. The loose single-file libs above were given a package SHAPE by
+# make_pkg_dir (a read-only wrapper dir), which never touches the sibling source.
 echo "==> precompiling in dependency order -> $OUT" >&2
 # Leaves first (no inter-lib deps), then ones that depend on them, then vault.
 #   zlib, csv, lancedb, json : leaves
@@ -98,8 +69,8 @@ echo "==> precompiling in dependency order -> $OUT" >&2
 "$MOJO" precompile "$ASM/zlib"        -o "$OUT/zlib.mojopkg"
 "$MOJO" precompile "$ASM/csv"         -o "$OUT/csv.mojopkg"
 "$MOJO" precompile "$ASM/lancedb"     -o "$OUT/lancedb.mojopkg"
-"$MOJO" precompile "$ASM/json"        -o "$OUT/json.mojopkg"
-"$MOJO" precompile "$ASM/flare" -I "$OUT" -o "$OUT/flare.mojopkg"
+"$MOJO" precompile "$JSON/json"        -o "$OUT/json.mojopkg"
+"$MOJO" precompile "$FLARE/flare" -I "$OUT" -o "$OUT/flare.mojopkg"
 "$MOJO" precompile "$ASM/pdf"  -I "$OUT" -o "$OUT/pdf.mojopkg"
 "$MOJO" precompile "$ASM/docx" -I "$OUT" -o "$OUT/docx.mojopkg"
 "$MOJO" precompile "$ROOT/src/vault" -I "$OUT" -o "$OUT/vault.mojopkg"

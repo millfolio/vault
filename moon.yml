@@ -19,9 +19,18 @@ tasks:
     command: 'pixi run test'
     toolchain: 'system'
     inputs: ['core/**/*.mojo', 'privacy-box/**/*.mojo', 'pixi.toml', 'pixi.lock']
-  check: # build BOTH binaries (via the build dep), then run the unit suite
+  precompile: # the precompiled .mojopkg set the install bundle ships — RELEASE-critical
+    # `mojo precompile` compiles every file in each package (vault surface + libs),
+    # so it catches breakage a binary build skips (a nightly API rename, a
+    # `len(String)` only the tool surface reaches). Part of `check` so a precompile
+    # break is caught by `moon run :check`, not at release/tag time.
+    command: 'pixi run precompile'
+    toolchain: 'system'
+    inputs: ['core/src/**/*.mojo', 'core/scripts/precompile_pkgs.sh', 'pixi.toml', 'pixi.lock']
+    outputs: ['build/pkgs/**/*']
+  check: # build BOTH binaries + the precompiled pkg set, then run the unit suite
     command: 'pixi run test'
-    deps: ['build']
+    deps: ['build', 'precompile']
     toolchain: 'system'
   build-cli: # the Swift `mill` umbrella CLI
     command: 'swift build --package-path cli --product mill'

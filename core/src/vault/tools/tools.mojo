@@ -107,7 +107,7 @@ def _int_after(s: String, key: String) -> Int:
     var i = s.find(key)
     if i == -1:
         return -1
-    i += len(key)
+    i += key.byte_length()
     var b = s.as_bytes()
     while i < len(b) and (Int(b[i]) == 32 or Int(b[i]) == 58):  # spaces / ':'
         i += 1
@@ -162,7 +162,7 @@ def _stat_source(falias: String, name: String):
     filename as the visible text. The real filename only travels the LOCAL answer path
     (the frontier never sees it). No-op for an empty alias. (`alias` is a reserved word,
     hence the `falias` param.)"""
-    if len(falias) == 0:
+    if falias.byte_length() == 0:
         return
     var line = String(STAT_SENTINEL) + "source\t" + falias + "\t" + name + "\n"
     var b = line.as_bytes()

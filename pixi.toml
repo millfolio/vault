@@ -40,6 +40,16 @@ privacy-box = { cmd = "mkdir -p build && mojo build privacy-box/src/privacy_box.
 # the "one mojo" — both Mojo binaries.
 build = { depends-on = ["vault", "privacy-box"] }
 
+# precompile = the precompiled .mojopkg set the install bundle ships (vault tool
+# surface + libs). The RELEASE depends on this (package_millfolio.sh runs the same
+# script), and `mojo precompile` compiles EVERY file in each package — not just the
+# submodules a binary build happens to import — so it catches breakage (e.g. a
+# nightly API rename, or a `len(String)` that only the tool surface reaches) that
+# `mojo build` of the binaries silently skips. Wired into `check` so `moon run
+# :check` exercises it locally and in CI, before tag time. No FFI shims needed —
+# precompile only elaborates Mojo source.
+precompile = { cmd = "bash core/scripts/precompile_pkgs.sh build/pkgs" }
+
 # the Swift umbrella CLI (separate toolchain; install/start/stop/index/ask).
 cli = "swift build --package-path cli -c release"
 
