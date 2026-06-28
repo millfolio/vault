@@ -12,7 +12,7 @@ channels = [
 platforms = ["osx-arm64"]
 
 [dependencies]
-mojo = "==1.0.0b3.dev2026062206"
+mojo = "==1.0.0b3.dev2026062706"
 # flare's runtime deps — needed to build flare's FFI shims into this env (the
 # `flare-ffi` task) so flare's HTTP/TLS client works when consumed via -I flare.
 openssl          = ">=3.6.1,<4"
@@ -41,3 +41,5 @@ build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../va
 test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../../json -o build/events-test && ./build/events-test" }
 # Unit-test the serial run-queue state file (runqueue.mojo) — flock + ticket invariants.
 test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I src -I ../../flare -o build/runqueue-test && rm -f /tmp/millfolio-runq-test /tmp/millfolio-runq-test.lock && MILLFOLIO_RUNQ_PATH=/tmp/millfolio-runq-test ./build/runqueue-test" }
+# Full unit suite — what `moon run app-server:check` runs (events + run-queue).
+test-all = { depends-on = ["test", "test-runqueue"] }
