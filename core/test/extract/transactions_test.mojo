@@ -1,4 +1,4 @@
-"""transactions-test — the invariant-aware extractor reconciles SYNTHETIC statement
+"""Transactions-test — the invariant-aware extractor reconciles SYNTHETIC statement
 text against its own arithmetic. NO private data: every fixture is hand-written
 below. `pixi run test-transactions`.
 

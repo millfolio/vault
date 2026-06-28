@@ -523,7 +523,9 @@ def ask_local_batch(
 ) raises -> List[String]:
     """Apply `instruction` to MANY snippets and return one answer per item, aligned by
     index — but in just ⌈len(items)/10⌉ on-device model calls instead of one per item
-    (each `ask_local` is slow). Pass ALL your candidate texts; this batches them
+    (each `ask_local` is slow).
+
+    Pass ALL your candidate texts; this batches them
     internally (~10 per call), reports live progress, and concatenates the answers.
     A missing/garbled item is "none". This is the FAST way to do sum / scan / max:
         var ans = ask_local_batch("... reply the amount or none ...", texts)

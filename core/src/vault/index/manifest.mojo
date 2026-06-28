@@ -1,4 +1,4 @@
-"""manifest — the sanitized, frontier-visible view of the vault.
+"""Manifest — the sanitized, frontier-visible view of the vault.
 
 Scans a data directory and produces a list of `FileInfo`: each file gets an
 *alias* (`file_0`, `file_1`, ...), its kind (`csv`/`pdf`/`md`), size, and — for

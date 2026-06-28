@@ -1,4 +1,4 @@
-"""amounts — parse a money string from a bank statement into a Float64.
+"""Amounts — parse a money string from a bank statement into a Float64.
 
 Statement amounts come through as `$4,000.00`, `1,234.56`, `-31.00`, `(42.10)`
 (accounting negative), sometimes with a trailing currency word. Plain `atof`

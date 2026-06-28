@@ -1,4 +1,4 @@
-"""dates-test — iso_date folds M/D statement dates with the statement year into
+"""Dates-test — iso_date folds M/D statement dates with the statement year into
 sortable ISO. `pixi run test-dates`. Regression guard for the M/D-date fix (a
 mid-statement chunk has no year, so the program supplies the header year)."""
 

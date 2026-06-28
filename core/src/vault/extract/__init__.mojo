@@ -1,4 +1,4 @@
-"""vault.extract — statement transaction extraction + money/date parsing.
+"""Vault.extract — statement transaction extraction + money/date parsing.
 
 The lowest layer of the vault package: no intra-vault imports beyond its own
 siblings. Re-exports the public surface so `from vault.extract import …` and

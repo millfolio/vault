@@ -313,7 +313,7 @@ struct RemoteClient(Movable):
         # If the model hit the token cap the program is incomplete (cut mid-line),
         # which never compiles — and every fix attempt would re-truncate. Fail with a
         # clear message instead of silently looping the compile/fix on a partial file.
-        var truncated = False
+        var truncated: Bool
         try:
             truncated = v["stop_reason"].string_value() == "max_tokens"
         except:

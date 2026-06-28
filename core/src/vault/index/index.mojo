@@ -88,7 +88,7 @@ struct Manifest(Copyable, Movable):
 
 @fieldwise_init
 struct SideTable(Copyable, Movable):
-    """chunk_id -> (alias, text), as parallel lists. ids are sparse (deletes leave
+    """Chunk_id -> (alias, text), as parallel lists. ids are sparse (deletes leave
     gaps), so lookups scan rather than index by position."""
 
     var ids: List[Int]
@@ -818,8 +818,9 @@ def search(query: String, k: Int, base_url: String) raises -> List[Chunk]:
 def file_chunks(file_alias: String) raises -> List[String]:
     """EVERY indexed chunk of one file, in document order — the complete text the
     index already extracted, reachable by enumeration (unlike `search()`, which is
-    similarity-ranked top-k and structurally undercounts aggregations). For
-    count/sum/max over a file, read all of its chunks instead of gambling on the
+    similarity-ranked top-k and structurally undercounts aggregations).
+
+    For count/sum/max over a file, read all of its chunks instead of gambling on the
     top-k. Returns `[]` for an unknown alias or an unindexed vault. (Ordering/filter
     logic is `transactions.texts_for_alias`, unit-tested hermetically.)"""
     if not exists(_sidetable_path()):

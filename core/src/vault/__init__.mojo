@@ -1,4 +1,4 @@
-"""vault — the precompiled tool-surface package a privacy_box-generated program
+"""Vault — the precompiled tool-surface package a privacy_box-generated program
 imports via `from vault import *`.
 
 This `__init__` is the package's public face: it re-exports the entire tool

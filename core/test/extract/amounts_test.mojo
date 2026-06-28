@@ -1,4 +1,4 @@
-"""amounts-test — parse_amount handles $/comma/paren money strings. `pixi run
+"""Amounts-test — parse_amount handles $/comma/paren money strings. `pixi run
 test-amounts`. Regression guard for the "total spent" crash (atof choked on the
 comma in '4,000.00')."""
 

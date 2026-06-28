@@ -1,4 +1,4 @@
-"""sha256 — a pure-Mojo SHA-256 over bytes.
+"""SHA-256 — a pure-Mojo SHA-256 over bytes.
 
 Used to content-hash each vault file so `mill index` can skip files whose bytes
 haven't changed since the last index (incremental re-index). Local-only: the

@@ -1,4 +1,4 @@
-"""egress-test — prove the EgressGuard actually blocks. `pixi run egress-test`.
+"""Egress-test — prove the EgressGuard actually blocks. `pixi run egress-test`.
 
 The guard is privacy_box's confidentiality chokepoint. This is the test that makes
 "confidential" true rather than nominal: a clean payload passes, but a payload

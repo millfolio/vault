@@ -1,4 +1,4 @@
-"""sandbox-test — prove the VAULT run profile grants read to the dir the index
+"""Sandbox-test — prove the VAULT run profile grants read to the dir the index
 was actually built from. `pixi run test-sandbox`.
 
 Regression guard for the vault-dir mismatch fix: the vault readers (pdf_text /

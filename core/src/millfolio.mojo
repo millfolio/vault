@@ -1,4 +1,4 @@
-"""millfolio — CLI entry point for the personal data vault.
+"""Millfolio — CLI entry point for the personal data vault.
 
 For now: `mill manifest <dir>` prints the aliased, frontier-visible view of a
 vault directory — the confidentiality boundary, before any of the heavier

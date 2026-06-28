@@ -1,4 +1,4 @@
-"""privacy_box — CLI entry point. The private-VAULT harness: a frontier model writes
+"""Privacy_box — CLI entry point. The private-VAULT harness: a frontier model writes
 a Mojo program that uses the millfolio vault tools; it runs locally over the real
 data and only the printed answer surfaces.
 

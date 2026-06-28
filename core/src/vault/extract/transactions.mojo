@@ -1,4 +1,4 @@
-"""transactions — invariant-aware, reconcile-validated transaction extraction.
+"""Transactions — invariant-aware, reconcile-validated transaction extraction.
 
 A statement's full text (extracted ONCE at index time, with whole-document
 context) is parsed into structured `Txn` records WITHOUT a per-issuer template.
@@ -905,7 +905,7 @@ struct TxnRow(Copyable, Movable):
 
 
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
-    """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc, one per line.
+    """Alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc, one per line.
     """
     var out = String("")
     for i in range(len(rows)):

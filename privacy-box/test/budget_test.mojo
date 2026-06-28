@@ -1,4 +1,4 @@
-"""budget-test — unit-test the remote-API token Budget. `pixi run budget-test`."""
+"""Budget-test — unit-test the remote-API token Budget. `pixi run budget-test`."""
 
 from budget import Budget, parse_budget
 

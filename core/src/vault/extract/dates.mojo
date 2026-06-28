@@ -1,4 +1,4 @@
-"""dates — fold a bank-statement M/D date into a sortable ISO date.
+"""Dates — fold a bank-statement M/D date into a sortable ISO date.
 
 Statements print transaction dates as `M/D` or `MM/DD`; the year lives only in
 the statement header / period line. `iso_date(year, md)` combines a known
