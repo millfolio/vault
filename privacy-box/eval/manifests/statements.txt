@@ -1,0 +1,5 @@
+4 indexable file(s) — the frontier model sees only this:
+  file_0  [pdf]  18234 bytes
+  file_1  [pdf]  17655 bytes
+  file_2  [pdf]  20114 bytes
+  file_3  [csv]  4096 bytes  schema: col_0, col_1, col_2

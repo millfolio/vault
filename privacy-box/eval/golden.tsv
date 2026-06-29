@@ -1,0 +1,22 @@
+# Pre-release PROMPT eval — golden set (TAB-separated; '#' lines ignored).
+#
+# columns:  question <TAB> must_contain <TAB> must_not_contain <TAB> manifest
+#   must_contain / must_not_contain are COMMA-separated literal substrings checked
+#   against the generated program (grep -F). This is the STABLE tier: it asserts the
+#   model picks the right TOOLS / program SHAPE, which is far less flaky than scoring
+#   the numeric answer. Each rule below encodes a privacy_box-system.md HARD RULE or
+#   a regression we fixed (the "$224,303 phone bill"):
+#     transactions(  — spending/count/total/biggest must use the structured tool
+#     money(         — amounts must be formatted with money(), not String(x)
+#     manifest(      — vault-structure questions answer from the manifest
+#     .alias         — FileInfo has no .alias field (it's .id) → must never appear
+#     search(        — wrong for exact transaction aggregates / meta questions
+#     $" +           — manual dollar concat = the raw-float formatting bug
+#     ask_local      — a meta count must not call the model at all
+#
+# question	must_contain	must_not_contain	manifest
+how much did I pay for my phone bill	transactions(,money(	.alias,search(,$" +	statements.txt
+how many transactions do I have	transactions(	.alias,search(	statements.txt
+what is the total of my transactions	transactions(,money(	.alias,search(,$" +	statements.txt
+what was my biggest transaction	transactions(,money(	.alias,search(	statements.txt
+how many documents are in my vault	manifest(	search(,ask_local	statements.txt

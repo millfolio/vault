@@ -53,9 +53,18 @@ precompile = { cmd = "bash core/scripts/precompile_pkgs.sh build/pkgs" }
 # the Swift umbrella CLI (separate toolchain; install/start/stop/index/ask).
 cli = "swift build --package-path cli -c release"
 
+# Pre-release PROMPT eval — drives `privacy_box codegen` on a synthetic manifest and
+# lints the generated program against shape rules (privacy-box/eval/golden.tsv). NOT
+# in `test`/`check`: codegen is model-nondeterministic and needs ANTHROPIC_API_KEY,
+# so it's a manual pre-release gate, not a pre-push one. `pixi run eval`.
+eval = { cmd = "bash privacy-box/eval/run_eval.sh", depends-on = ["privacy-box"] }
+
 # Gate: pure-Mojo SHA-256 against FIPS known-answer vectors (used for the
 # incremental-reindex content hash). No FFI/-I beyond core/src.
 test-sha256 = { cmd = "mkdir -p build && mojo build core/test/index/sha256_test.mojo -I core/src -o build/sha256-test && ./build/sha256-test" }
+# Gate: UI search distance→cosine mapping + the relevance floor (the fix that stops
+# search returning the k nearest chunks for a term absent from the vault). Pure math.
+test-relevance = { cmd = "mkdir -p build && mojo build core/test/index/relevance_test.mojo -I core/src -o build/relevance-test && ./build/relevance-test" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
@@ -77,4 +86,4 @@ test-budget = { cmd = "mkdir -p build && mojo build privacy-box/test/budget_test
 # (the v0.4.34 .mojopkg-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }

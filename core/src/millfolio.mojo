@@ -20,6 +20,7 @@ from vault.index import (
     Chunk,
     vault_files,
 )
+from vault.index.relevance import cosine_from_l2sq, passes_min_sim
 
 
 def _print_manifest(data_dir: String) raises:
@@ -263,9 +264,10 @@ def _search_json(query: String, k: Int, out_path: String) raises:
     for i in range(len(hits)):
         ref h = hits[i]
         # h.score is LanceDB's squared-L2 distance over unit vectors → cosine.
-        var sim = 1.0 - Float64(h.score) / 2.0
-        if sim < min_sim:
+        var d = Float64(h.score)
+        if not passes_min_sim(d, min_sim):
             continue  # below the relevance floor — not a real match
+        var sim = cosine_from_l2sq(d)
         if not first:
             out += ","
         first = False

@@ -55,6 +55,27 @@ def _run_vault(question: String, var vault_dir: String) raises:
     print(orch.run_vault_task(question, dir.copy()))
 
 
+def _run_codegen(
+    question: String, manifest_path: String, var vault_dir: String
+) raises:
+    """`privacy_box codegen "<question>" [--manifest <file> | <dir>]` — print ONLY
+    the generated program; no compile, no run. Codegen only ever sees the aliased
+    MANIFEST, so the pre-release prompt eval feeds a hand-written synthetic manifest
+    (`--manifest`) and lints the program the frontier model writes — no index or
+    embedding server needed, just the frontier key. With a `<dir>` instead, the real
+    `mill manifest <dir>` is used (needs millfolio built + the vault indexed)."""
+    var cfg = load_config()
+    var dir = _vault_dir(vault_dir^)
+    var orch = build_vault_orchestrator(cfg, dir)
+    var manifest: String
+    if manifest_path != "":
+        with open(manifest_path, "r") as f:
+            manifest = f.read()
+    else:
+        manifest = orch.vault_manifest(dir)
+    print(orch.vault_codegen(question, manifest))
+
+
 def main() raises:
     # `privacy_box vault "<question>" [dir]` — the private-vault codegen loop. This is
     # THE query path: privacy_box is the vault harness, not a CSV tool.
@@ -66,6 +87,30 @@ def main() raises:
         var question = String(argv0[2])
         var vdir = String(argv0[3]) if len(argv0) >= 4 else String("")
         _run_vault(question, vdir^)
+        return
+
+    # `privacy_box codegen "<question>" [--manifest <file> | <vault_dir>]` — print
+    # the generated program only (the pre-release prompt eval drives this).
+    if len(argv0) > 1 and String(argv0[1]) == "codegen":
+        if len(argv0) < 3:
+            print(
+                'usage: privacy_box codegen "<question>" [--manifest <file> |'
+                " <vault_dir>]"
+            )
+            return
+        var question = String(argv0[2])
+        var mpath = String("")
+        var vdir = String("")
+        var a = 3
+        while a < len(argv0):
+            var tok = String(argv0[a])
+            if tok == "--manifest" and a + 1 < len(argv0):
+                mpath = String(argv0[a + 1])
+                a += 2
+            else:
+                vdir = tok
+                a += 1
+        _run_codegen(question, mpath, vdir^)
         return
 
     print('usage: privacy_box vault "<question>" [vault_dir]')
