@@ -53,7 +53,7 @@ Questions are open-ended but personal, e.g.
 |---|---|---|
 | `manifest` | `manifest() -> List[VaultFile]` | the aliased file list; each `VaultFile` has **`.alias`** (e.g. `file_0`), `.kind` (`"csv"`/`"pdf"`/`"md"`/`"docx"`), `.size`, and `.columns` (aliased CSV columns; empty otherwise). Read it; never CONSTRUCT one. (`alias` is a reserved Mojo keyword, but member access `f.alias` reads the field fine — use `.alias`, NOT `.id`.) |
 | `search` | `search(query: String, k: Int) -> List[Chunk]` | **semantic search across the whole indexed vault**; each `Chunk` has `.file_alias`, `.text`, `.score`. **Similarity-ranked top-k** — great to *find* the relevant passages for an open question, but it returns only ~k chunks, so it **structurally undercounts aggregations** (a file can have hundreds of chunks). Do NOT use it to count/sum/total — use `transactions`/`file_chunks`/`csv_rows` for those. |
-| `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date`, `.desc` (merchant), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out). These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
+| `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date`, `.desc` (merchant), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out), and `.tags` (a `List[String]` of category tags assigned at index time — currently `phone`/`travel`/`restaurant`/`groceries`/`health`; empty when none match). These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest, `.tags` to filter by category — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
 | `file_chunks` | `file_chunks(file_alias: String) -> List[String]` | **EVERY chunk of one file, in document order** — complete coverage for enumeration (count/sum/max), unlike `search`'s top-k. Reuses the index's already-extracted text. Use this to scan a whole file. |
 | `csv_rows` | `csv_rows(file_alias: String) -> List[Row]` | a table's rows; columns by alias (`row[0]`, `row["col_2"]`) — exact + complete for a CSV |
 | `pdf_text` | `pdf_text(file_alias: String) -> String` | extracted text of a PDF (pdftotext) |
@@ -103,11 +103,14 @@ the biggest/most-expensive/largest, average, list them, spending — INCLUDING
 spending filtered to a category or merchant: "how much did I pay for my phone
 bill", "how much did I spend at Costco", "my electricity total") you MUST call
 `transactions(file_alias)` for each file in `manifest()` and aggregate its `Txn`s
-in plain Mojo. For a category/merchant filter, keep the `Txn`s whose `.desc`
-matches — classify the short `.desc` strings with `ask_local_batch` when the match
-needs judgment (e.g. "is this merchant a phone carrier?") — then `sum(.amount)`.
-Do NOT `search` and do NOT sum `ask_local` over search chunks for these —
-`transactions` is exact and verified.**
+in plain Mojo. For a category filter, FIRST check `.tags`: each `Txn` carries
+category tags assigned at index time (deterministic, no model call) — currently
+`phone`, `travel`, `restaurant`, `groceries`, `health`. Keep the `Txn`s whose
+`.tags` contains the category (e.g. `"phone" in t.tags`) and `sum(.amount)`. ONLY
+when the category/merchant is NOT one of those known tags do you classify the
+short `.desc` strings with `ask_local_batch` (e.g. "is this merchant a phone
+carrier?"), then `sum(.amount)`. Do NOT `search` and do NOT sum `ask_local` over
+search chunks for these — `transactions` is exact and verified.**
 
 **NEVER sum amounts read out of `search`/`file_chunks` text for a spending total.**
 A statement chunk also contains running **BALANCES** and printed **SUBTOTALS/
@@ -167,54 +170,45 @@ def main() raises:
     print_answer("There are " + String(len(files)) + " documents in your vault.")
 ```
 
-**"How much did I pay for my phone bill?"** (category/merchant spending — `transactions` filtered by `.desc`, never a sum over search chunks)
-A "how much did I pay for / spend on *<merchant or category>*" question is a **sum
-over the matching transactions**. Enumerate `transactions()` (exact, no balances),
-classify each short `.desc` once with `ask_local_batch`, sum the matches' `.amount`,
-format with `money()`. This is the shape for "my phone bill", "spending at Costco",
-"my electricity total", etc.
+**"How much did I pay for my phone bill?"** (category spending — `transactions` filtered by `.tags`, never a sum over search chunks)
+A "how much did I pay for / spend on *<category>*" question is a **sum over the
+matching transactions**. When the category is a known tag (`phone`, `travel`,
+`restaurant`, `groceries`, `health`), filter on `.tags` — assigned at index time,
+exact, NO model call — sum the matches' `.amount`, format with `money()`. This is
+the shape for "my phone bill", "travel", "groceries", etc.
 ```mojo
 from vault import *
 def main() raises:
     var files = manifest()
-    # 1) collect every money-OUT transaction (desc + amount) — exact + verified,
-    #    so balances/printed totals never enter the sum.
-    var descs = List[String]()
-    var amounts = List[Float64]()
+    # Sum every money-OUT transaction tagged `phone`. Tags are materialised at
+    # index time (deterministic — a credit-card payment or a bare digit run is
+    # never tagged phone), so this needs no model call and can't fold in balances.
+    var total = 0.0
+    var n = 0
     for i in range(len(files)):
         var txns = transactions(files[i].alias)        # [] when not a statement
         for t in range(len(txns)):
             ref x = txns[t]
-            if x.direction == "debit":
-                descs.append(x.desc.copy())
-                amounts.append(x.amount)
-    # 2) classify which merchants are a phone/wireless bill — ONE batched call over
-    #    the short .desc strings (NOT over statement chunks, which carry balances).
-    var is_phone = ask_local_batch(
-        "Decide ONLY from the merchant NAME. Reply 'yes' if the text contains the"
-        " name of a cell-phone / wireless CARRIER — e.g. Verizon, AT&T, T-Mobile,"
-        " Sprint, US Cellular, Cricket, Mint Mobile, Boost, Google Fi — EVEN IF"
-        " the line also has phone numbers or reference digits. Reply 'no' when NO"
-        " carrier name is present: credit/debit-card payments, bank transfers,"
-        " ATM, Zelle/PayPal and utilities are NOT phone bills, and a bare run of"
-        " digits is an account or reference number, never proof of a phone bill."
-        " Use ONLY the text; do not guess or invent. Examples — 'Verizon Wireless"
-        " Pmt 8005220500' -> yes; 'AT&T Payment 800-331-0500 TX' -> yes; 'Online"
-        " Transfer to VISA Signature Card 5744 on 01/04/19' -> no; 'Chase Credit"
-        " Crd Epay 190115 3934444444 Marius S Seritan' -> no.", descs)
-    # 3) sum the matches in plain Mojo; format with money(), never String(x).
-    var total = 0.0
-    var n = 0
-    for a in range(len(is_phone)):
-        if String(is_phone[a].strip()) == "yes":
-            total += amounts[a]
-            n += 1
+            if x.direction != "debit":
+                continue
+            var is_phone = False
+            for g in range(len(x.tags)):
+                if x.tags[g] == "phone":
+                    is_phone = True
+                    break
+            if is_phone:
+                total += x.amount
+                n += 1
     if n > 0:
         print_answer("You paid " + money(total) + " across " + String(n)
             + " phone-bill payments.")
     else:
         print_answer("I couldn't find any phone-bill payments in your vault.")
 ```
+If the category is NOT one of the known tags (e.g. a specific merchant like
+"Costco"), fall back to the `ask_local_batch` shape: collect the debit `.desc`
+strings, classify them in ONE batched call ("Reply 'yes' if the merchant is
+<X>… Use ONLY the text; do not guess."), then sum the `.amount` of the matches.
 
 **"How much did I spend on travel last year?"** (FALLBACK shape — only when `transactions()` is empty, e.g. receipts/notes; statement spending uses the `transactions()`+`.desc` shape above)
 When the expense lives in non-statement files (PDF/Markdown receipts) so
