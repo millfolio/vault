@@ -17,6 +17,8 @@ a canned program so the pipeline runs offline.
 
 from std.os import getenv
 from flare.http import HttpClient, Request
+from flare.tls import TlsStream, TlsConfig
+from json import loads
 from egress import EgressGuard
 
 
@@ -267,6 +269,9 @@ struct RemoteClient(Movable):
 
         if self.mock or self.api_key == "":
             return Generated(_mock_program(), prompt.byte_length() // 4 + 300)
+        # Opt-in streaming path (proves the SSE pipe; a live-UI sink is the next step).
+        if getenv("MILLFOLIO_STREAM_CODEGEN", "") != "":
+            return self._anthropic_stream(prompt)
         return self._anthropic(prompt)
 
     def fix_code(self, code: String, errors: String) raises -> Generated:
@@ -332,3 +337,100 @@ struct RemoteClient(Movable):
         except:
             toks = 0
         return Generated(code^, toks)
+
+    def _anthropic_stream(self, prompt: String) raises -> Generated:
+        """Streaming codegen — same request as `_anthropic` but `stream:true`, driven
+        over a raw TlsStream (flare's HttpClient reads the whole body at once). SSE is
+        Anthropic-specific so it lives here, not in the generic client. Parses the
+        `content_block_delta` events and accumulates the program. Opt-in via
+        $MILLFOLIO_STREAM_CODEGEN. (v1 reads the full body then parses — proves the
+        TLS + de-chunk + SSE pipe; a per-delta sink for LIVE UI is the next increment,
+        see STREAMING_CODEGEN.md.)"""
+        var sys = _codegen_system()
+        var body = String('{"model":"') + self.model + '","max_tokens":8192,"stream":true,'
+        body += '"system":"' + _json_escape(sys) + '",'
+        body += '"messages":[{"role":"user","content":"' + _json_escape(prompt) + '"}]}'
+
+        # base_url e.g. https://api.anthropic.com/v1 → host `api.anthropic.com`,
+        # request target `/v1/messages`.
+        var after = String(self.base_url.split("://")[1])
+        var segs = after.split("/")
+        var host = String(segs[0])
+        var target = String("")
+        for i in range(1, len(segs)):
+            target += "/" + String(segs[i])
+        target += "/messages"
+
+        var wire = String("POST ") + target + " HTTP/1.1\r\n"
+        wire += "Host: " + host + "\r\n"
+        wire += "x-api-key: " + self.api_key + "\r\n"
+        wire += "anthropic-version: 2023-06-01\r\n"
+        wire += "content-type: application/json\r\n"
+        wire += "accept: text/event-stream\r\n"
+        wire += "content-length: " + String(body.byte_length()) + "\r\n"
+        wire += "connection: close\r\n\r\n"
+        wire += body
+
+        var stream = TlsStream.connect_timeout(host, UInt16(443), TlsConfig(), 120000)
+        var wb = wire.as_bytes()
+        stream.write_all(Span[UInt8, _](wb))
+
+        # Read the whole response (Connection: close → EOF-delimited).
+        var rbuf = List[UInt8](capacity=16384)
+        rbuf.resize(16384, 0)
+        var raw = List[UInt8](capacity=65536)
+        while True:
+            var n = stream.read(rbuf.unsafe_ptr(), len(rbuf))
+            if n == 0:
+                break
+            for i in range(n):
+                raw.append(rbuf[i])
+        stream.close()
+        var resp = String(unsafe_from_utf8=Span[UInt8, _](raw))
+
+        # Body after the headers = the SSE stream. We don't explicitly de-frame
+        # chunked transfer-encoding: SSE parsing only consumes `data:` lines, and a
+        # chunk-size framing line doesn't match that prefix. (A rare chunk boundary
+        # that splits a data: line just drops that delta — its JSON parse fails and we
+        # skip it. Converting the WHOLE response at once keeps UTF-8 valid.)
+        var he = resp.find("\r\n\r\n")
+        if he == -1:
+            raise Error("codegen stream: malformed response (no header terminator)")
+        var sse = String(resp[byte=he + 4 :])
+
+        # Parse the SSE: `data: <json>` lines. content_block_delta → append text;
+        # message_delta → stop_reason / output token count.
+        var code = String("")
+        var toks = 0
+        var truncated = False
+        var lines = sse.split("\n")
+        for li in range(len(lines)):
+            var line = String(lines[li]).strip()
+            if not line.startswith("data:"):
+                continue
+            var data = String(String(line[byte=5:]).strip())
+            if data == "" or data == "[DONE]":
+                continue
+            try:
+                var ev = loads(data)
+                var t = ev["type"].string_value()
+                if t == "content_block_delta":
+                    code += ev["delta"]["text"].string_value()
+                elif t == "message_delta":
+                    try:
+                        if ev["delta"]["stop_reason"].string_value() == "max_tokens":
+                            truncated = True
+                    except:
+                        pass
+                    try:
+                        toks += Int(ev["usage"]["output_tokens"].int_value())
+                    except:
+                        pass
+            except:
+                pass  # ping / keepalive / non-JSON event line
+        if truncated:
+            raise Error(
+                "codegen truncated: the model hit max_tokens before finishing the"
+                " program (stop_reason=max_tokens). Raise max_tokens or simplify."
+            )
+        return Generated(_strip_fences(code), toks)

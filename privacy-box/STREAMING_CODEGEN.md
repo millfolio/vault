@@ -20,7 +20,17 @@ the UI (and "Writing the program" shows real progress, not just an elapsed timer
 SSE is **Anthropic-specific**, so the streaming read belongs in `transport.mojo` (the
 Anthropic client), NOT flare's generic client. Drive `TlsStream` directly there.
 
-## Increment 1 — `RemoteClient._anthropic_stream(prompt) -> Generated`
+## Increment 1 — `RemoteClient._anthropic_stream(prompt) -> Generated` ✅ DONE
+
+Implemented + compiles (privacy_box + app server). Opt-in via `MILLFOLIO_STREAM_CODEGEN`
+(dispatched from `RemoteClient.codegen`). v1 reads the full body then SSE-parses (proves
+the TLS + SSE pipe end-to-end); the live per-delta sink is increment 2. NOTE: skips
+explicit chunked de-framing — SSE parsing only consumes `data:` lines, so chunk-size
+framing lines are ignored (a rare boundary that splits a `data:` line drops that delta;
+revisit with byte-level de-chunk if a real run shows corruption). **To verify:** set the
+env, run a query with `ANTHROPIC_API_KEY`, confirm the same program is produced.
+
+### Original design (for reference)
 
 Self-contained; opt-in via `$MILLFOLIO_STREAM_CODEGEN` (dispatch from `RemoteClient.codegen`
 so default behaviour is unchanged until it's proven).
