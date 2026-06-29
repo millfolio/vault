@@ -340,6 +340,8 @@ struct Api(Copyable, Handler, Movable):
         # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
         if path == "/api/stats":
             return self.handle_stats()
+        if path == "/api/history":
+            return self.handle_history()
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -405,6 +407,32 @@ struct Api(Copyable, Handler, Movable):
                 + "]}"
             )
         )
+
+    def handle_history(self) raises -> Response:
+        """Return the full ask history as {"records": [<obj>, …]} — the durable
+        backend store (`asks.jsonl`) of every question with its generated program
+        and answer. JSONL, so we comma-join the non-empty lines into an array — no
+        server-side JSON parsing. Missing file → empty list. Newest first so the UI
+        panel shows the most recent ask at the top."""
+        var recs = String("")
+        var first = True
+        try:
+            var raw: String
+            with open(_asks_path(), "r") as f:
+                raw = f.read()
+            var lines = raw.split("\n")
+            # Walk in reverse → newest record first in the array.
+            for i in range(len(lines) - 1, -1, -1):
+                var ln = String(lines[i]).strip()
+                if ln.byte_length() == 0:
+                    continue
+                if not first:
+                    recs += ","
+                recs += ln
+                first = False
+        except:
+            pass
+        return _cors(ok_json('{"records":[' + recs + "]}"))
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
@@ -753,6 +781,44 @@ def _append_stats(
             f.write(line)
     except:
         log("[stats] append failed (non-fatal)")
+
+
+def _asks_path() -> String:
+    """Where the FULL per-ask history accumulates (JSONL): the question, the
+    GENERATED program, and the answer. Durable + on-device under the config dir
+    (which `cp -R` deploys never delete) — survives a browser-data clear, unlike
+    the UI's localStorage. MILLFOLIO_ASKS_FILE overrides."""
+    return String(getenv("MILLFOLIO_ASKS_FILE", _config_dir() + "/asks.jsonl"))
+
+
+def _append_ask(
+    epoch: Int64,
+    question: String,
+    code: String,
+    answer: String,
+    source: String,
+    model: String,
+    ok: Bool,
+):
+    """Append ONE self-contained JSON record — {ts, q, code, answer, source, model,
+    ok} — to the per-ask history file (JSONL). This is the durable backend store
+    behind the chat history panel: every ask is kept forever with the program that
+    was generated and the answer it produced. Best-effort — a write failure is
+    logged, never propagated into the chat reply."""
+    var line = String("{")
+    line += '"ts":' + String(epoch)
+    line += ',"q":' + _json_escape(question)
+    line += ',"code":' + _json_escape(code)
+    line += ',"answer":' + _json_escape(answer)
+    line += ',"source":' + _json_escape(source)
+    line += ',"model":' + _json_escape(model)
+    line += ',"ok":' + ("true" if ok else "false")
+    line += "}\n"
+    try:
+        with open(_asks_path(), "a") as f:
+            f.write(line)
+    except:
+        log("[asks] append failed (non-fatal)")
 
 
 def _bump(
@@ -1126,6 +1192,17 @@ def on_connect(mut conn: WsConnection) raises:
             api_names,
             api_count,
             api_ms,
+        )
+        # The durable history store — same record, plus the generated program and
+        # the answer, kept forever (the chat history panel reads it back).
+        _append_ask(
+            _epoch_s(),
+            question,
+            code,
+            reply,
+            src_file,
+            _model_label(),
+            not timed_out,
         )
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")

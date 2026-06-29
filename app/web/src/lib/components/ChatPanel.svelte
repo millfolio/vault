@@ -49,6 +49,7 @@
   ]);
   onMount(() => {
     loadRecent();
+    loadHistory(); // durable backend history (no-op in demo)
     if (!demo) return;
     fetch("/questions.json")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -63,27 +64,74 @@
   let stream = $state<HTMLDivElement>();
 
   // Question history — shown in a left panel when the question box is focused.
-  // EVERY question is kept (no cap), persisted in localStorage so the full history
-  // survives reloads/restarts. Newest-first, de-duplicated.
+  // EVERY ask is kept forever. The durable copy lives in the BACKEND store
+  // (`asks.jsonl`, surfaced at /api/history): each record carries the question,
+  // the generated program, and the answer, so the history survives a browser-data
+  // clear and follows the vault, not the device. localStorage is a fast, offline
+  // fallback (question text only) merged in for asks the backend hasn't recorded
+  // yet (the record lands only after the answer completes). Newest-first, deduped.
+  interface AskRecord {
+    q: string;
+    answer?: string;
+    code?: string;
+    source?: string;
+    ts?: number;
+  }
   const RECENT_KEY = "millfolio:recent-questions";
-  let recent = $state<string[]>([]);
+  let recent = $state<AskRecord[]>([]);
   let showHistory = $state(false);
   let inputEl = $state<HTMLInputElement>();
 
-  function loadRecent() {
+  // Merge two record lists, newest-first, deduped by question — the FIRST occurrence
+  // wins, so callers pass the richer source (backend, with code+answer) first.
+  function mergeRecent(...lists: AskRecord[][]): AskRecord[] {
+    const seen = new Set<string>();
+    const out: AskRecord[] = [];
+    for (const list of lists)
+      for (const r of list) {
+        if (!r?.q || seen.has(r.q)) continue;
+        seen.add(r.q);
+        out.push(r);
+      }
+    return out;
+  }
+  function localQuestions(): AskRecord[] {
     try {
       const raw = localStorage.getItem(RECENT_KEY);
       if (raw) {
         const a = JSON.parse(raw);
         if (Array.isArray(a))
-          recent = a.filter((x) => typeof x === "string");
+          return a.filter((x) => typeof x === "string").map((q) => ({ q }));
       }
     } catch {} // private mode / quota — just start empty
+    return [];
+  }
+  function loadRecent() {
+    recent = localQuestions();
+  }
+  // Pull the durable history from the backend and merge it over the local cache
+  // (backend records win — they carry code+answer). Demo has no backend → skip.
+  async function loadHistory() {
+    if (demo) return;
+    try {
+      const r = await fetch("/api/history");
+      if (!r.ok) return;
+      const data = await r.json();
+      const recs: AskRecord[] = (data?.records ?? []).map((x: any) => ({
+        q: String(x.q ?? ""),
+        answer: x.answer,
+        code: x.code,
+        source: x.source,
+        ts: x.ts,
+      }));
+      recent = mergeRecent(recs, recent);
+    } catch {} // offline / older server without /api/history — keep the local list
   }
   function remember(q: string) {
-    recent = [q, ...recent.filter((x) => x !== q)];
+    // Optimistic: show it immediately (the backend records it once the answer is in).
+    recent = mergeRecent([{ q }], recent);
     try {
-      localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent.map((r) => r.q)));
     } catch {}
   }
   // Pick a past question → drop it into the box to edit/resend (non-destructive).
@@ -138,6 +186,15 @@
     if (stream) stream.scrollTop = stream.scrollHeight;
   });
 
+  // When an ask finishes (busy true→false), the backend has just written its record
+  // (question + generated program + answer) — pull it so the history entry upgrades
+  // from question-only to the full stored detail.
+  let wasBusy = false;
+  $effect(() => {
+    if (wasBusy && !busy) loadHistory();
+    wasBusy = busy;
+  });
+
   function submit(e: SubmitEvent) {
     e.preventDefault();
     const t = draft.trim();
@@ -167,9 +224,25 @@
         <button class="hist-close" type="button" aria-label="Close" onclick={() => (showHistory = false)}>×</button>
       </div>
       <ul>
-        {#each recent as q}
+        {#each recent as r}
           <li>
-            <button type="button" class="hist-item" title={q} onclick={() => pickRecent(q)}>{q}</button>
+            {#if r.answer || r.code}
+              <!-- backend record: expandable to its stored answer + generated program -->
+              <details class="hist-rec">
+                <summary title={r.q}>{r.q}</summary>
+                {#if r.answer}<p class="hist-answer">{r.answer}</p>{/if}
+                {#if r.source}<p class="hist-src">📄 {r.source}</p>{/if}
+                {#if r.code}
+                  <details class="hist-code">
+                    <summary>generated program</summary>
+                    <pre><code>{r.code}</code></pre>
+                  </details>
+                {/if}
+                <button type="button" class="hist-use" onclick={() => pickRecent(r.q)}>Ask again</button>
+              </details>
+            {:else}
+              <button type="button" class="hist-item" title={r.q} onclick={() => pickRecent(r.q)}>{r.q}</button>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -346,6 +419,75 @@
     text-overflow: ellipsis;
   }
   .hist-item:hover { background: var(--surface); }
+  /* backend record — expandable to its stored answer + generated program */
+  .hist-rec {
+    border-radius: var(--radius);
+  }
+  .hist-rec > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hist-rec > summary::-webkit-details-marker { display: none; }
+  .hist-rec > summary:hover { background: var(--surface); }
+  .hist-rec[open] > summary {
+    white-space: normal;
+    font-weight: 600;
+  }
+  .hist-answer {
+    margin: 4px 10px 6px;
+    padding: 6px 8px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    font-size: 12.5px;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .hist-src {
+    margin: 0 10px 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .hist-code {
+    margin: 0 10px 6px;
+    font-size: 11px;
+  }
+  .hist-code > summary {
+    cursor: pointer;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10px;
+  }
+  .hist-code pre {
+    margin: 4px 0 0;
+    padding: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 40vh;
+    overflow: auto;
+    font-size: 11px;
+  }
+  .hist-use {
+    margin: 2px 10px 8px;
+    padding: 5px 12px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+  }
+  .hist-use:hover { background: var(--accent-dim); }
   .stream {
     flex: 1;
     overflow-y: auto;
