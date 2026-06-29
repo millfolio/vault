@@ -30,6 +30,10 @@ from vaultcfg import millfolio_bin, vault_include_paths
 # the orchestrator. Keep all three copies of the literal in lockstep.
 comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
 comptime STAT_SENTINEL = "\x1f@@stat@@\x1f"
+# On-device-model exchange line (debug; gated by $MILLFOLIO_LOG_LOCAL). Matches the
+# copy in vault tools.mojo — the server streams these as collapsible debug items.
+comptime LOCAL_SENTINEL = "\x1f@@local@@\x1f"
+comptime LOCAL_SEP = "\x1f=>\x1f"  # separates <sent> from <got> in a LOCAL line
 
 
 def _strip_progress(out_text: String) raises -> String:
@@ -42,8 +46,10 @@ def _strip_progress(out_text: String) raises -> String:
     var first = True
     for i in range(len(lines)):
         var ln = String(lines[i])
-        if ln.startswith(String(PROGRESS_SENTINEL)) or ln.startswith(
-            String(STAT_SENTINEL)
+        if (
+            ln.startswith(String(PROGRESS_SENTINEL))
+            or ln.startswith(String(STAT_SENTINEL))
+            or ln.startswith(String(LOCAL_SENTINEL))
         ):
             continue
         if not first:

@@ -63,6 +63,14 @@ comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
 # then strips them from the reply. \x1f can't appear in real answer text.
 comptime STAT_SENTINEL = "\x1f@@stat@@\x1f"
 
+# Sentinel for an on-device-model exchange line: `LOCAL_SENTINEL + <sent>\x1f=>\x1f<got>\n`
+# on fd 1. Gated by $MILLFOLIO_LOG_LOCAL (the app server sets it) so it's off for the
+# CLI. Lets the server surface WHAT ask_local/ask_local_batch sent to the local model
+# and what it returned — for debugging an answer (e.g. a misclassifying phone-bill
+# filter). Newlines in the payload are escaped to `\n` so each exchange is ONE line.
+comptime LOCAL_SENTINEL = "\x1f@@local@@\x1f"
+comptime LOCAL_SEP = "\x1f=>\x1f"
+
 
 def _stat(tool: String, ms: Float64):
     """Emit a timing line for one engine call (ask_local/search) to fd 1, unbuffered
@@ -413,6 +421,7 @@ def ask_local(instruction: String, content: String) raises -> String:
             # Mojo json lib crashes (uncatchable debug_assert) indexing that trailing
             # nested object, so parse the numbers straight from the raw response text.
             _stat_model_from_raw(raw)
+            _log_local(msg, out)  # debug: what was sent to the local model + its reply
             return out
         except:
             attempt += 1
@@ -494,6 +503,7 @@ def _batch_call(
         except:
             attempt += 1
     _stat("ask_local", Float64(perf_counter_ns() - t0) / 1.0e6)
+    _log_local(prompt, reply)  # debug: the batched prompt sent + the raw reply
 
     # Parse "<n>: <answer>" lines into the aligned result (split on the FIRST ':',
     # rejoining the rest so an answer that contains ':' survives).
@@ -564,6 +574,23 @@ def progress(msg: String):
     emitted. `print_answer` stays a normal `print`: its buffer flushes at exit,
     AFTER every raw progress write, so the answer still comes last."""
     var line = String(PROGRESS_SENTINEL) + msg + "\n"
+    var n = line.byte_length()
+    var p = line.unsafe_ptr().bitcast[c_char]()
+    _ = external_call["write", Int](Int(1), p, Int(n))
+
+
+def _log_local(sent: String, got: String) raises:
+    """When $MILLFOLIO_LOG_LOCAL is set, emit one on-device-model exchange to fd 1
+    under LOCAL_SENTINEL — `<sent>\x1f=>\x1f<got>` with newlines escaped to `\\n` so
+    it stays a single line — via the same unbuffered raw write(2) as progress(), so
+    it survives the run sandbox + the captured-stdout buffering. No-op otherwise."""
+    if getenv("MILLFOLIO_LOG_LOCAL", "") == "":
+        return
+    var line = String(LOCAL_SENTINEL)
+    line += _replace_all(_replace_all(sent, "\n", "\\n"), "\r", " ")
+    line += LOCAL_SEP
+    line += _replace_all(_replace_all(got, "\n", "\\n"), "\r", " ")
+    line += "\n"
     var n = line.byte_length()
     var p = line.unsafe_ptr().bitcast[c_char]()
     _ = external_call["write", Int](Int(1), p, Int(n))

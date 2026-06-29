@@ -1447,6 +1447,10 @@ public final class Bootstrapper: ObservableObject {
             // freeze the rest of the UI (Stats/System/Vault GETs would block on it).
             // Safe: the sandboxed RUN stays serial via the flock run-queue regardless.
             "MILLFOLIO_WORKERS": "4",
+            // Surface the on-device-model exchanges (ask_local/ask_local_batch sent →
+            // got) as collapsible debug items in the chat — for debugging an answer
+            // (e.g. why a phone-bill filter matched what it did).
+            "MILLFOLIO_LOG_LOCAL": "1",
         ]
         if FileManager.default.fileExists(atPath: "/etc/ssl/cert.pem") {
             env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
