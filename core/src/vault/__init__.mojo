@@ -5,7 +5,7 @@ This `__init__` is the package's public face: it re-exports the entire tool
 surface from `vault.tools` plus the public types those tools return, so the
 `from vault import *` contract (used verbatim in privacy_box-system.md and every
 example) resolves unchanged whether the package is consumed as source or as a
-precompiled `vault.mojopkg`.
+precompiled `vault.mojoc`.
 
 The tool surface (signatures + semantics) is documented in `vault/tools.mojo`
 and must match privacy_box/resources/privacy_box-system.md exactly.

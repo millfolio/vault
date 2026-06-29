@@ -40,7 +40,7 @@ privacy-box = { cmd = "mkdir -p build && mojo build privacy-box/src/privacy_box.
 # the "one mojo" — both Mojo binaries.
 build = { depends-on = ["vault", "privacy-box"] }
 
-# precompile = the precompiled .mojopkg set the install bundle ships (vault tool
+# precompile = the precompiled .mojoc set the install bundle ships (vault tool
 # surface + libs). The RELEASE depends on this (package_millfolio.sh runs the same
 # script), and `mojo precompile` compiles EVERY file in each package — not just the
 # submodules a binary build happens to import — so it catches breakage (e.g. a
@@ -82,8 +82,8 @@ test-egress = { cmd = "mkdir -p build && mojo build privacy-box/test/egress_test
 # Gate: budget directive parsing/accounting.
 test-budget = { cmd = "mkdir -p build && mojo build privacy-box/test/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
 # Gate: the `mill` CLI's provisioned mojo nightly matches the pixi pin that
-# precompiles vault.mojopkg — a drift breaks the vault surface at install time
-# (the v0.4.34 .mojopkg-version mismatch). pixi.toml is the source of truth.
+# precompiles vault.mojoc — a drift breaks the vault surface at install time
+# (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
 test = { depends-on = ["test-sha256", "test-relevance", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }

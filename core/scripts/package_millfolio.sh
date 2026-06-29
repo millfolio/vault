@@ -2,13 +2,13 @@
 #
 # Build millfolio.zip — the PRECOMPILED millfolio bundle the Millfolio app downloads.
 # For commercial IP protection this bundle ships NO `.mojo` source for the vault
-# tool surface or its Mojo libs: only precompiled `.mojopkg`s, the prebuilt
+# tool surface or its Mojo libs: only precompiled `.mojoc`s, the prebuilt
 # `millfolio` binary, and the prebuilt FFI shims (`.so`/`.dylib`).
 #
 # The bundle unzips to a single self-contained `millfolio/` dir:
 #
 #   millfolio/
-#     pkgs/      vault.mojopkg + flare/json/lancedb/pdf/docx/csv/zlib .mojopkg
+#     pkgs/      vault.mojoc + flare/json/lancedb/pdf/docx/csv/zlib .mojoc
 #                (precompiled by scripts/precompile_pkgs.sh — the ONLY way the
 #                 vault surface + libs reach the install; no source)
 #     build/     millfolio                              (prebuilt vault CLI binary)
@@ -22,7 +22,7 @@
 #   - compiles generated `from vault import *` programs with `-I millfolio/pkgs`.
 #
 # Building the shims needs clang + cargo + OpenSSL/zlib, so we ship them prebuilt
-# + made relocatable via @loader_path. The `.mojopkg`s are tied to the exact
+# + made relocatable via @loader_path. The `.mojoc`s are tied to the exact
 # compiler nightly — CI rebuilds them on every nightly bump (never hand-ship a
 # stale set). Run via pixi (needs CONDA_PREFIX) AFTER `pixi run ffi`.
 # Usage: scripts/package_millfolio.sh [out.zip]
@@ -44,7 +44,7 @@ echo "==> precompiling the vault tool surface + libs into pkgs/" >&2
 # package_bundle.sh exports; standalone it defaults to the umbrella sibling layout.
 MOJO="$MOJO" bash "$ROOT/scripts/precompile_pkgs.sh" "$D/pkgs"
 
-echo "==> building the prebuilt millfolio binary against the .mojopkg set" >&2
+echo "==> building the prebuilt millfolio binary against the .mojoc set" >&2
 "$MOJO" build "$ROOT/src/millfolio.mojo" -I "$D/pkgs" -o "$D/build/millfolio"
 
 # Relocate the binary's rpath. `mojo build` bakes in the BUILD machine's toolchain
@@ -89,5 +89,5 @@ done
 echo "==> zipping -> $OUT" >&2
 rm -f "$OUT"
 ( cd "$STAGE" && zip -qr -X "$OUT" millfolio )
-echo "==> done — bundle contains ONLY .mojopkg + prebuilt binary + FFI shims (no .mojo)" >&2
+echo "==> done — bundle contains ONLY .mojoc + prebuilt binary + FFI shims (no .mojo)" >&2
 ls -lh "$OUT" >&2

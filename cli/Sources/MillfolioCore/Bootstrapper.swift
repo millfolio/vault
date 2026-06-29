@@ -102,7 +102,7 @@ public final class Bootstrapper: ObservableObject {
     // ── millfolio (personal data vault) ───────────────────────────────────────────
     // millfolio is a one-shot vault CLI shipped PRECOMPILED (commercial IP
     // protection — no `.mojo` source on-device). Its bundle carries a prebuilt
-    // build/millfolio binary, pkgs/*.mojopkg (the vault tool surface + its libs,
+    // build/millfolio binary, pkgs/*.mojoc (the vault tool surface + its libs,
     // precompiled against the SAME Mojo nightly as privacy_box), and the prebuilt
     // FFI shims. Install just places the binary + installMillfolioShims(); the
     // generated `from vault import *` programs compile against `-I pkgs`.
@@ -1004,7 +1004,7 @@ public final class Bootstrapper: ObservableObject {
     }
 
     /// Download millfolio's Mojo toolchain + PRECOMPILED bundle and place it. Same
-    /// nightly as privacy_box; the bundle ships a prebuilt binary + pkgs/*.mojopkg
+    /// nightly as privacy_box; the bundle ships a prebuilt binary + pkgs/*.mojoc
     /// (the vault surface + libs) + prebuilt FFI shims — no source, no on-device
     /// build. The toolchain is still needed to compile the per-query generated
     /// programs against `-I pkgs`, and to install the shims into its lib/.
@@ -1017,7 +1017,7 @@ public final class Bootstrapper: ObservableObject {
             millfolioBin,
             millfolioMojoPrefix.appendingPathComponent("lib/liblancedbmojo.dylib"),
             millfolioMojoPrefix.appendingPathComponent("lib/libzlibmojo.so"),
-            millfolioDir.appendingPathComponent("pkgs/vault.mojopkg"),
+            millfolioDir.appendingPathComponent("pkgs/vault.mojoc"),
         ]
         if stepCurrent(".millfolio-step", millfolioCritical)
             && !mojoToolchainStale(millfolioMojoPrefix, Self.privacy_boxMojoVersion) {
@@ -1044,7 +1044,7 @@ public final class Bootstrapper: ObservableObject {
         }
         try relocateMojoPrefix(millfolioMojoPrefix)
 
-        // 2. millfolio bundle — PRECOMPILED, no source. Ships pkgs/*.mojopkg (the
+        // 2. millfolio bundle — PRECOMPILED, no source. Ships pkgs/*.mojoc (the
         //    vault tool surface + its libs) + a prebuilt build/millfolio binary +
         //    the FFI shims. Commercial IP protection: no `.mojo` for the vault
         //    surface or its libs reaches the device, and there is no on-device
@@ -1053,8 +1053,8 @@ public final class Bootstrapper: ObservableObject {
         guard fm.fileExists(atPath: millfolioBin.path) else {
             throw BootstrapError.step("unpack", "millfolio zip missing prebuilt millfolio/build/millfolio")
         }
-        guard fm.fileExists(atPath: millfolioDir.appendingPathComponent("pkgs/vault.mojopkg").path) else {
-            throw BootstrapError.step("unpack", "millfolio zip missing precompiled millfolio/pkgs/vault.mojopkg")
+        guard fm.fileExists(atPath: millfolioDir.appendingPathComponent("pkgs/vault.mojoc").path) else {
+            throw BootstrapError.step("unpack", "millfolio zip missing precompiled millfolio/pkgs/vault.mojoc")
         }
 
         // 3. The binary is already built (shipped in build/millfolio) — nothing to
@@ -1123,7 +1123,7 @@ public final class Bootstrapper: ObservableObject {
               let python = try? findPython() else { return }
         let mojo = privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path
         // The orchestrator's include set (mirror of vaultcfg.vault_include_paths):
-        // the single millfolio/pkgs dir of precompiled `.mojopkg`s (vault + its
+        // the single millfolio/pkgs dir of precompiled `.mojoc`s (vault + its
         // libs). No source on the include path.
         let inc = [
             "-I", millfolioDir.appendingPathComponent("pkgs").path,

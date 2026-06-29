@@ -1,7 +1,7 @@
 """Vault.index — indexing, manifest, readers, embeddings, and content hashing.
 
 Re-exports the public surface of its modules so `from vault.index import …` and
-`vault.index.name` resolve from anywhere (source or precompiled `.mojopkg`).
+`vault.index.name` resolve from anywhere (source or precompiled `.mojoc`).
 """
 
 from vault.index.index import (

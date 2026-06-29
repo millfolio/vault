@@ -2,12 +2,12 @@
 #
 # precompile_pkgs.sh — produce the precompiled Mojo package set the vault tool
 # surface ships as (commercial IP protection: the install bundle carries NO
-# `.mojo` source for the vault surface or its libs, only these `.mojopkg`s + the
+# `.mojo` source for the vault surface or its libs, only these `.mojoc`s + the
 # prebuilt binaries + the prebuilt FFI shims).
 #
-# Output: a single `pkgs/` dir holding ONE `.mojopkg` per import name —
-#   zlib.mojopkg csv.mojopkg lancedb.mojopkg pdf.mojopkg docx.mojopkg
-#   flare.mojopkg json.mojopkg vault.mojopkg
+# Output: a single `pkgs/` dir holding ONE `.mojoc` per import name —
+#   zlib.mojoc csv.mojoc lancedb.mojoc pdf.mojoc docx.mojoc
+#   flare.mojoc json.mojoc vault.mojoc
 # A generated `from vault import *` program then builds with `-I <pkgs>` against
 # ONLY these packages (no `.mojo` on the include path) and dlopens the (already
 # prebuilt) FFI shims at runtime.
@@ -66,14 +66,14 @@ echo "==> precompiling in dependency order -> $OUT" >&2
 #   flare                    : imports `from json import …`
 #   pdf, docx                : import `from zlib import inflate`
 #   vault                    : imports all of the above + the std lib
-"$MOJO" precompile "$ASM/zlib"        -o "$OUT/zlib.mojopkg"
-"$MOJO" precompile "$ASM/csv"         -o "$OUT/csv.mojopkg"
-"$MOJO" precompile "$ASM/lancedb"     -o "$OUT/lancedb.mojopkg"
-"$MOJO" precompile "$JSON/json"        -o "$OUT/json.mojopkg"
-"$MOJO" precompile "$FLARE/flare" -I "$OUT" -o "$OUT/flare.mojopkg"
-"$MOJO" precompile "$ASM/pdf"  -I "$OUT" -o "$OUT/pdf.mojopkg"
-"$MOJO" precompile "$ASM/docx" -I "$OUT" -o "$OUT/docx.mojopkg"
-"$MOJO" precompile "$ROOT/src/vault" -I "$OUT" -o "$OUT/vault.mojopkg"
+"$MOJO" precompile "$ASM/zlib"        -o "$OUT/zlib.mojoc"
+"$MOJO" precompile "$ASM/csv"         -o "$OUT/csv.mojoc"
+"$MOJO" precompile "$ASM/lancedb"     -o "$OUT/lancedb.mojoc"
+"$MOJO" precompile "$JSON/json"        -o "$OUT/json.mojoc"
+"$MOJO" precompile "$FLARE/flare" -I "$OUT" -o "$OUT/flare.mojoc"
+"$MOJO" precompile "$ASM/pdf"  -I "$OUT" -o "$OUT/pdf.mojoc"
+"$MOJO" precompile "$ASM/docx" -I "$OUT" -o "$OUT/docx.mojoc"
+"$MOJO" precompile "$ROOT/src/vault" -I "$OUT" -o "$OUT/vault.mojoc"
 
 echo "==> precompiled package set:" >&2
 ls -1 "$OUT" >&2

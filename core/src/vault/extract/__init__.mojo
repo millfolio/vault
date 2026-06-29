@@ -2,7 +2,7 @@
 
 The lowest layer of the vault package: no intra-vault imports beyond its own
 siblings. Re-exports the public surface so `from vault.extract import …` and
-`vault.extract.name` resolve from anywhere (source or precompiled `.mojopkg`).
+`vault.extract.name` resolve from anywhere (source or precompiled `.mojoc`).
 """
 
 from vault.extract.transactions import (

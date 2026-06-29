@@ -3,10 +3,10 @@
 # check_mojo_version.sh — guard against the mojo-nightly drift that broke v0.4.34.
 #
 # Two places pin the Mojo nightly and they MUST agree:
-#   • pixi.toml          — the nightly CI precompiles the bundle's vault.mojopkg with.
+#   • pixi.toml          — the nightly CI precompiles the bundle's vault.mojoc with.
 #   • the `mill` CLI     — Bootstrapper.{mojoVersion,privacy_boxMojoVersion}, the
 #                          toolchain the installer provisions on the user's machine.
-# A `.mojopkg` is version-locked: a compiler older/newer than the one that built it
+# A `.mojoc` is version-locked: a compiler older/newer than the one that built it
 # REFUSES to load it ("Mojo precompiled file is incompatible…"), so a drift breaks the
 # whole vault tool surface at install time (`from vault import *` → unknown symbols).
 #
@@ -25,7 +25,7 @@ for name in mojoVersion privacy_boxMojoVersion; do
     v="$(grep -oE "${name} = \"1\.0\.0b3\.dev[0-9]+" "$BS" | grep -oE '1\.0\.0b3\.dev[0-9]+' | head -1)"
     if [ "$v" != "$pin" ]; then
         echo "✗ Bootstrapper.$name = '${v:-<missing>}' but pixi.toml pins '$pin'." >&2
-        echo "  Update the CLI constant to match — a version-locked vault.mojopkg" >&2
+        echo "  Update the CLI constant to match — a version-locked vault.mojoc" >&2
         echo "  cannot load under a mismatched compiler (the v0.4.34 install break)." >&2
         fail=1
     fi

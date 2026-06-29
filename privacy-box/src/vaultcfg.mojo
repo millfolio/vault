@@ -6,7 +6,7 @@ millfolio checkout (or the sibling layout):
 
   - the millfolio `build/millfolio` binary    (to print the aliased manifest)
   - the `-I` include set for `mojo build` (the single `<millfolio>/pkgs` dir of
-    precompiled `.mojopkg`s — vault + flare/json/lancedb/pdf/docx/csv/zlib — so
+    precompiled `.mojoc`s — vault + flare/json/lancedb/pdf/docx/csv/zlib — so
     the generated program + its transitive deps resolve with NO source)
   - the LanceDB index dir                 (~/.config/millfolio — read-allowed in
     the vault run sandbox)
@@ -54,8 +54,8 @@ def vault_include_paths() raises -> List[String]:
 
     The install ships PRECOMPILED packages (commercial IP protection — no `.mojo`
     source for the vault surface or its libs), so this is a SINGLE include dir:
-    `<millfolio>/pkgs`, which holds vault.mojopkg + the flare/json/lancedb/pdf/
-    docx/csv/zlib `.mojopkg`s. A generated `from vault import *` program compiles
+    `<millfolio>/pkgs`, which holds vault.mojoc + the flare/json/lancedb/pdf/
+    docx/csv/zlib `.mojoc`s. A generated `from vault import *` program compiles
     against those packages alone (the FFI shims it dlopens are already in the
     toolchain's lib/).
 

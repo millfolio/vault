@@ -703,7 +703,7 @@ struct Sandbox(Movable):
         remote model carry only aliased names (col_0…), never real data.
 
         `include_paths` are `mojo build`'s `-I` search dirs. For the VAULT path
-        this is the single millfolio `pkgs` dir of precompiled `.mojopkg`s (vault +
+        this is the single millfolio `pkgs` dir of precompiled `.mojoc`s (vault +
         its transitive deps flare/json/lancedb/pdf/docx/csv/zlib) so the generated
         `from vault import *` + everything it pulls resolves against compiled
         packages — no source. Empty for the CSV path (no imports beyond stdlib).
