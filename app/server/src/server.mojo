@@ -42,6 +42,7 @@ from std.time import perf_counter_ns
 from settings import load_config
 from wiring import build_vault_orchestrator
 from orchestrator import Orchestrator, PROGRESS_SENTINEL, STAT_SENTINEL, LOCAL_SENTINEL, LOCAL_SEP
+from transport import DeltaSink
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
@@ -885,6 +886,38 @@ comptime _SIGKILL: Int = 9
 comptime _RUN_MAX_ITERS: Int = 1000  # ~120s at 120ms/poll — kill a run past this
 
 
+struct WsSink(DeltaSink, Movable):
+    """Live codegen feedback: as the frontier model streams the program, update the ONE
+    "codegen" status line in place with the growing size, so the user sees the model
+    actively producing output (not just elapsed time). Coalesced (~200 chars) so it
+    doesn't flood the WS. Holds the connection by pointer — valid for the duration of
+    the synchronous `vault_codegen_stream` call within `on_connect`."""
+
+    var conn_addr: Int  # address of the on_connect `conn` (alive for the call)
+    var chars: Int
+    var last: Int
+
+    def __init__(out self, conn_addr: Int):
+        self.conn_addr = conn_addr
+        self.chars = 0
+        self.last = 0
+
+    def on_delta(mut self, text: String) raises:
+        self.chars += text.byte_length()
+        if self.chars - self.last >= 200:
+            self.last = self.chars
+            var conn = UnsafePointer[WsConnection, MutUntrackedOrigin](
+                unsafe_from_address=self.conn_addr
+            )
+            conn[].send_text(
+                status(
+                    "codegen",
+                    "Writing the program… (" + String(self.chars) + " chars)",
+                    "running",
+                )
+            )
+
+
 def on_connect(mut conn: WsConnection) raises:
     """Streaming chat over the SAME :10000 listener — flare upgrades the WebSocket
     request; every other request stays on the unary HTTP path (the `Api` handler).
@@ -941,7 +974,13 @@ def on_connect(mut conn: WsConnection) raises:
 
         conn.send_text(status("codegen", "Writing the program", "running"))
         _t = perf_counter_ns()
-        var code = orch.vault_codegen(question, manifest)
+        var code: String
+        if getenv("MILLFOLIO_STREAM_CODEGEN", "") != "":
+            # Stream the program — update the "codegen" line live with its size.
+            var sink = WsSink(Int(UnsafePointer(to=conn)))
+            code = orch.vault_codegen_stream(question, manifest, sink)
+        else:
+            code = orch.vault_codegen(question, manifest)
         _bump(api_names, api_count, api_ms, "codegen", 1, _ms_since(_t))
         conn.send_text(
             debug_event("codegen", "Generated program", code, "mojo")
