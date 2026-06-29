@@ -83,11 +83,14 @@ test-egress = { cmd = "mkdir -p build && mojo build privacy-box/test/egress_test
 test-budget = { cmd = "mkdir -p build && mojo build privacy-box/test/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
 # Gate: every ```mojo example in the codegen system prompt (privacy_box-system.md)
 # COMPILES against the vault package — catches a wrong tool/field (the `.id` vs
-# `.alias` regression) before it reaches a release. Deterministic; no FFI/network.
+# `.alias` regression) before it reaches a release. Needs the SIBLING lib repos on
+# the -I path (flare/json/lancedb/…), so it is NOT part of the hermetic `test`
+# aggregate (test.yml checks out vault only). It runs where the siblings exist: the
+# release preflight (before tagging) + bundle.yml (CI). No FFI/network.
 test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # Gate: the `mill` CLI's provisioned mojo nightly matches the pixi pin that
 # precompiles vault.mojoc — a drift breaks the vault surface at install time
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version", "test-prompt-examples"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }

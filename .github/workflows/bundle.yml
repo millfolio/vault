@@ -84,6 +84,13 @@ jobs:
       - name: Install protobuf (protoc)
         run: brew install protobuf
 
+      # Every ```mojo example in the codegen system prompt must compile against the
+      # vault package (catches a wrong tool/field like the .id/.alias regression).
+      # Here, not in the hermetic vault `test` job, because it needs the sibling libs.
+      - name: Codegen prompt examples compile
+        working-directory: vault
+        run: pixi run bash scripts/check_prompt_examples.sh
+
       - name: Package millfolio.zip
         working-directory: vault
         run: bash scripts/package_bundle.sh "$GITHUB_WORKSPACE/millfolio.zip"

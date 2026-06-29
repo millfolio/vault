@@ -19,6 +19,13 @@ INC=(-I "$ROOT/core/src"
      -I "$ROOT/../csv.mojo/src" -I "$ROOT/../docx.mojo/src")
 
 [ -f "$PROMPT" ] || { echo "prompt not found: $PROMPT" >&2; exit 1; }
+# The examples import `from vault import *`, whose transitive deps live in the SIBLING
+# repos. Skip cleanly when they aren't checked out (e.g. the hermetic test.yml job) —
+# the gate runs in the release preflight + bundle.yml, where the siblings exist.
+if [ ! -d "$ROOT/../flare" ] || [ ! -d "$ROOT/../json" ]; then
+  echo "==> sibling lib repos not present — skipping prompt-example compile gate" >&2
+  exit 0
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
