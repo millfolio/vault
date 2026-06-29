@@ -41,7 +41,7 @@ from std.time import perf_counter_ns
 
 from settings import load_config
 from wiring import build_vault_orchestrator
-from orchestrator import Orchestrator, PROGRESS_SENTINEL, STAT_SENTINEL
+from orchestrator import Orchestrator, PROGRESS_SENTINEL, STAT_SENTINEL, LOCAL_SENTINEL, LOCAL_SEP
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
@@ -658,6 +658,19 @@ def _progress_label(line: String) raises -> String:
     return String(line.removeprefix(PROGRESS_SENTINEL))
 
 
+def _unescape_nl(s: String) raises -> String:
+    """Restore `\\n` (two chars) → a real newline. The LOCAL sentinel escapes newlines
+    so each exchange stays one line; this undoes it for display. UTF-8 safe (splits the
+    String, not its bytes)."""
+    var parts = s.split("\\n")
+    var out = String("")
+    for i in range(len(parts)):
+        if i > 0:
+            out += "\n"
+        out += String(parts[i])
+    return out^
+
+
 def _secs1(ms: Float64) -> String:
     """Milliseconds → seconds with one decimal: 38234.5 -> "38.2s"."""
     var tenths = Int(ms / 100.0 + 0.5)
@@ -1080,6 +1093,24 @@ def on_connect(mut conn: WsConnection) raises:
                             atof(String(parts[1])),
                         )
                         dirty = True
+                elif ln.startswith(LOCAL_SENTINEL):
+                    # An on-device-model exchange (debug). Surface it as a collapsible
+                    # item so the user can see exactly what ask_local/ask_local_batch
+                    # sent to the local model and what it returned (e.g. why a
+                    # phone-bill filter matched what it did). \n was escaped for the
+                    # one-line sentinel — restore it for readability.
+                    var rec = String(ln.removeprefix(LOCAL_SENTINEL))
+                    var sg = rec.split(LOCAL_SEP)
+                    var sent = _unescape_nl(String(sg[0])) if len(sg) >= 1 else String("")
+                    var got = _unescape_nl(String(sg[1])) if len(sg) >= 2 else String("")
+                    conn.send_text(
+                        debug_event(
+                            "execute",
+                            "on-device model — what it was asked",
+                            "SENT:\n" + sent + "\n\nGOT:\n" + got,
+                            "text",
+                        )
+                    )
             # Update the ONE 'working' line in place with the latest progress label
             # + running api/model tallies, whenever a progress or stat line arrived.
             if dirty:
