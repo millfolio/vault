@@ -1442,6 +1442,11 @@ public final class Bootstrapper: ObservableObject {
             // Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
             "MILLFOLIO_WEB_DIR": appRoot.appendingPathComponent("web/dist").path,
             "MILLFOLIO_RUN_SCRIPT": runScript.path,
+            // A few worker threads so the long synchronous chat handler (codegen →
+            // compile → run, ~30s+) doesn't monopolize a single-threaded reactor and
+            // freeze the rest of the UI (Stats/System/Vault GETs would block on it).
+            // Safe: the sandboxed RUN stays serial via the flock run-queue regardless.
+            "MILLFOLIO_WORKERS": "4",
         ]
         if FileManager.default.fileExists(atPath: "/etc/ssl/cert.pem") {
             env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
