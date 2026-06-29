@@ -1521,9 +1521,15 @@ public final class Bootstrapper: ObservableObject {
         killStaleOnPort(10000); killStaleOnPort(10001)   // reap any legacy nohup instance
         try run("/bin/launchctl", ["bootstrap", guiDomain, url.path])
         _ = waitForPort(10000, timeout: 25)
+        // Don't open the browser on "socket listening" alone — the multi-worker app
+        // server BINDS the port before its workers can serve files, so the first load
+        // raced the `_app/*.js` chunks to 404 (a page refresh fixed it). Wait until a
+        // real STATIC asset (the favicon, served from MILLFOLIO_WEB_DIR) returns 200 —
+        // then the JS chunks are being served too. Falls through + opens on timeout.
+        _ = waitForHttp(10000, path: "/favicon.svg", timeout: 25)
         _ = try? runStatus("/bin/bash", ["-c",
             "command -v tailscale >/dev/null 2>&1 && tailscale serve --bg 10000 >/dev/null 2>&1 || true"])
-        _ = try? runStatus("/bin/bash", ["-c", "(sleep 1 && open 'http://localhost:10000') >/dev/null 2>&1 &"])
+        _ = try? runStatus("/bin/bash", ["-c", "open 'http://localhost:10000' >/dev/null 2>&1 &"])
     }
 
     /// Poll until something is LISTENING on `port`, or `timeout` s elapse.
@@ -1533,6 +1539,22 @@ public final class Bootstrapper: ObservableObject {
         while Date() < deadline {
             if (try? runStatus("/bin/bash", ["-c",
                 "lsof -ti tcp:\(port) -sTCP:LISTEN >/dev/null 2>&1"])) == 0 { return true }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return false
+    }
+
+    /// Poll until an HTTP GET of `path` on `port` returns 200, or `timeout` s elapse.
+    /// Stronger than `waitForPort`: it confirms the server is actually SERVING (the
+    /// socket can be listening before the workers serve content). Probe a real static
+    /// asset to confirm the web root is mounted + serving.
+    @discardableResult
+    public func waitForHttp(_ port: Int, path: String = "/", timeout: Double = 25) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let code = try? run("/bin/bash", ["-c",
+                "curl -s -o /dev/null -w '%{http_code}' --max-time 2 'http://localhost:\(port)\(path)' 2>/dev/null"]),
+                code.trimmingCharacters(in: .whitespacesAndNewlines) == "200" { return true }
             Thread.sleep(forTimeInterval: 0.3)
         }
         return false
