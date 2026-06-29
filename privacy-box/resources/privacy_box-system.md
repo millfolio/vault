@@ -97,14 +97,27 @@ at the top of the loop with your position (e.g.
 `progress("scanning " + String(i+1) + "/" + String(len(hits)))`) so the user sees
 live progress instead of a frozen spinner. It's free and never sees data.
 
-### Aggregations ("how much total…", "biggest…", "how many transactions…")
+### Aggregations ("how much total…", "biggest…", "how many transactions…", "how much did I pay for <X>…")
 **HARD RULE — if the question is about TRANSACTIONS (count them, total/sum them,
-the biggest/most-expensive/largest, average, list them, spending) you MUST call
+the biggest/most-expensive/largest, average, list them, spending — INCLUDING
+spending filtered to a category or merchant: "how much did I pay for my phone
+bill", "how much did I spend at Costco", "my electricity total") you MUST call
 `transactions(file_alias)` for each file in `manifest()` and aggregate its `Txn`s
-in plain Mojo. Do NOT `search` and do NOT `ask_local` for these — `transactions`
-is exact and verified. Only if EVERY file's `transactions(...)` is empty do you
-fall back to `file_chunks`. Writing `search(...)` for a "how many / total /
-biggest transaction" question is wrong.**
+in plain Mojo. For a category/merchant filter, keep the `Txn`s whose `.desc`
+matches — classify the short `.desc` strings with `ask_local_batch` when the match
+needs judgment (e.g. "is this merchant a phone carrier?") — then `sum(.amount)`.
+Do NOT `search` and do NOT sum `ask_local` over search chunks for these —
+`transactions` is exact and verified.**
+
+**NEVER sum amounts read out of `search`/`file_chunks` text for a spending total.**
+A statement chunk also contains running **BALANCES** and printed **SUBTOTALS/
+TOTALS**; if you ask the model for "the amount" on each chunk and add them up, you
+fold those non-transaction figures into the sum and over-count wildly (this is how
+a phone bill comes back as `$224,303`). Sum the structured `Txn.amount` from
+`transactions()` instead, and format the result with `money(...)`, never
+`String(x)`. Only if EVERY file's `transactions(...)` is empty do you fall back to
+`file_chunks`. Writing `search(...)` for a "how many / total / biggest / how much
+did I pay for X" question is wrong.
 
 A count / sum / total / biggest / average needs **every** matching record — so
 **ENUMERATE, don't `search`.** `search` is similarity-ranked top-k: it returns ~k
@@ -154,7 +167,52 @@ def main() raises:
     print_answer("There are " + String(len(files)) + " documents in your vault.")
 ```
 
-**"How much did I spend on travel last year?"** (the FAST aggregation shape)
+**"How much did I pay for my phone bill?"** (category/merchant spending — `transactions` filtered by `.desc`, never a sum over search chunks)
+A "how much did I pay for / spend on *<merchant or category>*" question is a **sum
+over the matching transactions**. Enumerate `transactions()` (exact, no balances),
+classify each short `.desc` once with `ask_local_batch`, sum the matches' `.amount`,
+format with `money()`. This is the shape for "my phone bill", "spending at Costco",
+"my electricity total", etc.
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    # 1) collect every money-OUT transaction (desc + amount) — exact + verified,
+    #    so balances/printed totals never enter the sum.
+    var descs = List[String]()
+    var amounts = List[Float64]()
+    for i in range(len(files)):
+        var txns = transactions(files[i].id)        # [] when not a statement
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction == "debit":
+                descs.append(x.desc.copy())
+                amounts.append(x.amount)
+    # 2) classify which merchants are a phone/wireless bill — ONE batched call over
+    #    the short .desc strings (NOT over statement chunks, which carry balances).
+    var is_phone = ask_local_batch(
+        "Use ONLY the text. If this merchant/description is a PHONE or wireless"
+        " bill (e.g. Verizon, AT&T, T-Mobile, a cell-phone carrier), reply 'yes'."
+        " Otherwise reply 'no'. Do not guess or invent.", descs)
+    # 3) sum the matches in plain Mojo; format with money(), never String(x).
+    var total = 0.0
+    var n = 0
+    for a in range(len(is_phone)):
+        if String(is_phone[a].strip()) == "yes":
+            total += amounts[a]
+            n += 1
+    if n > 0:
+        print_answer("You paid " + money(total) + " across " + String(n)
+            + " phone-bill payments.")
+    else:
+        print_answer("I couldn't find any phone-bill payments in your vault.")
+```
+
+**"How much did I spend on travel last year?"** (FALLBACK shape — only when `transactions()` is empty, e.g. receipts/notes; statement spending uses the `transactions()`+`.desc` shape above)
+When the expense lives in non-statement files (PDF/Markdown receipts) so
+`transactions()` returns nothing, enumerate candidate chunks and extract with
+`ask_local_batch`. Tell the model to return ONLY a purchase amount and to **ignore
+balances/totals**, so a running balance never gets folded into the sum.
 ```mojo
 from vault import *
 def main() raises:
@@ -167,13 +225,14 @@ def main() raises:
             cand.append(c.text)
     # 2) extract ALL of them in one call — ask_local_batch batches internally (~10/call).
     var ans = ask_local_batch(
-        "Use ONLY the text. If it is a 2025 travel expense, reply with just the amount"
-        " (e.g. 1234.56). Otherwise reply 'none'. Do not guess or invent.", cand)
-    # 3) aggregate in Mojo — parse_amount('none')==0, so just add.
+        "Use ONLY the text. If it is a 2025 TRAVEL PURCHASE, reply with just that"
+        " purchase's amount (e.g. 1234.56). IGNORE account balances and printed"
+        " totals/subtotals. Otherwise reply 'none'. Do not guess or invent.", cand)
+    # 3) aggregate in Mojo — parse_amount('none')==0, so just add. Format with money().
     var total = 0.0
     for a in range(len(ans)):
         total += parse_amount(String(ans[a]))
-    print_answer("You spent about $" + String(total) + " on travel in 2025.")
+    print_answer("You spent about " + money(total) + " on travel in 2025.")
 ```
 
 **"How many transactions / what's my total / total spent / total deposits?"** (count/sum — `transactions`)
@@ -188,7 +247,7 @@ def main() raises:
     var received = 0.0    # credits (money in)
     var files = manifest()
     for i in range(len(files)):
-        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        var txns = transactions(files[i].id)   # exact, reconcile-verified; [] if none
         for t in range(len(txns)):
             ref x = txns[t]
             n += 1
@@ -218,8 +277,8 @@ def main() raises:
     var files = manifest()
     # 1) EXACT path: reconcile-verified transactions, max in plain Mojo.
     for i in range(len(files)):
-        progress("checking " + files[i].alias)
-        var txns = transactions(files[i].alias)
+        progress("checking " + files[i].id)
+        var txns = transactions(files[i].id)
         for t in range(len(txns)):
             ref x = txns[t]
             if x.direction == "debit" and (not have or x.amount > top_amount):
@@ -229,7 +288,7 @@ def main() raises:
     # 2) FALLBACK only for files with no reconciled transactions: scan ALL chunks.
     if not have:
         for i in range(len(files)):
-            var chunks = file_chunks(files[i].alias)      # COMPLETE, not search top-k
+            var chunks = file_chunks(files[i].id)      # COMPLETE, not search top-k
             var cand = List[String]()
             for c in range(len(chunks)):
                 if chunks[c].find(".") != -1:             # cheap free pre-filter: an amount
