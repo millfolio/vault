@@ -65,6 +65,11 @@ test-sha256 = { cmd = "mkdir -p build && mojo build core/test/index/sha256_test.
 # Gate: UI search distance→cosine mapping + the relevance floor (the fix that stops
 # search returning the k nearest chunks for a term absent from the vault). Pure math.
 test-relevance = { cmd = "mkdir -p build && mojo build core/test/index/relevance_test.mojo -I core/src -o build/relevance-test && ./build/relevance-test" }
+# Gate: the deterministic tag matcher (vault.derive.categorize) — seed taxonomy
+# tags phone/travel/restaurant/groceries/health, multi-valued, and a credit-card/
+# transfer line with a digit run gets NO tag (guards the on-device classifier's
+# phone false-positive class with pure, deterministic rules). No FFI/network.
+test-categorize = { cmd = "mkdir -p build && mojo build core/test/derive/categorize_test.mojo -I core/src -o build/categorize-test && ./build/categorize-test" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
@@ -93,4 +98,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }
