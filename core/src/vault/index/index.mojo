@@ -50,7 +50,13 @@ from vault.extract.transactions import (
     select_txns,
     texts_for_alias,
 )
-from vault.derive.categorize import default_registry
+from vault.derive.categorize import (
+    Registry,
+    default_registry,
+    parse_rules,
+    merge_registry,
+    registry_template,
+)
 
 
 comptime CHUNK_SIZE = 512  # ~codepoints per chunk
@@ -709,9 +715,9 @@ def build_index(
     )
 
     # Embed only new + changed files; append to LanceDB + the side-table.
-    # The derived-tag registry (deterministic, pure) is built once and matched
-    # over each reconciled transaction's description below.
-    var reg = default_registry()
+    # The derived-tag registry (built-in defaults + the user's categories.txt)
+    # is loaded once and matched over each reconciled transaction's description.
+    var reg = _load_registry()
     for t in range(len(emb_idx)):
         var i = emb_idx[t]
         var falias = emb_alias[t].copy()
@@ -871,6 +877,32 @@ def file_chunks(file_alias: String) raises -> List[String]:
 
 def _txns_path() raises -> String:
     return _config_dir() + "/transactions.tsv"
+
+
+def _categories_path() raises -> String:
+    return _config_dir() + "/categories.txt"
+
+
+def _load_registry() raises -> Registry:
+    """The effective tag registry = built-in defaults + the user's
+    `categories.txt` (merged additively). Writes a commented template the first
+    time so the file is discoverable; an absent/empty file just yields the
+    defaults. Read once per `build_index` and matched over every transaction."""
+    var reg = default_registry()
+    var path = _categories_path()
+    if exists(path):
+        var text: String
+        with open(path, "r") as f:
+            text = f.read()
+        reg = merge_registry(reg^, parse_rules(text))
+    else:
+        # Seed a documented template so the user can discover + extend categories.
+        try:
+            with open(path, "w") as f:
+                f.write(registry_template())
+        except:
+            pass  # best-effort; never fail indexing over the template write
+    return reg^
 
 
 def _load_txn_rows() raises -> List[TxnRow]:

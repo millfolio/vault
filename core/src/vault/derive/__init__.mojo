@@ -14,4 +14,8 @@ from vault.derive.categorize import (
     Rule,
     Registry,
     default_registry,
+    parse_rules,
+    merge_registry,
+    tag_names,
+    registry_template,
 )

@@ -8,7 +8,12 @@ credit-card/transfer line with a long digit run gets NO tag (the false-positive
 class the on-device phone classifier hit).
 """
 
-from vault.derive.categorize import default_registry
+from vault.derive.categorize import (
+    default_registry,
+    parse_rules,
+    merge_registry,
+    tag_names,
+)
 
 
 def expect(cond: Bool, what: String) raises:
@@ -89,6 +94,52 @@ def main() raises:
     expect(
         len(reg.tags_for("ACME WIDGETS LLC 0099")) == 0,
         "unknown merchant → no deterministic tag",
+    )
+
+    # ── user-editable registry: parse + merge ────────────────────────────────────
+    var cfg = String(
+        "# my categories\n"
+        "\n"
+        "pets = chewy, petco, the vet\n"
+        "phone = acme wireless\n"  # extends the built-in phone tag
+        "  health  =  my doctor ,  \n"  # whitespace + a trailing empty keyword
+        "malformed line with no equals\n"
+        "= no tag\n"  # empty tag → skipped
+    )
+    var user = parse_rules(cfg)
+    expect(
+        len(user) == 3, "parse_rules: 3 valid rules (skips malformed/empty-tag)"
+    )
+
+    var merged = merge_registry(default_registry(), user)
+
+    # new tag from a user-only keyword
+    expect(_has(merged.tags_for("CHEWY.COM 0123"), "pets"), "user rule → pets")
+    expect(
+        len(default_registry().tags_for("CHEWY.COM 0123")) == 0,
+        "defaults alone don't know pets (merge added it, base unchanged)",
+    )
+    # a user keyword EXTENDS a built-in tag (additive)
+    expect(
+        _has(merged.tags_for("ACME WIRELESS PMT 5551212"), "phone"),
+        "user keyword extends built-in phone tag",
+    )
+    # and the built-in phone keywords still work after merge
+    expect(
+        _has(merged.tags_for("Verizon Wireless Pmt"), "phone"),
+        "built-in phone keywords survive the merge (additive)",
+    )
+    # whitespace trimmed; trailing empty keyword dropped
+    expect(
+        _has(merged.tags_for("Visit to MY DOCTOR LLC"), "health"),
+        "trimmed user keyword 'my doctor' → health",
+    )
+
+    # tag_names lists the registry's tags (built-ins + the new user tag)
+    var names = tag_names(merged)
+    expect(
+        _has(names, "phone") and _has(names, "pets"),
+        "tag_names includes built-in + user tags",
     )
 
     print("ok: all categorize tests passed")

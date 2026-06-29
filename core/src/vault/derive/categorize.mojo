@@ -197,3 +197,89 @@ def default_registry() -> Registry:
         )
     )
     return Registry(rules^)
+
+
+# ── user-editable registry: parse + merge a config file ───────────────────────
+
+
+def parse_rules(text: String) raises -> List[Rule]:
+    """Parse user category rules from the config-file format. One rule per
+    non-comment line:
+
+        <tag> = <keyword>, <keyword>, ...
+
+    matched case-insensitively as substrings. Blank lines and lines starting
+    with `#` are ignored; tag/keywords are trimmed and empty keywords dropped
+    (so a malformed line yields no rule rather than an error). Keywords must not
+    contain `=` or `,` (the field separators). Excludes aren't exposed in the
+    user format yet — every parsed rule is keyword-only."""
+    var out = List[Rule]()
+    var lines = text.split("\n")
+    for i in range(len(lines)):
+        var line = String(lines[i].strip())
+        if line.byte_length() == 0 or line.startswith("#"):
+            continue
+        var parts = line.split("=")
+        if len(parts) < 2:
+            continue
+        var tag = String(parts[0].strip())
+        if tag.byte_length() == 0:
+            continue
+        var kw_parts = String(parts[1]).split(",")
+        var kws = List[String]()
+        for k in range(len(kw_parts)):
+            var kw = String(kw_parts[k].strip())
+            if kw.byte_length() > 0:
+                kws.append(kw^)
+        if len(kws) > 0:
+            out.append(Rule(tag^, kws^, List[String]()))
+    return out^
+
+
+def merge_registry(var base: Registry, extra: List[Rule]) raises -> Registry:
+    """Merge `extra` rules into `base` (additive): keywords for a tag that
+    already exists are APPENDED to that rule; a new tag is added as a new rule.
+    So a user line `phone = my carrier` extends the built-in `phone`, and a new
+    tag `pets = chewy, petco` creates a category. Built-in keywords are never
+    removed (v1 is additive)."""
+    for e in range(len(extra)):
+        ref er = extra[e]
+        var found = -1
+        for b in range(len(base.rules)):
+            if base.rules[b].tag == er.tag:
+                found = b
+                break
+        if found >= 0:
+            var r = base.rules[found].copy()
+            for k in range(len(er.keywords)):
+                r.keywords.append(er.keywords[k].copy())
+            base.rules[found] = r^
+        else:
+            base.rules.append(er.copy())
+    return base^
+
+
+def tag_names(reg: Registry) raises -> List[String]:
+    """The distinct tags the registry can assign, in registry order — what the
+    codegen context advertises and the System tab lists."""
+    var out = List[String]()
+    for i in range(len(reg.rules)):
+        out.append(reg.rules[i].tag.copy())
+    return out^
+
+
+def registry_template() raises -> String:
+    """The commented config-file template written to
+    `~/.config/millfolio/categories.txt` when absent — documents the format so
+    the user can discover and extend their categories."""
+    return String(
+        "# millfolio category rules — add your own categories here.\n#\n# Each"
+        " non-comment line maps a TAG to comma-separated keywords, matched\n#"
+        " case-insensitively as substrings of the transaction description.\n#"
+        " Repeat a built-in tag to ADD keywords to it; use a new tag name to\n#"
+        " create a new category. Matched at index time — re-run `mill index`\n#"
+        " after editing.\n#\n# Examples (uncomment / edit):\n#   phone = my"
+        " carrier name\n#   pets = chewy, petco, the vet\n#   subscriptions ="
+        " netflix, spotify, hbo max\n#\n# Built-in tags: phone, travel,"
+        " restaurant, groceries, health\n"
+    )
