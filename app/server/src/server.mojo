@@ -55,6 +55,7 @@ from events import (
     error_event,
     json_escape,
 )
+from store import ask_record_line, history_records_array, system_json
 from json import loads
 
 comptime DEFAULT_PORT = 10000
@@ -416,25 +417,13 @@ struct Api(Copyable, Handler, Movable):
         and answer. JSONL, so we comma-join the non-empty lines into an array — no
         server-side JSON parsing. Missing file → empty list. Newest first so the UI
         panel shows the most recent ask at the top."""
-        var recs = String("")
-        var first = True
+        var raw = String("")
         try:
-            var raw: String
             with open(_asks_path(), "r") as f:
                 raw = f.read()
-            var lines = raw.split("\n")
-            # Walk in reverse → newest record first in the array.
-            for i in range(len(lines) - 1, -1, -1):
-                var ln = String(lines[i]).strip()
-                if ln.byte_length() == 0:
-                    continue
-                if not first:
-                    recs += ","
-                recs += ln
-                first = False
         except:
-            pass
-        return _cors(ok_json('{"records":[' + recs + "]}"))
+            pass  # missing file → empty history
+        return _cors(ok_json('{"records":' + history_records_array(raw) + "}"))
 
     def handle_system(self) raises -> Response:
         """System info for the System tab: WHERE the data + logs live, so a user can
@@ -442,22 +431,18 @@ struct Api(Copyable, Handler, Movable):
         answer looks wrong, plus the running version/model. Paths are computed from
         $HOME so they stay correct across machines; the log locations mirror the ones
         the `mill` CLI's launch agents write to."""
-        var home = getenv("HOME", "")
-        var app_log = home + "/Library/Application Support/Millfolio/Millfolio.log"
-        var server_log = home + "/Library/Logs/Millfolio/server.log"
-        var transcripts = String("/tmp/millfolio/sessions/")
-        var out = String("{")
-        out += '"version":' + _json_escape(_app_version()) + ","
-        out += '"model":' + _json_escape(_model_label()) + ","
-        out += '"dataDir":' + _json_escape(_config_dir()) + ","
-        out += '"statsFile":' + _json_escape(_stats_path()) + ","
-        out += '"asksFile":' + _json_escape(_asks_path()) + ","
-        out += '"logs":{'
-        out += '"transcripts":' + _json_escape(transcripts) + ","
-        out += '"app":' + _json_escape(app_log) + ","
-        out += '"server":' + _json_escape(server_log)
-        out += "}}"
-        return _cors(ok_json(out))
+        return _cors(
+            ok_json(
+                system_json(
+                    getenv("HOME", ""),
+                    _app_version(),
+                    _model_label(),
+                    _config_dir(),
+                    _stats_path(),
+                    _asks_path(),
+                )
+            )
+        )
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
@@ -830,18 +815,10 @@ def _append_ask(
     behind the chat history panel: every ask is kept forever with the program that
     was generated and the answer it produced. Best-effort — a write failure is
     logged, never propagated into the chat reply."""
-    var line = String("{")
-    line += '"ts":' + String(epoch)
-    line += ',"q":' + _json_escape(question)
-    line += ',"code":' + _json_escape(code)
-    line += ',"answer":' + _json_escape(answer)
-    line += ',"source":' + _json_escape(source)
-    line += ',"model":' + _json_escape(model)
-    line += ',"ok":' + ("true" if ok else "false")
-    line += "}\n"
+    var line = ask_record_line(epoch, question, code, answer, source, model, ok)
     try:
         with open(_asks_path(), "a") as f:
-            f.write(line)
+            f.write(line + "\n")  # JSONL — one record per line
     except:
         log("[asks] append failed (non-fatal)")
 
