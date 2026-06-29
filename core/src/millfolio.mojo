@@ -232,21 +232,46 @@ def _json_str(s: String) -> String:
     return out
 
 
+def _search_min_sim() raises -> Float64:
+    """Minimum cosine similarity for a UI search hit to be shown. The embedding
+    server returns L2-normalized vectors, so LanceDB's default squared-L2
+    `_distance` d maps cleanly to cosine: `cos = 1 - d/2`. k-NN ALWAYS returns the
+    k nearest chunks — even when nothing is actually relevant (a term absent from
+    the vault, e.g. "anthropic") — so without a floor the UI shows junk. We drop
+    hits below this similarity. Tunable via MILLFOLIO_SEARCH_MIN_SIM; default 0.4."""
+    var raw = getenv("MILLFOLIO_SEARCH_MIN_SIM", "")
+    if raw == "":
+        return 0.4
+    try:
+        return atof(raw)
+    except:
+        return 0.4
+
+
 def _search_json(query: String, k: Int, out_path: String) raises:
     """Machine-readable search for the app server / clients: a JSON array of
-    {alias, score, text}, nearest first. `alias` is the frontier-safe token; real
-    names stay server-side (resolve via /api/vault). With `--out <path>` the JSON
-    is written to that file (so a caller's captured stdout/stderr noise can't
-    corrupt it); otherwise it's printed to stdout."""
+    {alias, score, text}, nearest first. `score` is COSINE SIMILARITY (higher =
+    better, ~[0,1]); hits below `_search_min_sim()` are omitted so an absent term
+    returns `[]` instead of the k nearest unrelated chunks. `alias` is the
+    frontier-safe token; real names stay server-side (resolve via /api/vault). With
+    `--out <path>` the JSON is written to that file (so a caller's captured
+    stdout/stderr noise can't corrupt it); otherwise it's printed to stdout."""
     var hits = search(query, k, _embed_url())
+    var min_sim = _search_min_sim()
     var out = String("[")
+    var first = True
     for i in range(len(hits)):
         ref h = hits[i]
-        if i > 0:
+        # h.score is LanceDB's squared-L2 distance over unit vectors → cosine.
+        var sim = 1.0 - Float64(h.score) / 2.0
+        if sim < min_sim:
+            continue  # below the relevance floor — not a real match
+        if not first:
             out += ","
+        first = False
         out += "{"
         out += '"alias":' + _json_str(h.file_alias) + ","
-        out += '"score":' + String(h.score) + ","
+        out += '"score":' + String(sim) + ","
         out += '"text":' + _json_str(h.text)
         out += "}"
     out += "]"
