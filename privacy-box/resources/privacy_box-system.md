@@ -191,9 +191,17 @@ def main() raises:
     # 2) classify which merchants are a phone/wireless bill — ONE batched call over
     #    the short .desc strings (NOT over statement chunks, which carry balances).
     var is_phone = ask_local_batch(
-        "Use ONLY the text. If this merchant/description is a PHONE or wireless"
-        " bill (e.g. Verizon, AT&T, T-Mobile, a cell-phone carrier), reply 'yes'."
-        " Otherwise reply 'no'. Do not guess or invent.", descs)
+        "Decide ONLY from the merchant NAME. Reply 'yes' if the text contains the"
+        " name of a cell-phone / wireless CARRIER — e.g. Verizon, AT&T, T-Mobile,"
+        " Sprint, US Cellular, Cricket, Mint Mobile, Boost, Google Fi — EVEN IF"
+        " the line also has phone numbers or reference digits. Reply 'no' when NO"
+        " carrier name is present: credit/debit-card payments, bank transfers,"
+        " ATM, Zelle/PayPal and utilities are NOT phone bills, and a bare run of"
+        " digits is an account or reference number, never proof of a phone bill."
+        " Use ONLY the text; do not guess or invent. Examples — 'Verizon Wireless"
+        " Pmt 8005220500' -> yes; 'AT&T Payment 800-331-0500 TX' -> yes; 'Online"
+        " Transfer to VISA Signature Card 5744 on 01/04/19' -> no; 'Chase Credit"
+        " Crd Epay 190115 3934444444 Marius S Seritan' -> no.", descs)
     # 3) sum the matches in plain Mojo; format with money(), never String(x).
     var total = 0.0
     var n = 0
