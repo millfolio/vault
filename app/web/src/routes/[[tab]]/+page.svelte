@@ -4,6 +4,7 @@
   import ChatPanel from "$lib/components/ChatPanel.svelte";
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import StatsPanel from "$lib/components/StatsPanel.svelte";
+  import SystemPanel from "$lib/components/SystemPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
   import type { ServerEvent, Session, MillfolioClient, StepState } from "$lib/protocol";
@@ -73,10 +74,16 @@
   let busy = $state(false);
   let session: Session | undefined;
   // The active tab is driven by the URL ([[tab]] optional-param route): "/" → chat,
-  // "/vault" → vault, "/stats" → stats. One component serves all three, so switching
-  // tabs is a same-route param change (no remount) — the chat session survives.
-  const view = $derived<"chat" | "vault" | "stats">(
-    page.params.tab === "vault" ? "vault" : page.params.tab === "stats" ? "stats" : "chat",
+  // "/vault" → vault, "/stats" → stats, "/system" → system. One component serves all
+  // tabs, so switching is a same-route param change (no remount) — the chat survives.
+  const view = $derived<"chat" | "vault" | "stats" | "system">(
+    page.params.tab === "vault"
+      ? "vault"
+      : page.params.tab === "stats"
+        ? "stats"
+        : page.params.tab === "system"
+          ? "system"
+          : "chat",
   );
   // Run-queue position — shown as a floating bottom-right badge, not inline.
   let queueMsg = $state<string | null>(null);
@@ -239,6 +246,7 @@
       <a class:active={view === "chat"} href="/">Chat</a>
       <a class:active={view === "vault"} href="/vault">Vault</a>
       <a class:active={view === "stats"} href="/stats">Stats</a>
+      {#if !isDemo}<a class:active={view === "system"} href="/system">System</a>{/if}
     </nav>
   </header>
   {#if vaultEmpty && view === "chat"}
@@ -255,6 +263,8 @@
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
     {:else if view === "vault"}
       <VaultPanel />
+    {:else if view === "system"}
+      <SystemPanel />
     {:else}
       <StatsPanel />
     {/if}

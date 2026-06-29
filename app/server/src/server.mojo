@@ -342,6 +342,8 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_stats()
         if path == "/api/history":
             return self.handle_history()
+        if path == "/api/system":
+            return self.handle_system()
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -433,6 +435,29 @@ struct Api(Copyable, Handler, Movable):
         except:
             pass
         return _cors(ok_json('{"records":[' + recs + "]}"))
+
+    def handle_system(self) raises -> Response:
+        """System info for the System tab: WHERE the data + logs live, so a user can
+        find a per-ask transcript (the generated program + its run output) when an
+        answer looks wrong, plus the running version/model. Paths are computed from
+        $HOME so they stay correct across machines; the log locations mirror the ones
+        the `mill` CLI's launch agents write to."""
+        var home = getenv("HOME", "")
+        var app_log = home + "/Library/Application Support/Millfolio/Millfolio.log"
+        var server_log = home + "/Library/Logs/Millfolio/server.log"
+        var transcripts = String("/tmp/millfolio/sessions/")
+        var out = String("{")
+        out += '"version":' + _json_escape(_app_version()) + ","
+        out += '"model":' + _json_escape(_model_label()) + ","
+        out += '"dataDir":' + _json_escape(_config_dir()) + ","
+        out += '"statsFile":' + _json_escape(_stats_path()) + ","
+        out += '"asksFile":' + _json_escape(_asks_path()) + ","
+        out += '"logs":{'
+        out += '"transcripts":' + _json_escape(transcripts) + ","
+        out += '"app":' + _json_escape(app_log) + ","
+        out += '"server":' + _json_escape(server_log)
+        out += "}}"
+        return _cors(ok_json(out))
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
