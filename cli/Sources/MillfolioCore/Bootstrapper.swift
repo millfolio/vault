@@ -1298,7 +1298,102 @@ public final class Bootstrapper: ObservableObject {
     /// models' weights) + privacy_box + millfolio, idempotently. Each step skips what's
     /// already installed (see the guards in installServer/PrivacyBoxEngine/Millfolio-
     /// Engine), so re-running is cheap and reuses anything present.
+    // MARK: - Environment preflight (shared by `mill install` + `mill doctor`)
+
+    /// One environment prerequisite: a human label, whether it passed, and the
+    /// command that fixes it when it didn't.
+    public struct EnvCheck: Sendable {
+        public let label: String
+        public let ok: Bool
+        public let hint: String
+    }
+
+    /// Run a probe command, returning (trimmed combined output, exit code) and NEVER
+    /// throwing — for env checks where a nonzero exit just means "not installed".
+    private func probe(_ launch: String, _ args: [String]) -> (out: String, code: Int32) {
+        guard FileManager.default.isExecutableFile(atPath: launch) else { return ("", 127) }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: launch)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        do { try p.run() } catch { return ("", 127) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        let out = (String(data: data, encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (out, p.terminationStatus)
+    }
+
+    /// The BUILD prerequisites `mill install` needs, one EnvCheck each — so the install
+    /// preflight and `mill doctor` share ONE source of truth. Pure inspection:
+    ///   • Apple Silicon (arm64).
+    ///   • FULL Xcode selected (not just Command Line Tools) — `xcodebuild
+    ///     -downloadComponent` and the Metal compiler live in Xcode, not the CLT.
+    ///   • Metal Toolchain present — the engine compiles Metal GPU kernels at build
+    ///     time; without it `mojo build` fails mid-install with `Metal Compiler failed
+    ///     to compile metallib`. Probed with `xcrun metal --version`, which exits
+    ///     nonzero ("missing Metal Toolchain") when the component isn't downloaded —
+    ///     unlike `xcrun --find metal`, whose wrapper can exist while it's missing.
+    ///   • Python ≥ 3.10 (the Mojo toolchain needs one).
+    public func preflightEnv() -> [EnvCheck] {
+        var checks: [EnvCheck] = []
+
+        let arch = probe("/usr/bin/uname", ["-m"]).out
+        let osVer = probe("/usr/bin/sw_vers", ["-productVersion"]).out
+        checks.append(EnvCheck(
+            label: "Apple Silicon — \(arch.isEmpty ? "?" : arch), macOS \(osVer.isEmpty ? "?" : osVer)",
+            ok: arch == "arm64",
+            hint: "millfolio requires an Apple-Silicon Mac"))
+
+        // Full Xcode: the active developer dir must live inside an Xcode.app, not the
+        // CommandLineTools dir (which can't download the Metal Toolchain).
+        let devDir = probe("/usr/bin/xcode-select", ["-p"]).out
+        checks.append(EnvCheck(
+            label: "Full Xcode — \(devDir.isEmpty ? "none selected" : devDir)",
+            ok: devDir.contains(".app/Contents/Developer"),
+            hint: "install Xcode (App Store), then: sudo xcode-select -s /Applications/Xcode.app"))
+
+        // Metal Toolchain: succeeds only when the downloadable component is present.
+        checks.append(EnvCheck(
+            label: "Metal toolchain",
+            ok: probe("/usr/bin/xcrun", ["metal", "--version"]).code == 0,
+            hint: "install: xcodebuild -downloadComponent MetalToolchain"))
+
+        // Python ≥ 3.10.
+        var pyLabel = "not found"
+        var pyOK = false
+        if let py = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            let v = probe(py, ["--version"]).out  // e.g. "Python 3.12.4"
+            pyLabel = v.isEmpty ? py : v
+            let parts = v.replacingOccurrences(of: "Python ", with: "").split(separator: ".")
+            if parts.count >= 2, let major = Int(parts[0]), let minor = Int(parts[1]) {
+                pyOK = major > 3 || (major == 3 && minor >= 10)
+            }
+        }
+        checks.append(EnvCheck(label: "Python 3 — \(pyLabel)", ok: pyOK, hint: "Python ≥ 3.10 is required"))
+
+        return checks
+    }
+
+    /// Fail FAST — before any build — if a build prerequisite is missing, so e.g. a
+    /// missing Metal Toolchain surfaces immediately as "run X, then re-run mill install"
+    /// rather than as a cryptic `metallib` compile error several steps in. `mill doctor`
+    /// shows the same checks without throwing.
+    public func requireEnv() throws {
+        let failed = preflightEnv().filter { !$0.ok }
+        guard failed.isEmpty else {
+            let lines = failed.map { "  ✗ \($0.label)\n      → \($0.hint)" }.joined(separator: "\n")
+            throw BootstrapError.preflight(
+                "millfolio can't install — missing prerequisite(s):\n\(lines)\n\n"
+                + "Fix the above, then re-run `mill install`  (`mill doctor` re-checks).")
+        }
+    }
+
     public func installVault() async throws {
+        try requireEnv()                    // fail fast on missing Xcode/Metal/Python
         try await installServer()           // engine + chat + embedding weights
         try await installPrivacyBoxEngine()   // the vault orchestrator/sandbox + tools
         try await installMillfolioEngine()    // the vault tools + indexer
@@ -1855,8 +1950,12 @@ public final class Bootstrapper: ObservableObject {
 
 public enum BootstrapError: Error, CustomStringConvertible {
     case step(String, String)
+    case preflight(String)
     public var description: String {
-        switch self { case .step(let s, let m): return "\(s): \(m)" }
+        switch self {
+        case .step(let s, let m): return "\(s): \(m)"
+        case .preflight(let m): return m
+        }
     }
 }
 

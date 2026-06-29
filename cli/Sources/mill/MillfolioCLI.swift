@@ -149,24 +149,13 @@ struct Doctor: AsyncParsableCommand {
         let fm = FileManager.default
         var checks: [(String, Bool, String)] = []   // (label, ok, hint-when-failing)
 
-        // ── environment ──
-        let osVer = sh("/usr/bin/sw_vers", ["-productVersion"]).out
-        let arch  = sh("/usr/bin/uname", ["-m"]).out
-        checks.append(("Apple Silicon — \(arch), macOS \(osVer)", arch == "arm64",
-                       "millfolio requires an Apple-Silicon Mac"))
-        let clt = sh("/usr/bin/xcode-select", ["-p"])
-        checks.append(("Xcode command-line tools", clt.code == 0 && !clt.out.isEmpty,
-                       "install: xcode-select --install"))
-        let metal = sh("/usr/bin/xcrun", ["--find", "metal"])
-        checks.append(("Metal toolchain", metal.code == 0 && !metal.out.isEmpty,
-                       "install: xcodebuild -downloadComponent MetalToolchain"))
+        // ── environment — the build prerequisites are the SAME checks `mill install`
+        // gates on (boot.preflightEnv()), so doctor and the install preflight never drift.
+        let osVer = sh("/usr/bin/sw_vers", ["-productVersion"]).out  // kept for the report title
+        for c in boot.preflightEnv() { checks.append((c.label, c.ok, c.hint)) }
         checks.append(("Homebrew",
                        ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].contains { fm.isExecutableFile(atPath: $0) },
                        "https://brew.sh"))
-        let py = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
-            .first { fm.isExecutableFile(atPath: $0) }
-        checks.append(("Python 3 — \(py.map { sh($0, ["--version"]).out } ?? "not found")",
-                       py != nil, "Python ≥ 3.10 is required"))
         let vals = try? URL(fileURLWithPath: NSHomeDirectory())
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         let freeGB = Double(vals?.volumeAvailableCapacityForImportantUsage ?? 0) / 1e9
