@@ -41,7 +41,13 @@ from std.time import perf_counter_ns
 
 from settings import load_config
 from wiring import build_vault_orchestrator
-from orchestrator import Orchestrator, PROGRESS_SENTINEL, STAT_SENTINEL, LOCAL_SENTINEL, LOCAL_SEP
+from orchestrator import (
+    Orchestrator,
+    PROGRESS_SENTINEL,
+    STAT_SENTINEL,
+    LOCAL_SENTINEL,
+    LOCAL_SEP,
+)
 from transport import DeltaSink
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
 from vaultcfg import vault_dir as resolve_vault_dir
@@ -1140,8 +1146,12 @@ def on_connect(mut conn: WsConnection) raises:
                     # one-line sentinel — restore it for readability.
                     var rec = String(ln.removeprefix(LOCAL_SENTINEL))
                     var sg = rec.split(LOCAL_SEP)
-                    var sent = _unescape_nl(String(sg[0])) if len(sg) >= 1 else String("")
-                    var got = _unescape_nl(String(sg[1])) if len(sg) >= 2 else String("")
+                    var sent = _unescape_nl(String(sg[0])) if len(
+                        sg
+                    ) >= 1 else String("")
+                    var got = _unescape_nl(String(sg[1])) if len(
+                        sg
+                    ) >= 2 else String("")
                     conn.send_text(
                         debug_event(
                             "execute",
@@ -1315,6 +1325,17 @@ def main() raises:
     runq_reset()  # clear any stale run-queue state from a prior process
     var srv = HttpServer.bind(SocketAddr.localhost(UInt16(port)))
     srv.config.ws_handler = on_connect
+    # Run each chat WebSocket on its OWN detached thread (off the reactor).
+    # A chat query blocks for ~30s–2min inside `on_connect` (codegen's Anthropic
+    # call, then compile + the run-poll loop). Inline, that parks the whole reactor
+    # worker, so the read-only API GETs (/api/system, /api/vault, …) pinned to that
+    # worker stall for the entire query — the UI's System tab shows "Loading…".
+    # Offloading frees the reactor to keep answering those GETs while the chat runs.
+    # The sandboxed RUN stays serial regardless (the flock run-queue in on_connect);
+    # only manifest+codegen now overlap across visitors — desired for the demo.
+    # MILLFOLIO_WS_INLINE=1 restores the old inline (reactor-blocking) behaviour.
+    if getenv("MILLFOLIO_WS_INLINE", "") == "":
+        srv.config.ws_offload = True
     var workers = _workers()
     if workers > 1:
         print(
