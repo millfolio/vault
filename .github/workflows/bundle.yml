@@ -5,7 +5,10 @@ name: bundle
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    # Only PRE-RELEASE tags (vX.Y.Z-rc.N, the DEV channel) build + attach assets.
+    # Plain vX.Y.Z prod tags are created by `release:promote`, which COPIES the
+    # tested rc's assets — they must NOT trigger a rebuild that would clobber them.
+    tags: ["v*-*"]
   pull_request:
     paths: ["scripts/package_bundle.sh", ".github/workflows/bundle.yml"]
   workflow_dispatch:
@@ -96,3 +99,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: millfolio.zip
+          # A pre-release tag (vX.Y.Z-rc.N) is the DEV channel — keep it OFF
+          # /releases/latest so prod CLIs (and the version-pinned bundle URL) ignore
+          # it until `release:promote` copies the assets to a clean vX.Y.Z release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}

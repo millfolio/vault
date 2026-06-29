@@ -3,7 +3,10 @@ name: build cli
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    # Only PRE-RELEASE tags (vX.Y.Z-rc.N, the DEV channel) build + attach the CLI.
+    # Plain vX.Y.Z prod tags are created by `release:promote`, which copies the
+    # tested rc's CLI tarball — a rebuild there would clobber the tested binary.
+    tags: ["v*-*"]
   pull_request:
   workflow_dispatch:
 
@@ -80,6 +83,9 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: mill-macos.tar.gz
+          # Pre-release tag = DEV channel → keep it off /releases/latest (see bundle.yml).
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
           body: |
             The `mill` CLI — the millfolio personal data vault on Apple Silicon.
 

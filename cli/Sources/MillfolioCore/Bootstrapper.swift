@@ -185,8 +185,17 @@ public final class Bootstrapper: ObservableObject {
     // All on-device-built source ships in ONE archive whose subtrees mirror the
     // former four zips: runner/ privacy_box/ millfolio/ app/. Downloaded once and
     // built per-component, so the per-component build steps below are unchanged.
-    private let bundleURL =
-        URL(string: "https://github.com/millfolio/vault/releases/latest/download/millfolio.zip")!
+    // Pin the bundle to THIS CLI's release tag, not /releases/latest/, so the CLI and
+    // its bundle move atomically AND a dev (pre-release) CLI fetches the dev bundle —
+    // GitHub's /releases/latest skips pre-releases, so /latest/ would hand a dev CLI
+    // the last PROD bundle. A source build with no Homebrew tag falls back to /latest/.
+    private var bundleURL: URL {
+        let v = brewCliVersion()  // e.g. "v0.4.36" (prod) or "v0.4.37-rc.1" (dev), "" if unmanaged
+        if !v.isEmpty {
+            return URL(string: "https://github.com/millfolio/vault/releases/download/\(v)/millfolio.zip")!
+        }
+        return URL(string: "https://github.com/millfolio/vault/releases/latest/download/millfolio.zip")!
+    }
     private var bundleRoot: URL { support.appendingPathComponent("bundle", isDirectory: true) }
     private var engineRoot: URL { bundleRoot.appendingPathComponent("runner", isDirectory: true) }
     /// HF cache root for the model weights (HF_HOME). Self-contained under support/.
@@ -1802,9 +1811,20 @@ public final class Bootstrapper: ObservableObject {
     private func brewCliVersion() -> String {
         guard let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { return "" }
-        guard let out = try? run(brew, ["list", "--versions", "millfolio/tap/mill"]) else { return "" }
-        let toks = out.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
-        return toks.count >= 2 ? "v" + toks.last! : ""
+        // Two channels: prod is `millfolio/tap/mill` (binary `mill`), dev is
+        // `millfolio/tap/mill-dev` (binary `mill-dev`). Prefer the formula matching how
+        // THIS binary was invoked, so a dev CLI reads the dev version (and thus fetches
+        // the dev bundle). If only one is installed, that one wins.
+        let exe = (CommandLine.arguments.first.map { ($0 as NSString).lastPathComponent }) ?? "mill"
+        let formulae = exe == "mill-dev"
+            ? ["millfolio/tap/mill-dev", "millfolio/tap/mill"]
+            : ["millfolio/tap/mill", "millfolio/tap/mill-dev"]
+        for formula in formulae {
+            guard let out = try? run(brew, ["list", "--versions", formula]) else { continue }
+            let toks = out.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
+            if toks.count >= 2 { return "v" + toks.last! }
+        }
+        return ""
     }
 
     /// Installed versions of millfolio + its components (label, version) for display.
