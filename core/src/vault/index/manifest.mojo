@@ -101,21 +101,14 @@ def _collect_files(dir: String, mut out: List[String]) raises:
             out.append(p.copy())
 
 
-def build_manifest(data_dir: String) raises -> List[FileInfo]:
-    """Scan `data_dir` RECURSIVELY (subfolders included) and build the aliased
-    manifest. Files that aren't CSV/PDF/Markdown/DOCX are skipped; aliases are
-    assigned in sorted-path order for stability. `FileInfo.path` is the full real
-    path (local-only); a file's identity within the vault is its path RELATIVE to
-    `data_dir` (e.g. `reports/q1.pdf`), so same-named files in different subfolders
-    don't collide. A missing vault dir is created (empty) rather than an error.
+def manifest_for_files(paths_in: List[String]) raises -> List[FileInfo]:
+    """Build the kind-filtered, alias-assigned `FileInfo` list for an EXPLICIT set
+    of candidate file `paths` (sorted by full path for stable aliasing). Files that
+    aren't CSV/PDF/Markdown/DOCX are skipped. Callers compute each file's vault
+    name relative to the source base (`_relpath`); aliases here are positional.
     """
-    makedirs(data_dir, exist_ok=True)
-    var paths = List[String]()
-    _collect_files(data_dir, paths)
-    _sort_names(
-        paths
-    )  # full paths share the data_dir prefix → sorts like relpaths
-
+    var paths = paths_in.copy()
+    _sort_names(paths)
     var infos = List[FileInfo]()
     var idx = 0
     for i in range(len(paths)):
@@ -133,3 +126,90 @@ def build_manifest(data_dir: String) raises -> List[FileInfo]:
         )
         idx += 1
     return infos^
+
+
+def build_manifest(data_dir: String) raises -> List[FileInfo]:
+    """Scan `data_dir` RECURSIVELY (subfolders included) and build the aliased
+    manifest. Files that aren't CSV/PDF/Markdown/DOCX are skipped; aliases are
+    assigned in sorted-path order for stability. `FileInfo.path` is the full real
+    path (local-only); a file's identity within the vault is its path RELATIVE to
+    `data_dir` (e.g. `reports/q1.pdf`), so same-named files in different subfolders
+    don't collide. A missing vault dir is created (empty) rather than an error.
+    """
+    makedirs(data_dir, exist_ok=True)
+    var paths = List[String]()
+    _collect_files(data_dir, paths)
+    return manifest_for_files(paths)
+
+
+def collect_index_paths(roots: List[String]) raises -> List[String]:
+    """Every indexable candidate file across `roots`: a DIRECTORY root is walked
+    recursively (`_collect_files`); a FILE root is taken as-is. Non-existent roots
+    are skipped (the CLI validates existence before we get here)."""
+    var out = List[String]()
+    for r in range(len(roots)):
+        var root = roots[r]
+        if isdir(root):
+            _collect_files(root, out)
+        elif isfile(root):
+            out.append(root.copy())
+    return out^
+
+
+def _last_slash(s: String) -> Int:
+    """Byte index of the last '/' in `s`, or -1 if none."""
+    var b = s.as_bytes()
+    var idx = -1
+    for i in range(len(b)):
+        if b[i] == 47:  # '/'
+            idx = i
+    return idx
+
+
+def _dirname(path: String) raises -> String:
+    """The directory containing `path` (everything before the last '/'). '/' for a
+    root-level entry, '.' when there's no slash at all."""
+    var i = _last_slash(path)
+    if i < 0:
+        return String(".")
+    if i == 0:
+        return String("/")
+    return String(path[byte=:i])
+
+
+def common_base(roots: List[String]) raises -> String:
+    """The directory all `roots` live under — used as the index `source_dir`, with
+    every file then named RELATIVE to it. A single directory root IS its own base
+    (names stay relative to it, e.g. `reports/q1.pdf`, preserving the original
+    single-folder behaviour); a single file's base is its parent dir; multiple
+    roots use their longest common ancestor directory (so e.g. indexing `WF/` and
+    `Chase/` names files `WF/…` and `Chase/…` with no collisions)."""
+    if len(roots) == 0:
+        return String(".")
+    if len(roots) == 1:
+        return roots[0].copy() if isdir(roots[0]) else _dirname(roots[0])
+    # Longest common component-wise prefix of the roots (abs paths split to
+    # ["", "a", "b", …]; the leading "" keeps the root slash).
+    var common = List[String]()
+    var first = roots[0].split("/")
+    for p in range(len(first)):
+        common.append(String(first[p]))
+    for r in range(1, len(roots)):
+        var parts = roots[r].split("/")
+        var n = len(common) if len(common) < len(parts) else len(parts)
+        var k = 0
+        while k < n and common[k] == String(parts[k]):
+            k += 1
+        var trunc = List[String]()
+        for j in range(k):
+            trunc.append(common[j].copy())
+        common = trunc^
+    var base = String("")
+    for j in range(len(common)):
+        if j > 0:
+            base += "/"
+        base += common[j]
+    # All-absolute roots that share only "/" collapse to "" above → restore "/".
+    if base == "" and roots[0].byte_length() > 0 and roots[0].startswith("/"):
+        return String("/")
+    return base^

@@ -232,22 +232,42 @@ struct Index: AsyncParsableCommand {
         rebuild from scratch — needed after an extractor/chunking change (e.g. the \
         PDF fix), where file bytes (and the skip-hash) don't change.
         """)
-    @Argument(help: "The folder to index (your vault dir).")
-    var folder: String
+    @Argument(help: "One or more files or folders to index (folders are walked recursively).")
+    var paths: [String]
 
     @Flag(name: .long, help: "Rebuild the whole index even if no files changed.")
     var force = false
 
     @MainActor func run() async throws {
+        guard !paths.isEmpty else {
+            FileHandle.standardError.write(Data(
+                "mill index: give one or more files or folders to index\n".utf8))
+            throw ExitCode.failure
+        }
+        // Validate + make ABSOLUTE. The millfolio child runs with a different
+        // working directory, so a relative path like `financial/WF` would resolve
+        // against the wrong cwd (and silently index nothing) — resolve each here
+        // against the user's cwd. Fail fast on anything that doesn't exist.
+        let fm = FileManager.default
+        var absPaths: [String] = []
+        for p in paths {
+            guard fm.fileExists(atPath: p) else {
+                FileHandle.standardError.write(Data(
+                    "mill index: does not exist: \(p)\n".utf8))
+                throw ExitCode.failure
+            }
+            absPaths.append(URL(fileURLWithPath: p).standardizedFileURL.path)
+        }
+
         let boot = streaming()   // stream progress to the console
         // Indexing embeds every chunk via the inference server — make sure it's up,
         // else `index` blocks on a dead endpoint (or stalls waiting for embeddings)
         // with no feedback. First start also loads the embedding model (~tens of s).
         try boot.ensureInferenceServer()
         print("Indexing — progress below (first run loads the embedding model):")
-        // Run the millfolio launcher (`index <folder> [--force]`) as a logged child
+        // Run the millfolio launcher (`index <path…> [--force]`) as a logged child
         // so its output — and any failure — is captured in the millfolio log.
-        let code = try boot.runVaultIndex(folder: folder, force: force)
+        let code = try boot.runVaultIndex(paths: absPaths, force: force)
         try finish(code, boot, "mill index")
     }
 }

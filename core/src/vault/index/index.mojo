@@ -28,7 +28,14 @@ from std.os import getenv, makedirs, remove, rmdir, listdir
 from std.os.path import exists, isfile
 
 from lancedb import Store
-from vault.index.manifest import build_manifest, FileInfo, _csv_columns
+from vault.index.manifest import (
+    build_manifest,
+    manifest_for_files,
+    collect_index_paths,
+    common_base,
+    FileInfo,
+    _csv_columns,
+)
 from vault.index.readers import csv_rows, md_text, pdf_text, docx_text
 import vault.index.readers as readers
 from vault.index.embed import embed, embed_batch, EMBED_DIM
@@ -532,10 +539,18 @@ def _embed_chunks(
 # ── build (incremental) ───────────────────────────────────────────────────────
 
 
-def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
-    """Incrementally bring the index in sync with `data_dir`: embed only new and
-    content-changed files, delete chunks for changed/removed files, and skip
-    unchanged files. A no-op when nothing changed.
+def build_index(
+    roots: List[String], base_url: String, force: Bool = False
+) raises:
+    """Incrementally bring the index in sync with `roots` — one or more files
+    and/or directories. Directories are walked recursively; files are indexed
+    directly. Embed only new and content-changed files, delete chunks for
+    changed/removed files, skip unchanged files. A no-op when nothing changed.
+
+    Every file is named RELATIVE to the common-ancestor directory of `roots` (the
+    index `source_dir`), so a single folder behaves exactly as before
+    (`reports/q1.pdf`) and several folders stay distinct (`WF/2019-01.pdf`,
+    `Chase/…`).
 
     `force` rebuilds from scratch even when nothing changed — use it when the
     extraction/chunking logic itself changed (e.g. an improved PDF extractor),
@@ -545,6 +560,17 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     (e.g. http://127.0.0.1:8000/v1); a failed embed aborts with a clear error.
     """
     makedirs(_config_dir(), exist_ok=True)
+
+    # Normalise roots (drop trailing slashes), then derive the source base + the
+    # explicit candidate-file set across every root (dirs recursed, files direct).
+    var nroots = List[String]()
+    for r in range(len(roots)):
+        var rr = String(roots[r])
+        while rr.byte_length() > 1 and rr.endswith("/"):
+            rr = String(rr[byte = : rr.byte_length() - 1])
+        nroots.append(rr^)
+    var base = common_base(nroots)
+    var allpaths = collect_index_paths(nroots)
 
     var have_manifest = exists(_manifest_path())
     var man = _load_manifest()
@@ -558,7 +584,7 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
     var fresh = (
         force
         or (not have_manifest)
-        or (len(old) > 0 and man.source_dir != data_dir)
+        or (len(old) > 0 and man.source_dir != base)
     )
     if fresh:
         _rmtree(_db_uri())
@@ -571,12 +597,12 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         next_alias = 0
 
     # Current files (sorted, csv/pdf/md only) + their content hashes.
-    var infos = build_manifest(data_dir)
+    var infos = manifest_for_files(allpaths)
     print(
         "scanning "
         + String(len(infos))
-        + " file(s) in "
-        + data_dir
+        + " file(s) under "
+        + base
         + " for changes…"
     )
     var cur_paths = List[String]()
@@ -589,13 +615,13 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
         cur_paths.append(fi.path.copy())
         # Identity = full name relative to the vault root (recursion-safe: two
         # `report.pdf` in different subfolders stay distinct).
-        cur_names.append(_relpath(fi.path, data_dir))
+        cur_names.append(_relpath(fi.path, base))
         cur_kinds.append(fi.kind.copy())
         cur_sizes.append(fi.size)
         cur_shas.append(sha256_file_hex(fi.path))
         # Name every file the scan found (the embed step below logs only the
         # new/changed ones, so unchanged files would otherwise be invisible).
-        print("  • " + _relpath(fi.path, data_dir) + " [" + fi.kind + "]")
+        print("  • " + _relpath(fi.path, base) + " [" + fi.kind + "]")
 
     # Diff current vs old (by name + hash).
     var new_entries = List[
@@ -757,7 +783,7 @@ def build_index(data_dir: String, base_url: String, force: Bool = False) raises:
 
     _write_sidetable(st)
     _write_txn_rows(trows)
-    _write_manifest(Manifest(new_entries^, next_id, next_alias, data_dir))
+    _write_manifest(Manifest(new_entries^, next_id, next_alias, base))
     print(
         "index updated — "
         + String(len(emb_idx))

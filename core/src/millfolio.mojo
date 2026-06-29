@@ -138,15 +138,17 @@ def main() raises:
             return
         _embed(String(args[2]))
     elif cmd == "index":
-        var data_dir = _default_dir()
+        var roots = List[String]()
         var force = False
         for i in range(2, len(args)):
             var a = String(args[i])
             if a == "--force":
                 force = True
             else:
-                data_dir = a
-        build_index(data_dir, _embed_url(), force)
+                roots.append(a)
+        if len(roots) == 0:
+            roots.append(_default_dir())  # no paths → the configured vault dir
+        build_index(roots^, _embed_url(), force)
     elif cmd == "search":
         if len(args) < 3:
             print('usage: millfolio search "<query>" [k] [--json]')
