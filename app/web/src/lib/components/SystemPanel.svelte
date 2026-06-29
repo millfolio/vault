@@ -1,11 +1,10 @@
-<script module lang="ts">
+<script lang="ts">
+  import { onMount } from "svelte";
+
   // System info from the server (/api/system): where the data + logs live, plus the
-  // running version/model. Cached at MODULE scope (shared across tab switches — the
-  // [[tab]] route destroys/recreates this component) so the tab shows last-known data
-  // INSTANTLY instead of a perpetual "Loading…" while a question is being answered:
-  // the app server can't serve the GET during a long synchronous query (one effective
-  // worker — macOS SO_REUSEPORT doesn't load-balance, so MILLFOLIO_WORKERS doesn't
-  // help). The paths/version don't change within a session, so stale-while-busy is fine.
+  // running version/model. The point of this tab is discoverability — when an answer
+  // looks wrong, the per-ask transcript holds the generated program AND its run
+  // output, which is the fastest way to see what the model actually did.
   type Logs = { transcripts?: string; app?: string; server?: string };
   type Sys = {
     version?: string;
@@ -15,14 +14,9 @@
     asksFile?: string;
     logs?: Logs;
   };
-  let cachedSys: Sys | null = null;
-</script>
 
-<script lang="ts">
-  import { onMount } from "svelte";
-
-  let sys = $state<Sys | null>(cachedSys);
-  let loaded = $state(cachedSys !== null); // have cached data → no "Loading…"
+  let sys = $state<Sys | null>(null);
+  let loaded = $state(false);
   let failed = $state(false);
   let copied = $state(""); // the path most recently copied (for the ✓ hint)
 
@@ -35,17 +29,14 @@
   }
 
   onMount(() => {
-    // Refresh in the background; if the fetch stalls (server busy answering a
-    // question), the cached data stays on screen instead of reverting to "Loading…".
     fetch(`${apiBase()}/api/system`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => {
         sys = d as Sys;
-        cachedSys = d as Sys;
         loaded = true;
       })
       .catch(() => {
-        if (cachedSys === null) failed = true; // only "unavailable" with nothing cached
+        failed = true;
         loaded = true;
       });
   });
