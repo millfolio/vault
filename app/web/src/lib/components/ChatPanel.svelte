@@ -186,6 +186,29 @@
     if (stream) stream.scrollTop = stream.scrollHeight;
   });
 
+  // Live elapsed time on the currently-running step. The codegen step ("Writing the
+  // program") is a 30s+ BLOCKING call to the frontier model with no intermediary data,
+  // so without this it just looks hung. Frontend-only: key the timer on the active
+  // step's id (a string, so the effect only resets when the step actually changes —
+  // not on every items update) and tick until the next event replaces it.
+  const activeStepId = $derived<string | null>(
+    busy
+      ? ([...items].reverse().find((x) => x.kind === "status" && x.state === "running")?.id ?? null)
+      : null,
+  );
+  let stepElapsed = $state(0);
+  $effect(() => {
+    const id = activeStepId;
+    if (!id) { stepElapsed = 0; return; }
+    const t0 = Date.now();
+    stepElapsed = 0;
+    const h = setInterval(() => { stepElapsed = Math.floor((Date.now() - t0) / 1000); }, 1000);
+    return () => clearInterval(h);
+  });
+  function fmtElapsed(s: number): string {
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
   // When an ask finishes (busy true→false), the backend has just written its record
   // (question + generated program + answer) — pull it so the history entry upgrades
   // from question-only to the full stored detail.
@@ -270,6 +293,7 @@
           <span class="icon" aria-hidden="true">{icon[it.state ?? "pending"]}</span>
           <span class="label">{it.label}</span>
           {#if it.detail}<span class="detail">— {it.detail}</span>{/if}
+          {#if it.id === activeStepId && stepElapsed >= 2}<span class="elapsed">· {fmtElapsed(stepElapsed)}</span>{/if}
         </div>
       {:else if it.kind === "debug"}
         <details class="debug">
@@ -595,6 +619,10 @@
   .status.awaiting-approval .icon { color: var(--warn); }
   .status .detail {
     opacity: 0.8;
+  }
+  .status .elapsed {
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
   }
 
   /* debug — small, collapsible */
