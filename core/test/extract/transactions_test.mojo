@@ -283,6 +283,7 @@ def main() raises:
             500.0,
             String("credit"),
             String("Pay\tDay"),
+            List[String](),  # no tags
         )
     )
     rows.append(
@@ -292,6 +293,7 @@ def main() raises:
             800.0,
             String("debit"),
             String("Rent"),
+            [String("phone")],  # single tag
         )
     )
     rows.append(
@@ -301,6 +303,7 @@ def main() raises:
             4.50,
             String("debit"),
             String("Coffee"),
+            [String("travel"), String("restaurant")],  # multi-valued
         )
     )
     var back = tsv_to_txn_rows(txn_rows_to_tsv(rows))
@@ -311,13 +314,27 @@ def main() raises:
     )
     _say(sr, "transactions: TSV round-trips (incl. an escaped tab in desc)")
     ok = sr and ok
+    # tags column round-trips: empty / single / multi (and order preserved).
+    var st = (
+        len(back[0].tags) == 0
+        and len(back[1].tags) == 1
+        and back[1].tags[0] == "phone"
+        and len(back[2].tags) == 2
+        and back[2].tags[0] == "travel"
+        and back[2].tags[1] == "restaurant"
+    )
+    _say(st, "transactions: derived tags round-trip (empty / single / multi)")
+    ok = st and ok
     var sel = select_txns(back, String("file_0"))
     var ss = (
         len(sel) == 2
         and sel[0].direction == "credit"
         and _close(sel[1].amount, 800.0)
+        and len(sel[0].tags) == 0
+        and len(sel[1].tags) == 1
+        and sel[1].tags[0] == "phone"
     )
-    _say(ss, "transactions: select_txns returns just file_0's two rows")
+    _say(ss, "transactions: select_txns returns file_0's two rows (with tags)")
     ok = ss and ok
     var dropped = drop_aliases(back, [String("file_0")])
     var sd = len(dropped) == 1 and dropped[0].falias == "file_1"

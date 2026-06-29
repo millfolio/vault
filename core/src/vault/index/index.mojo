@@ -50,6 +50,7 @@ from vault.extract.transactions import (
     select_txns,
     texts_for_alias,
 )
+from vault.derive.categorize import default_registry
 
 
 comptime CHUNK_SIZE = 512  # ~codepoints per chunk
@@ -708,6 +709,9 @@ def build_index(
     )
 
     # Embed only new + changed files; append to LanceDB + the side-table.
+    # The derived-tag registry (deterministic, pure) is built once and matched
+    # over each reconciled transaction's description below.
+    var reg = default_registry()
     for t in range(len(emb_idx)):
         var i = emb_idx[t]
         var falias = emb_alias[t].copy()
@@ -731,6 +735,10 @@ def build_index(
             if ext.reconciled:
                 for x in range(len(ext.txns)):
                     ref tx = ext.txns[x]
+                    # Materialise derived tags ONCE here (deterministic rule
+                    # match over the description; no model call) so category
+                    # questions become a stored-tag filter, not a per-row model
+                    # call. See QUERY_FLOW.md / vault.derive.
                     trows.append(
                         TxnRow(
                             falias.copy(),
@@ -738,6 +746,7 @@ def build_index(
                             tx.amount,
                             tx.direction.copy(),
                             tx.desc.copy(),
+                            reg.tags_for(tx.desc),
                         )
                     )
 

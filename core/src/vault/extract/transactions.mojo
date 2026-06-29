@@ -30,16 +30,35 @@ from vault.extract.dates import iso_date
 comptime _EPS = 0.005  # half-a-cent tolerance for money reconciliation
 
 
-@fieldwise_init
 struct Txn(Copyable, Movable):
     """One extracted transaction. `amount` is a non-negative MAGNITUDE; the sign of
     the money flow is in `direction` (`"credit"` = money in, `"debit"` = money out,
-    `""` = unknown). `date` is the raw statement date token (e.g. `"4/20"`)."""
+    `""` = unknown). `date` is the raw statement date token (e.g. `"4/20"`).
+    `tags` are derived category tags (e.g. `phone`, `travel`) materialised at index
+    time from the description — empty at extraction, populated when read back from
+    the index (see `select_txns`); multi-valued (see `vault.derive`)."""
 
     var date: String
     var desc: String
     var amount: Float64
     var direction: String
+    var tags: List[String]
+
+    def __init__(
+        out self,
+        var date: String,
+        var desc: String,
+        amount: Float64,
+        var direction: String,
+    ):
+        # 4-arg constructor: `tags` default empty and are assigned at
+        # materialisation (index time) / when read back from the index, not at
+        # extraction — so the extraction sites stay unchanged.
+        self.date = date^
+        self.desc = desc^
+        self.amount = amount
+        self.direction = direction^
+        self.tags = List[String]()
 
 
 @fieldwise_init
@@ -902,11 +921,37 @@ struct TxnRow(Copyable, Movable):
     var amount: Float64
     var direction: String
     var desc: String
+    var tags: List[String]
+
+
+def _tags_to_field(tags: List[String]) -> String:
+    """Join tags with `,` for the TSV's last column. Tags are safe lowercase
+    identifiers (no tab/comma/newline), so no escaping is needed."""
+    var out = String("")
+    for i in range(len(tags)):
+        if i > 0:
+            out += ","
+        out += tags[i]
+    return out^
+
+
+def _field_to_tags(s: String) raises -> List[String]:
+    """Parse the `,`-joined tags column; empty string → no tags."""
+    var out = List[String]()
+    if s.byte_length() == 0:
+        return out^
+    var parts = s.split(",")
+    for i in range(len(parts)):
+        var p = String(parts[i])
+        if p.byte_length() > 0:
+            out.append(p^)
+    return out^
 
 
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
-    """Alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc, one per line.
-    """
+    """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc <TAB>
+    comma-joined-tags, one per line. The tags column may be empty; rows written
+    before tags existed parse with no tags (see `tsv_to_txn_rows`)."""
     var out = String("")
     for i in range(len(rows)):
         ref r = rows[i]
@@ -920,6 +965,8 @@ def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
             + r.direction
             + "\t"
             + _esc(r.desc)
+            + "\t"
+            + _tags_to_field(r.tags)
             + "\n"
         )
     return out^
@@ -935,6 +982,11 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
         var cols = line.split("\t")
         if len(cols) < 5:
             continue
+        # Backward-compatible: rows written before the tags column (5 fields)
+        # parse with no tags.
+        var tags = List[String]()
+        if len(cols) >= 6:
+            tags = _field_to_tags(String(cols[5]))
         rows.append(
             TxnRow(
                 _unesc(String(cols[0])),
@@ -942,6 +994,7 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
                 atof(String(cols[2])),
                 String(cols[3]),
                 _unesc(String(cols[4])),
+                tags^,
             )
         )
     return rows^
@@ -968,9 +1021,11 @@ def select_txns(rows: List[TxnRow], file_alias: String) raises -> List[Txn]:
     for i in range(len(rows)):
         ref r = rows[i]
         if r.falias == file_alias:
-            out.append(
-                Txn(r.date.copy(), r.desc.copy(), r.amount, r.direction.copy())
+            var t = Txn(
+                r.date.copy(), r.desc.copy(), r.amount, r.direction.copy()
             )
+            t.tags = r.tags.copy()
+            out.append(t^)
     return out^
 
 
