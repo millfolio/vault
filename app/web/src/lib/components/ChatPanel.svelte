@@ -48,6 +48,7 @@
     "how much did I spend",
   ]);
   onMount(() => {
+    loadRecent();
     if (!demo) return;
     fetch("/questions.json")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -60,6 +61,37 @@
   let draft = $state("");
   let picked = $state("");
   let stream = $state<HTMLDivElement>();
+
+  // Question history — shown in a left panel when the question box is focused.
+  // EVERY question is kept (no cap), persisted in localStorage so the full history
+  // survives reloads/restarts. Newest-first, de-duplicated.
+  const RECENT_KEY = "millfolio:recent-questions";
+  let recent = $state<string[]>([]);
+  let showHistory = $state(false);
+  let inputEl = $state<HTMLInputElement>();
+
+  function loadRecent() {
+    try {
+      const raw = localStorage.getItem(RECENT_KEY);
+      if (raw) {
+        const a = JSON.parse(raw);
+        if (Array.isArray(a))
+          recent = a.filter((x) => typeof x === "string");
+      }
+    } catch {} // private mode / quota — just start empty
+  }
+  function remember(q: string) {
+    recent = [q, ...recent.filter((x) => x !== q)];
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+    } catch {}
+  }
+  // Pick a past question → drop it into the box to edit/resend (non-destructive).
+  function pickRecent(q: string) {
+    draft = q;
+    showHistory = false;
+    inputEl?.focus();
+  }
 
   // Demo auto-approve: the public demo shouldn't park on the "Approve" gate (the
   // single-threaded server would wedge), so in demo mode an unresolved approval gets
@@ -111,7 +143,9 @@
     const t = draft.trim();
     if (!t || busy) return;
     onsend(t);
+    remember(t);
     draft = "";
+    showHistory = false;
   }
 
   // Demo: ask the selected curated question (only these are in the replay cache).
@@ -124,6 +158,23 @@
 </script>
 
 <section class="chat">
+  {#if !demo && showHistory}
+    <!-- click anywhere outside the panel to dismiss -->
+    <div class="hist-backdrop" role="presentation" onclick={() => (showHistory = false)}></div>
+    <aside class="history" aria-label="Questions you've asked">
+      <div class="hist-head">
+        <span>Recent questions</span>
+        <button class="hist-close" type="button" aria-label="Close" onclick={() => (showHistory = false)}>×</button>
+      </div>
+      <ul>
+        {#each recent as q}
+          <li>
+            <button type="button" class="hist-item" title={q} onclick={() => pickRecent(q)}>{q}</button>
+          </li>
+        {/each}
+      </ul>
+    </aside>
+  {/if}
   <div class="stream" bind:this={stream}>
     <div class="thread">
     {#if items.length === 0}
@@ -197,7 +248,15 @@
   {:else}
     <form onsubmit={submit}>
       <div class="row">
-        <input type="text" placeholder="My question is…" bind:value={draft} disabled={busy} />
+        <input
+          type="text"
+          placeholder="My question is…"
+          bind:value={draft}
+          bind:this={inputEl}
+          disabled={busy}
+          onfocus={() => (showHistory = recent.length > 0)}
+          onkeydown={(e) => { if (e.key === "Escape") showHistory = false; }}
+        />
         <button type="submit" disabled={busy || !draft.trim()}>Send</button>
       </div>
     </form>
@@ -210,7 +269,83 @@
     flex-direction: column;
     min-height: 0;
     background: var(--surface);
+    position: relative; /* positioning context for the recent-questions panel */
   }
+
+  /* ── recent-questions panel (opens on focusing the question box) ─────────── */
+  .hist-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 5; /* below the panel, above the conversation — catches outside clicks */
+  }
+  .history {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 6;
+    width: min(280px, 80%);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-2);
+    border-right: 1px solid var(--border);
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.18);
+    overflow-y: auto;
+    animation: hist-in 0.14s ease-out;
+  }
+  @keyframes hist-in {
+    from { transform: translateX(-8px); opacity: 0; }
+  }
+  .hist-head {
+    position: sticky;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+  }
+  .hist-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  .hist-close:hover { color: var(--text); }
+  .history ul {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .hist-item {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    /* one-line, ellipsised — the full question is in the title tooltip */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hist-item:hover { background: var(--surface); }
   .stream {
     flex: 1;
     overflow-y: auto;
