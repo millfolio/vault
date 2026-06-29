@@ -57,7 +57,19 @@ so default behaviour is unchanged until it's proven).
 Verify: env-gate it on, run a real query (needs `ANTHROPIC_API_KEY`), confirm the same
 program is produced as the blocking path.
 
-## Increment 2 — live progress to the UI
+## Increment 2 — live progress to the UI ✅ DONE
+
+Implemented + compiles (privacy_box + app server). Closures are gone in this nightly, so
+the callback is a `DeltaSink` **trait** (transport.mojo): `_anthropic_stream[S: DeltaSink]`
+is now INCREMENTAL (byte-level line extraction, UTF-8-safe) and calls `sink.on_delta(text)`
+per delta; `RemoteClient.codegen_stream[S]` + `Orchestrator.vault_codegen_stream[S]` thread
+it through. The app server's `WsSink` (holds the WS conn by address — valid for the
+synchronous call) updates the ONE "codegen" status line in place with the growing program
+size ("Writing the program… (1234 chars)"); the frontend already updates status by stepId,
+and the elapsed timer keeps ticking alongside. Still env-gated (`MILLFOLIO_STREAM_CODEGEN`).
+Verify with a real query once the env is set.
+
+### Increment 2 — original notes
 
 `_anthropic_stream` needs to deliver each delta upward. Threading a **capturing**
 callback through `vault_codegen → _codegen → _anthropic_stream` is the open question

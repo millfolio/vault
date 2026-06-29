@@ -25,6 +25,47 @@ from egress import EgressGuard
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
+trait DeltaSink(Movable):
+    """Receives the codegen text as it streams in. The app server implements this to
+    emit a live status/debug event per delta; CLI/other callers use `NullSink`. (A
+    trait, not a closure — this Mojo nightly removed `escaping`/nested `fn`.)"""
+
+    def on_delta(mut self, text: String) raises:
+        ...
+
+
+struct NullSink(DeltaSink, Movable):
+    """A sink that drops every delta — for non-streaming callers."""
+
+    def on_delta(mut self, text: String) raises:
+        pass
+
+
+def _find_byte(buf: List[UInt8], val: Int, start: Int) -> Int:
+    """First index ≥ `start` in `buf` holding byte `val`, or -1."""
+    var i = start
+    while i < len(buf):
+        if Int(buf[i]) == val:
+            return i
+        i += 1
+    return -1
+
+
+def _find_crlfcrlf(buf: List[UInt8], start: Int) -> Int:
+    """First index ≥ `start` of a `\\r\\n\\r\\n` (header terminator), or -1."""
+    var i = start
+    while i + 3 < len(buf):
+        if (
+            Int(buf[i]) == 13
+            and Int(buf[i + 1]) == 10
+            and Int(buf[i + 2]) == 13
+            and Int(buf[i + 3]) == 10
+        ):
+            return i
+        i += 1
+    return -1
+
+
 def _replace_all(s: String, old: String, new: String) raises -> String:
     var parts = s.split(old)
     var out = String("")
@@ -269,10 +310,20 @@ struct RemoteClient(Movable):
 
         if self.mock or self.api_key == "":
             return Generated(_mock_program(), prompt.byte_length() // 4 + 300)
-        # Opt-in streaming path (proves the SSE pipe; a live-UI sink is the next step).
-        if getenv("MILLFOLIO_STREAM_CODEGEN", "") != "":
-            return self._anthropic_stream(prompt)
         return self._anthropic(prompt)
+
+    def codegen_stream[
+        S: DeltaSink
+    ](self, messages: List[ChatMessage], mut sink: S) raises -> Generated:
+        """Like `codegen` but STREAMS the program via `sink` (live). Same EgressGuard
+        gate. MOCK / no key falls back to the canned program (no streaming)."""
+        var prompt = String("")
+        for m in messages:
+            var checked = self.guard.check(m.content)  # raises -> aborts send
+            prompt += m.role + ": " + checked + "\n"
+        if self.mock or self.api_key == "":
+            return Generated(_mock_program(), prompt.byte_length() // 4 + 300)
+        return self._anthropic_stream(prompt, sink)
 
     def fix_code(self, code: String, errors: String) raises -> Generated:
         """Ask the remote model to fix code that failed (compile or runtime).
@@ -338,14 +389,15 @@ struct RemoteClient(Movable):
             toks = 0
         return Generated(code^, toks)
 
-    def _anthropic_stream(self, prompt: String) raises -> Generated:
+    def _anthropic_stream[S: DeltaSink](
+        self, prompt: String, mut sink: S
+    ) raises -> Generated:
         """Streaming codegen — same request as `_anthropic` but `stream:true`, driven
         over a raw TlsStream (flare's HttpClient reads the whole body at once). SSE is
-        Anthropic-specific so it lives here, not in the generic client. Parses the
-        `content_block_delta` events and accumulates the program. Opt-in via
-        $MILLFOLIO_STREAM_CODEGEN. (v1 reads the full body then parses — proves the
-        TLS + de-chunk + SSE pipe; a per-delta sink for LIVE UI is the next increment,
-        see STREAMING_CODEGEN.md.)"""
+        Anthropic-specific so it lives here. Parses `content_block_delta` events as the
+        bytes arrive, calling `sink.on_delta(text)` per chunk (LIVE) and accumulating
+        the program. Byte-level line extraction keeps UTF-8 valid across read
+        boundaries (a multibyte codepoint can't span the `\\n` we split on)."""
         var sys = _codegen_system()
         var body = String('{"model":"') + self.model + '","max_tokens":8192,"stream":true,'
         body += '"system":"' + _json_escape(sys) + '",'
@@ -375,59 +427,66 @@ struct RemoteClient(Movable):
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
 
-        # Read the whole response (Connection: close → EOF-delimited).
+        # Read INCREMENTALLY (Connection: close → EOF-delimited). Skip the response
+        # headers (\r\n\r\n) once, then drain complete SSE lines as bytes arrive. We
+        # don't de-frame chunked transfer-encoding: SSE parsing only consumes `data:`
+        # lines, so chunk-size framing lines are ignored.
         var rbuf = List[UInt8](capacity=16384)
         rbuf.resize(16384, 0)
-        var raw = List[UInt8](capacity=65536)
+        var buf = List[UInt8](capacity=65536)  # received bytes not yet line-consumed
+        var consumed = 0
+        var headers_done = False
+        var code = String("")
+        var toks = 0
+        var truncated = False
         while True:
             var n = stream.read(rbuf.unsafe_ptr(), len(rbuf))
             if n == 0:
                 break
             for i in range(n):
-                raw.append(rbuf[i])
+                buf.append(rbuf[i])
+            if not headers_done:
+                var he = _find_crlfcrlf(buf, consumed)
+                if he == -1:
+                    continue
+                consumed = he + 4
+                headers_done = True
+            while True:
+                var nl = _find_byte(buf, 10, consumed)  # '\n'
+                if nl == -1:
+                    break
+                var end = nl
+                if end > consumed and Int(buf[end - 1]) == 13:  # strip trailing '\r'
+                    end -= 1
+                var line = String(
+                    String(unsafe_from_utf8=Span[UInt8, _](buf[consumed:end])).strip()
+                )
+                consumed = nl + 1
+                if not line.startswith("data:"):
+                    continue
+                var data = String(String(line[byte=5:]).strip())
+                if data == "" or data == "[DONE]":
+                    continue
+                try:
+                    var ev = loads(data)
+                    var t = ev["type"].string_value()
+                    if t == "content_block_delta":
+                        var txt = ev["delta"]["text"].string_value()
+                        code += txt
+                        sink.on_delta(txt)  # LIVE: surface the chunk
+                    elif t == "message_delta":
+                        try:
+                            if ev["delta"]["stop_reason"].string_value() == "max_tokens":
+                                truncated = True
+                        except:
+                            pass
+                        try:
+                            toks += Int(ev["usage"]["output_tokens"].int_value())
+                        except:
+                            pass
+                except:
+                    pass  # ping / keepalive / non-JSON event line
         stream.close()
-        var resp = String(unsafe_from_utf8=Span[UInt8, _](raw))
-
-        # Body after the headers = the SSE stream. We don't explicitly de-frame
-        # chunked transfer-encoding: SSE parsing only consumes `data:` lines, and a
-        # chunk-size framing line doesn't match that prefix. (A rare chunk boundary
-        # that splits a data: line just drops that delta — its JSON parse fails and we
-        # skip it. Converting the WHOLE response at once keeps UTF-8 valid.)
-        var he = resp.find("\r\n\r\n")
-        if he == -1:
-            raise Error("codegen stream: malformed response (no header terminator)")
-        var sse = String(resp[byte=he + 4 :])
-
-        # Parse the SSE: `data: <json>` lines. content_block_delta → append text;
-        # message_delta → stop_reason / output token count.
-        var code = String("")
-        var toks = 0
-        var truncated = False
-        var lines = sse.split("\n")
-        for li in range(len(lines)):
-            var line = String(lines[li]).strip()
-            if not line.startswith("data:"):
-                continue
-            var data = String(String(line[byte=5:]).strip())
-            if data == "" or data == "[DONE]":
-                continue
-            try:
-                var ev = loads(data)
-                var t = ev["type"].string_value()
-                if t == "content_block_delta":
-                    code += ev["delta"]["text"].string_value()
-                elif t == "message_delta":
-                    try:
-                        if ev["delta"]["stop_reason"].string_value() == "max_tokens":
-                            truncated = True
-                    except:
-                        pass
-                    try:
-                        toks += Int(ev["usage"]["output_tokens"].int_value())
-                    except:
-                        pass
-            except:
-                pass  # ping / keepalive / non-JSON event line
         if truncated:
             raise Error(
                 "codegen truncated: the model hit max_tokens before finishing the"

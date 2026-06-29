@@ -18,7 +18,13 @@ from std.os import getenv, setenv
 from logging import log
 
 from budget import Budget
-from transport import LocalClient, RemoteClient, ChatMessage, _codegen_system
+from transport import (
+    LocalClient,
+    RemoteClient,
+    ChatMessage,
+    _codegen_system,
+    DeltaSink,
+)
 from sandbox import Sandbox, RunHandle
 from broker import CapabilityBroker
 from vaultcfg import millfolio_bin, vault_include_paths
@@ -177,6 +183,46 @@ struct Orchestrator(Movable):
         var msgs = List[ChatMessage]()
         msgs.append(ChatMessage(String("user"), user_msg))
         var code = self._codegen(msgs)
+        _session_append(
+            "QUESTION: "
+            + question
+            + "\n\n===== SYSTEM PROMPT =====\n"
+            + _codegen_system()
+            + "\n\n===== PROMPT TO THE OUTSIDE MODEL (user turn) =====\n"
+            + user_msg
+            + "\n\n===== OUTSIDE MODEL OUTPUT (program) =====\n"
+            + code
+            + "\n"
+        )
+        return code
+
+    def vault_codegen_stream[
+        S: DeltaSink
+    ](
+        mut self, question: String, manifest: String, mut sink: S
+    ) raises -> String:
+        """Like `vault_codegen` but STREAMS the program to `sink` (live UI). Budget-
+        routed: streams from the remote model while budget remains, else falls back to
+        the LOCAL model (no streaming). Same EgressGuard gate + session transcript."""
+        log("• asking the outside model to write the program (streaming)…")
+        var user_msg = (
+            String("Question: ")
+            + question
+            + "\n\nVault manifest (aliases only — you never see real"
+            " content):\n"
+            + manifest
+            + "\n\nWrite the Mojo program (`from vault import *`) that"
+            " answers it."
+        )
+        var msgs = List[ChatMessage]()
+        msgs.append(ChatMessage(String("user"), user_msg))
+        var code: String
+        if self.budget.depleted():
+            code = self.local.codegen(msgs)  # local has no streaming
+        else:
+            var g = self.remote.codegen_stream(msgs, sink)
+            self.budget.charge(g.tokens)
+            code = g.code.copy()
         _session_append(
             "QUESTION: "
             + question
