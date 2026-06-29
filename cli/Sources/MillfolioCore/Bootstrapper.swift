@@ -337,6 +337,38 @@ public final class Bootstrapper: ObservableObject {
                            atomically: true, encoding: .utf8)
     }
 
+    // ── granular per-step install guards (existence AND freshness) ───────────────
+    // The coarse "is the binary present?" skip is wrong in two ways: it leaves a
+    // step skipped when a SHARED-toolchain re-provision wiped its lib/ (the missing
+    // liblancedbmojo.dylib that crashed `mill index` after v0.4.35), and it skips a
+    // REBUILD when a new release shipped new source under the same toolchain. So a
+    // step is "current" iff EVERY critical artifact it produces still exists AND a
+    // `.{step}` stamp equals the installed CLI version. Either a missing file or a
+    // version bump re-triggers the step. Cheap: a handful of `fileExists` + one read.
+
+    /// The freshness key: the installed `mill` CLI version (so a release bump
+    /// re-runs every step), falling back to the pinned mojo nightly when brew
+    /// can't be queried. Cached — `brewCliVersion()` shells out.
+    private lazy var installVersionKey: String = {
+        let v = brewCliVersion()
+        return v.isEmpty ? Self.mojoVersion : v
+    }()
+
+    /// True when every `files` artifact exists AND the `.{stamp}` step marker
+    /// matches the current install version. Pair with `recordStep` after install.
+    private func stepCurrent(_ stamp: String, _ files: [URL]) -> Bool {
+        let fm = FileManager.default
+        for f in files where !fm.fileExists(atPath: f.path) { return false }
+        let have = (try? String(contentsOf: support.appendingPathComponent(stamp),
+                                 encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return have == installVersionKey
+    }
+    private func recordStep(_ stamp: String) {
+        try? installVersionKey.write(to: support.appendingPathComponent(stamp),
+                                     atomically: true, encoding: .utf8)
+    }
+
     // ── step 1: install server (+ weights) ──────────────────────────────────────
     /// Menu-app entry point: fire-and-forget, drives `phase`. The CLI calls the
     /// throwing `installServer()` directly.
@@ -416,7 +448,7 @@ public final class Bootstrapper: ObservableObject {
         // present → nothing to do. Otherwise fall through; the steps below each
         // skip what's already done (toolchain, weights), so a partial install
         // resumes (e.g. just the missing embedding weights).
-        if isServerInstalled && weightsPresent && embedWeightsPresent
+        if stepCurrent(".engine-step", [serverBin]) && weightsPresent && embedWeightsPresent
             && !mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
             set("engine already installed — skipping")
             return
@@ -467,6 +499,7 @@ public final class Bootstrapper: ObservableObject {
         }
 
         ensureConfig(at: engineConfigURL, Self.engineConfigDefault)
+        recordStep(".engine-step")
     }
 
     // ── step 2: start / stop server (launchd LaunchAgent) ────────────────────────
@@ -817,7 +850,7 @@ public final class Bootstrapper: ObservableObject {
     /// vendored flare/json/jinja2.mojo + prebuilt FFI shims.
     public func installPrivacyBoxEngine() async throws {
         // Idempotent: skip the whole download+build if the binary is already there.
-        if isPrivacyBoxInstalled
+        if stepCurrent(".privacy_box-step", [privacy_boxBin])
             && !mojoToolchainStale(privacy_boxMojoPrefix, Self.privacy_boxMojoVersion) {
             set("privacy_box already installed — skipping")
             return
@@ -868,6 +901,7 @@ public final class Bootstrapper: ObservableObject {
         //    unlike the always-serving server.
         try installPrivacyBoxShims()
         ensureConfig(at: privacy_boxConfigURL, Self.privacy_boxConfigDefault)
+        recordStep(".privacy_box-step")
     }
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the privacy_box
@@ -967,7 +1001,16 @@ public final class Bootstrapper: ObservableObject {
     /// programs against `-I pkgs`, and to install the shims into its lib/.
     public func installMillfolioEngine() async throws {
         // Idempotent: skip the whole download if the binary is already there.
-        if isMillfolioInstalled
+        // Granular: the vault binary runs WITH CONDA_PREFIX and dlopens its FFI
+        // shims from `mojo/lib`, so check those exist too — a shared-toolchain
+        // re-provision wipes them (the post-v0.4.35 `mill index` dlopen crash).
+        let millfolioCritical = [
+            millfolioBin,
+            millfolioMojoPrefix.appendingPathComponent("lib/liblancedbmojo.dylib"),
+            millfolioMojoPrefix.appendingPathComponent("lib/libzlibmojo.so"),
+            millfolioDir.appendingPathComponent("pkgs/vault.mojopkg"),
+        ]
+        if stepCurrent(".millfolio-step", millfolioCritical)
             && !mojoToolchainStale(millfolioMojoPrefix, Self.privacy_boxMojoVersion) {
             set("millfolio already installed — skipping")
             return
@@ -1015,6 +1058,7 @@ public final class Bootstrapper: ObservableObject {
         //    `$CONDA_PREFIX/lib` lookup finds them at runtime (millfolio runs WITH
         //    CONDA_PREFIX set via run-millfolio.sh).
         try installMillfolioShims()
+        recordStep(".millfolio-step")
     }
 
     /// Copy the bundled relocatable FFI shims (+ their dylib deps) into the millfolio
@@ -1129,7 +1173,7 @@ public final class Bootstrapper: ObservableObject {
     /// privacy_box engine tree — reusing privacy_box's Mojo toolchain + flare shims, so
     /// no new toolchain. Requires the privacy_box engine (installPrivacyBoxEngine).
     public func installAppServer() async throws {
-        if isAppServerInstalled {
+        if stepCurrent(".appserver-step", [appServerBin]) {
             set("millfolio app server already installed — skipping")
             return
         }
@@ -1168,6 +1212,7 @@ public final class Bootstrapper: ObservableObject {
         // One binary now serves the UI + REST + the streaming chat WS on one port.
         try run(mojo, ["build", "src/server.mojo"] + inc + ["-o", "build/millfolio-server"],
                 cwd: appRoot, env: env)
+        recordStep(".appserver-step")
     }
 
     // ── millfolio: start (open a ready-to-use Terminal) ───────────────────────────
@@ -1539,6 +1584,7 @@ public final class Bootstrapper: ObservableObject {
     /// Run the privacy_box vault loop for one question. See runLoggedScript.
     public func runVaultAsk(question: String, vaultDir: String) throws -> Int32 {
         refreshServerRunning()
+        ensureVaultShims()  // self-heal a wiped shared-toolchain lib/ before the vault binary dlopens it
         let script = try writePrivacyBoxScript()
         let args = ["vault", question, vaultDir]
         logRunDiagnostics(label: "ask", launcher: script, args: args, probes: [
@@ -1561,6 +1607,7 @@ public final class Bootstrapper: ObservableObject {
     /// See runLoggedScript.
     public func runVaultIndex(paths: [String], force: Bool = false) throws -> Int32 {
         refreshServerRunning()
+        ensureVaultShims()  // self-heal a wiped shared-toolchain lib/ before the vault binary dlopens it
         let script = try writeMillfolioScript()
         var args = ["index"] + paths
         if force { args.append("--force") }
