@@ -25,7 +25,7 @@ Questions are open-ended but personal, e.g.
   you **must** call `ask_local(...)`, the on-device **trusted** model that *can*
   see content. Do **not** try to infer meaning yourself with string matching;
   you don't have the content.
-- **Never fabricate data or hand-build a manifest.** Do NOT construct `FileInfo`
+- **Never fabricate data or hand-build a manifest.** Do NOT construct `VaultFile`
   values, sample rows, or a fake file list — `manifest()` and `search()` return the
   real aliased data when the program runs. Call the tools and combine their
   results; do not invent their inputs. Any error you see back is sanitized.
@@ -51,7 +51,7 @@ Questions are open-ended but personal, e.g.
 ## Tools — available as `from vault import *`
 | tool | signature | use |
 |---|---|---|
-| `manifest` | `manifest() -> List[FileInfo]` | the aliased file list; each `FileInfo` has `.id` (the alias, e.g. `file_0`), `.kind` (`"csv"`/`"pdf"`/`"md"`/`"docx"`), `.size`. Read it; never CONSTRUCT a `FileInfo` (and there is no `.alias` field — `alias` is a reserved Mojo keyword). |
+| `manifest` | `manifest() -> List[VaultFile]` | the aliased file list; each `VaultFile` has **`.alias`** (e.g. `file_0`), `.kind` (`"csv"`/`"pdf"`/`"md"`/`"docx"`), `.size`, and `.columns` (aliased CSV columns; empty otherwise). Read it; never CONSTRUCT one. (`alias` is a reserved Mojo keyword, but member access `f.alias` reads the field fine — use `.alias`, NOT `.id`.) |
 | `search` | `search(query: String, k: Int) -> List[Chunk]` | **semantic search across the whole indexed vault**; each `Chunk` has `.file_alias`, `.text`, `.score`. **Similarity-ranked top-k** — great to *find* the relevant passages for an open question, but it returns only ~k chunks, so it **structurally undercounts aggregations** (a file can have hundreds of chunks). Do NOT use it to count/sum/total — use `transactions`/`file_chunks`/`csv_rows` for those. |
 | `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date`, `.desc` (merchant), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out). These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
 | `file_chunks` | `file_chunks(file_alias: String) -> List[String]` | **EVERY chunk of one file, in document order** — complete coverage for enumeration (count/sum/max), unlike `search`'s top-k. Reuses the index's already-extracted text. Use this to scan a whole file. |
@@ -182,7 +182,7 @@ def main() raises:
     var descs = List[String]()
     var amounts = List[Float64]()
     for i in range(len(files)):
-        var txns = transactions(files[i].id)        # [] when not a statement
+        var txns = transactions(files[i].alias)        # [] when not a statement
         for t in range(len(txns)):
             ref x = txns[t]
             if x.direction == "debit":
@@ -247,7 +247,7 @@ def main() raises:
     var received = 0.0    # credits (money in)
     var files = manifest()
     for i in range(len(files)):
-        var txns = transactions(files[i].id)   # exact, reconcile-verified; [] if none
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
         for t in range(len(txns)):
             ref x = txns[t]
             n += 1
@@ -277,8 +277,8 @@ def main() raises:
     var files = manifest()
     # 1) EXACT path: reconcile-verified transactions, max in plain Mojo.
     for i in range(len(files)):
-        progress("checking " + files[i].id)
-        var txns = transactions(files[i].id)
+        progress("checking " + files[i].alias)
+        var txns = transactions(files[i].alias)
         for t in range(len(txns)):
             ref x = txns[t]
             if x.direction == "debit" and (not have or x.amount > top_amount):
@@ -288,7 +288,7 @@ def main() raises:
     # 2) FALLBACK only for files with no reconciled transactions: scan ALL chunks.
     if not have:
         for i in range(len(files)):
-            var chunks = file_chunks(files[i].id)      # COMPLETE, not search top-k
+            var chunks = file_chunks(files[i].alias)      # COMPLETE, not search top-k
             var cand = List[String]()
             for c in range(len(chunks)):
                 if chunks[c].find(".") != -1:             # cheap free pre-filter: an amount
