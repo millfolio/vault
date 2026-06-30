@@ -1088,23 +1088,61 @@ def on_connect(mut conn: WsConnection) raises:
         var _t = perf_counter_ns()
         var manifest = orch.vault_manifest(vault_dir)
         _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
-        # The frontier-safe view also carries the category tag NAMES (so the model can
-        # filter `.tags`) — show them in the same debug dropdown, since they're sent
-        # too. Never the keyword RULES (those hold real merchant strings → on-device).
+        # The frontier-safe view also carries the category tag NAMES + scope notes
+        # (so the model filters `.tags`); never the keyword RULES (real merchant
+        # strings → on-device). DISPLAY-ONLY truncation so this dropdown stays
+        # readable as the vault grows — show the first few of each group + the total.
+        # The FULL manifest + tag list still go to the model (codegen uses `manifest`
+        # / _tags_context, untouched); this only shapes the debug body.
+        var _head = 3
+        var _dbg = String("")
+        # Manifest: keep the header lines (vault:/count), cap the `file_` lines.
+        var _files = List[String]()
+        var _mlines = manifest.split("\n")
+        for _i in range(len(_mlines)):
+            var _ln = String(_mlines[_i])
+            if String(_ln.strip()).startswith("file_"):
+                _files.append(_ln)
+            elif String(_ln.strip()).byte_length() > 0:
+                if _dbg.byte_length() > 0:
+                    _dbg += "\n"
+                _dbg += _ln
+        for _i in range(len(_files)):
+            if _i >= _head:
+                break
+            if _dbg.byte_length() > 0:
+                _dbg += "\n"
+            _dbg += _files[_i]
+        if len(_files) > _head:
+            _dbg += (
+                "\n  … and "
+                + String(len(_files) - _head)
+                + " more files ("
+                + String(len(_files))
+                + " total)"
+            )
+        # Category tags (name + scope note), capped the same way.
         var _avail = effective_tags()
         var _adesc = effective_tag_descriptions()
-        var _tags_block = String("")
-        for _i in range(len(_avail)):
-            _tags_block += "\n- " + _avail[_i]
-            if _i < len(_adesc) and _adesc[_i].byte_length() > 0:
-                _tags_block += " — " + _adesc[_i]
-        var _dbg = manifest
-        if _tags_block.byte_length() > 0:
+        if len(_avail) > 0:
             _dbg += (
                 "\n\nCategory tags also sent (name + scope note; the model"
                 " filters .tags on these):"
             )
-            _dbg += _tags_block
+            for _i in range(len(_avail)):
+                if _i >= _head:
+                    break
+                _dbg += "\n- " + _avail[_i]
+                if _i < len(_adesc) and _adesc[_i].byte_length() > 0:
+                    _dbg += " — " + _adesc[_i]
+            if len(_avail) > _head:
+                _dbg += (
+                    "\n  … and "
+                    + String(len(_avail) - _head)
+                    + " more tags ("
+                    + String(len(_avail))
+                    + " total)"
+                )
         conn.send_text(
             debug_event(
                 "manifest",
