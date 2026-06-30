@@ -54,6 +54,7 @@ from vault.derive.store import (
     load_txn_rows,
     write_txn_rows,
     retag,
+    ml_materialize_rows,
 )
 
 
@@ -807,6 +808,24 @@ def build_index(
     # from the current registry — one pure pass, the single source of tags.
     _ = retag(trows, reg)
     write_txn_rows(trows)
+    # Materialize ML-rule tags (`<tag> : <question>`) for the NEWLY-extracted files
+    # via the on-device model — the fuzzy tail no keyword captures, paid once at
+    # index (carried-over rows keep their cached ML tags). Best-effort: a classify
+    # failure (engine busy, chat model not serving) must never abort indexing.
+    if len(emb_alias) > 0:
+        try:
+            var ml_changed = ml_materialize_rows(
+                trows, reg, base_url, emb_alias
+            )
+            if ml_changed > 0:
+                write_txn_rows(trows)
+                print(
+                    "  materialized ML tags on "
+                    + String(ml_changed)
+                    + " transaction(s)"
+                )
+        except e:
+            print("  (ML tag pass skipped: " + String(e) + ")")
     _write_manifest(Manifest(new_entries^, next_id, next_alias, base))
     print(
         "index updated — "

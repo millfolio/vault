@@ -21,6 +21,7 @@ from vault.index import (
     vault_files,
     effective_tags,
     effective_retag,
+    ml_materialize,
     tags_report_json,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
@@ -205,9 +206,21 @@ def main() raises:
             + String(changed)
             + " transaction(s) from the current category rules"
         )
+    elif cmd == "materialize":
+        # Run the ML category rules (`<tag> : <question>`) over the stored
+        # transactions via the on-device model — the fuzzy tail no keyword rule
+        # captures. Slow + needs the chat engine up, so it's a lazy on-demand pass
+        # (the deterministic tags are applied first).
+        var changed = ml_materialize(_local_url())
+        print(
+            "materialized — "
+            + String(changed)
+            + " transaction(s) updated from the category rules"
+        )
     else:
         print(
-            "usage: millfolio <manifest|read|embed|index|search|tags|retag> ..."
+            "usage: millfolio"
+            " <manifest|read|embed|index|search|tags|retag|materialize> ..."
         )
 
 

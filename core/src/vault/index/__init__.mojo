@@ -20,6 +20,7 @@ from vault.index.index import (
 from vault.derive.store import (
     effective_tags,
     effective_retag,
+    ml_materialize,
     tags_report,
     tags_report_json,
     TagInfo,

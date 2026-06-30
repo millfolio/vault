@@ -23,6 +23,7 @@ from vault.derive.categorize import (
     rules_canon,
     registry_to_text,
 )
+from vault.derive.classify import classify_batch
 
 
 # ── paths ─────────────────────────────────────────────────────────────────────
@@ -222,6 +223,61 @@ def effective_retag() raises -> Int:
     var changed = retag(trows, reg)
     if changed > 0:
         write_txn_rows(trows)
+    return changed
+
+
+def ml_materialize_rows(
+    mut rows: List[TxnRow],
+    reg: Registry,
+    base_url: String,
+    restrict_aliases: List[String],
+) raises -> Int:
+    """Apply the registry's ML rules to `rows` in place, via the on-device model
+    (chat at `base_url`). For each ML rule, classify the descriptions of rows that
+    don't already carry the tag — optionally restricted to `restrict_aliases` (the
+    newly-extracted files at index time, so existing rows aren't re-classified
+    every pass) — and add the tag where the model answers yes. Returns the number
+    of rows changed; no-op when the registry has no ML rules. Raises if the engine
+    chat is unreachable, so callers can treat the ML pass as best-effort."""
+    var changed = 0
+    var restrict = len(restrict_aliases) > 0
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        if not r.is_ml():
+            continue
+        var idxs = List[Int]()
+        var descs = List[String]()
+        for t in range(len(rows)):
+            if restrict and not _contains(restrict_aliases, rows[t].falias):
+                continue
+            if _contains(rows[t].tags, r.tag):
+                continue  # already tagged (cached from a prior pass)
+            idxs.append(t)
+            descs.append(rows[t].desc.copy())
+        if len(descs) == 0:
+            continue
+        var verdicts = classify_batch(base_url, r.ml_prompt, descs)
+        for k in range(len(idxs)):
+            if k < len(verdicts) and verdicts[k]:
+                var row = rows[idxs[k]].copy()
+                row.tags.append(r.tag.copy())
+                rows[idxs[k]] = row^
+                changed += 1
+    return changed
+
+
+def ml_materialize(base_url: String) raises -> Int:
+    """Materialize ALL ML-rule tags over the stored transactions and persist —
+    backs `millfolio materialize` (a lazy on-demand pass, since ML is slow and
+    needs the engine up). Applies the deterministic tags first (preserving any
+    existing ML tags), then the ML rules via the engine. Returns rows changed.
+    """
+    var reg = load_registry()
+    var rows = load_txn_rows()
+    var changed = retag(rows, reg)
+    changed += ml_materialize_rows(rows, reg, base_url, List[String]())
+    if changed > 0:
+        write_txn_rows(rows)
     return changed
 
 
