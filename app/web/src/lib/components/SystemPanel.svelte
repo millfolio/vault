@@ -12,6 +12,7 @@
     dataDir?: string;
     statsFile?: string;
     asksFile?: string;
+    categoriesFile?: string;
     logs?: Logs;
   };
 
@@ -54,6 +55,7 @@
     ["Data directory", sys?.dataDir, "the index, extracted transactions, and the stores below"],
     ["Question history", sys?.asksFile, "every ask: question + generated program + answer"],
     ["Usage stats", sys?.statsFile, "per-question timing (the Stats tab)"],
+    ["Category rules", sys?.categoriesFile, "your editable tag keywords (phone, travel, …) — add your own, then re-index to retag"],
   ]);
   const logRows = $derived<[string, string | undefined, string][]>([
     ["Per-ask transcripts", sys?.logs?.transcripts, "one file per question — the generated program AND its run output (start here when an answer looks wrong)"],

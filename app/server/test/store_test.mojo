@@ -34,12 +34,18 @@ def main() raises:
     _ = loads(line)  # raises if the record isn't valid JSON
     expect(line.find('"ts":1234') != -1, "ts present")
     expect(line.find('"q":"pho\\"ne bill"') != -1, "question quote escaped")
-    expect(line.find('"code":"print(\\"hi\\")\\n"') != -1, "code newline+quotes escaped")
+    expect(
+        line.find('"code":"print(\\"hi\\")\\n"') != -1,
+        "code newline+quotes escaped",
+    )
     expect(line.find('"answer":"paid\\t$5"') != -1, "answer tab escaped")
     expect(line.find('"source":"file_3"') != -1, "source present")
     expect(line.find('"model":"qwen"') != -1, "model present")
     expect(line.find('"ok":true') != -1, "ok true")
-    expect(line.find("\n") == -1, "record line has no embedded newline (writer adds it)")
+    expect(
+        line.find("\n") == -1,
+        "record line has no embedded newline (writer adds it)",
+    )
 
     var line2 = ask_record_line(1, "q", "c", "a", "file_0", "m", False)
     expect(line2.find('"ok":false') != -1, "ok false")
@@ -69,15 +75,30 @@ def main() raises:
     expect(sj.find('"version":"v9"') != -1, "version")
     expect(sj.find('"model":"qwen2.5"') != -1, "model")
     expect(sj.find('"dataDir":"/Users/x/.config/millfolio"') != -1, "dataDir")
-    expect(sj.find('"asksFile":"/Users/x/.config/millfolio/asks.jsonl"') != -1, "asksFile")
     expect(
-        sj.find('"app":"/Users/x/Library/Application Support/Millfolio/Millfolio.log"') != -1,
+        sj.find('"asksFile":"/Users/x/.config/millfolio/asks.jsonl"') != -1,
+        "asksFile",
+    )
+    expect(
+        sj.find('"categoriesFile":"/Users/x/.config/millfolio/categories.txt"')
+        != -1,
+        "categoriesFile derived from dataDir",
+    )
+    expect(
+        sj.find(
+            '"app":"/Users/x/Library/Application'
+            ' Support/Millfolio/Millfolio.log"'
+        )
+        != -1,
         "app log path derived from home",
     )
     expect(
         sj.find('"server":"/Users/x/Library/Logs/Millfolio/server.log"') != -1,
         "server log path derived from home",
     )
-    expect(sj.find('"transcripts":"/tmp/millfolio/sessions/"') != -1, "transcripts path")
+    expect(
+        sj.find('"transcripts":"/tmp/millfolio/sessions/"') != -1,
+        "transcripts path",
+    )
 
     print("ok: all store tests passed")

@@ -80,6 +80,8 @@ def system_json(
     out += ',"dataDir":' + json_escape(data_dir)
     out += ',"statsFile":' + json_escape(stats_file)
     out += ',"asksFile":' + json_escape(asks_file)
+    # The user-editable category rules (vault.derive): edit + re-index to retag.
+    out += ',"categoriesFile":' + json_escape(data_dir + "/categories.txt")
     out += ',"logs":{'
     out += '"transcripts":' + json_escape(transcripts)
     out += ',"app":' + json_escape(app_log)
