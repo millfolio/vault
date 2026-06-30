@@ -133,8 +133,10 @@
         {:else}
           <p class="hint">
             One rule per line: <code>tag = keyword, keyword, …</code> (case-insensitive
-            substring match). Lines starting with <code>#</code> are comments. Saving
-            re-tags your transactions immediately.
+            substring match), or an ML rule <code>tag : a yes/no question</code> the
+            on-device model answers. Lines starting with <code>#</code> are comments.
+            Saving re-tags immediately for keyword rules; <strong>ML rules materialize
+            on the next index</strong> (they need the model).
           </p>
           <textarea bind:value={text} spellcheck="false" rows="14"></textarea>
           <div class="actions">
