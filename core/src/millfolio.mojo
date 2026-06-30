@@ -19,6 +19,7 @@ from vault.index import (
     search,
     Chunk,
     vault_files,
+    effective_tags,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
 
@@ -120,7 +121,7 @@ def _embed_url() raises -> String:
 def main() raises:
     var args = argv()
     if len(args) < 2:
-        print("usage: millfolio <manifest|read|embed|index|search> ...")
+        print("usage: millfolio <manifest|read|embed|index|search|tags> ...")
         return
     var cmd = String(args[1])
     if cmd == "manifest":
@@ -173,9 +174,20 @@ def main() raises:
             _search_json(query, k, out_path)
         else:
             _search(query, k)
-
+    elif cmd == "tags":
+        # The effective category tag NAMES (built-in defaults + the user's
+        # categories.txt), comma-joined. The codegen orchestrator captures this
+        # to tell the frontier model which `.tags` it can filter on. Names only —
+        # never the keyword rules (on-device matching detail).
+        var names = effective_tags()
+        var out = String("")
+        for i in range(len(names)):
+            if i > 0:
+                out += ", "
+            out += names[i]
+        print(out)
     else:
-        print("usage: millfolio <manifest|read|embed|index|search> ...")
+        print("usage: millfolio <manifest|read|embed|index|search|tags> ...")
 
 
 def _embed(text: String) raises:
@@ -239,7 +251,8 @@ def _search_min_sim() raises -> Float64:
     `_distance` d maps cleanly to cosine: `cos = 1 - d/2`. k-NN ALWAYS returns the
     k nearest chunks — even when nothing is actually relevant (a term absent from
     the vault, e.g. "anthropic") — so without a floor the UI shows junk. We drop
-    hits below this similarity. Tunable via MILLFOLIO_SEARCH_MIN_SIM; default 0.4."""
+    hits below this similarity. Tunable via MILLFOLIO_SEARCH_MIN_SIM; default 0.4.
+    """
     var raw = getenv("MILLFOLIO_SEARCH_MIN_SIM", "")
     if raw == "":
         return 0.4

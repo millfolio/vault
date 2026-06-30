@@ -11,6 +11,7 @@ from vault.index.index import (
     file_transactions,
     vault_files,
     index_manifest,
+    effective_tags,
     Chunk,
 )
 from vault.index.manifest import build_manifest, FileInfo, _csv_columns

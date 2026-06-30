@@ -80,6 +80,21 @@ def _session_append(text: String):
         pass
 
 
+def _tags_context(tags: String) -> String:
+    """Format the available-tags line for the codegen prompt, or empty when there
+    are none (nothing indexed / no registry). Tells the model the category
+    vocabulary so it can filter `transactions()` on `.tags` — including the
+    user's own categories, which the static system prompt can't know."""
+    if tags.byte_length() == 0:
+        return String("")
+    return (
+        "\n\nAvailable category tags (each Txn's `.tags` is drawn from these;"
+        ' filter transactions() on them for category questions, e.g. `"phone"'
+        " in t.tags`): "
+        + tags
+    )
+
+
 struct Orchestrator(Movable):
     var local: LocalClient
     var remote: RemoteClient
@@ -163,6 +178,20 @@ struct Orchestrator(Movable):
             return out^
         return m.output.copy()
 
+    def _vault_tags(mut self) raises -> String:
+        """The effective category tag NAMES (built-in defaults + the user's
+        `categories.txt`), via the trusted on-device `millfolio tags`. Just the
+        comma-joined tag names go to the model — NEVER the keyword rules (those
+        are on-device matching detail, and more sensitive: they hold merchant
+        names the user typed). Best-effort: an empty string (→ no tags line in
+        the prompt) when the binary can't produce them, so codegen never fails
+        over tags."""
+        var argv: List[String] = [millfolio_bin(), String("tags")]
+        var t = self.sandbox.capture(argv)
+        if t.exit_code != 0:
+            return String("")
+        return String(t.output.strip())
+
     def vault_codegen(
         mut self, question: String, manifest: String
     ) raises -> String:
@@ -170,13 +199,28 @@ struct Orchestrator(Movable):
         _codegen) for a `from vault import *` program from the question + the
         aliased manifest. The system prompt is resources/privacy_box-system.md.
         """
-        log("• asking the outside model to write the program…")
+        # Report the route HONESTLY — `_codegen` falls back to the local model when
+        # there's no remote budget (no ANTHROPIC_API_KEY → token_budget=0), and the
+        # status used to claim "outside model" unconditionally (a ~90s local run
+        # mislabeled as frontier).
+        if self.budget.depleted():
+            log(
+                "• no remote budget — writing the program on the LOCAL"
+                " on-device model (slower; set ANTHROPIC_API_KEY for the fast"
+                " frontier model)…"
+            )
+        else:
+            log("• asking the frontier model to write the program…")
+        var tags = self._vault_tags()
+        if tags.byte_length() > 0:
+            log("• available category tags sent to the model: " + tags)
         var user_msg = (
             String("Question: ")
             + question
             + "\n\nVault manifest (aliases only — you never see real"
             " content):\n"
             + manifest
+            + _tags_context(tags)
             + "\n\nWrite the Mojo program (`from vault import *`) that"
             " answers it."
         )
@@ -203,14 +247,26 @@ struct Orchestrator(Movable):
     ) raises -> String:
         """Like `vault_codegen` but STREAMS the program to `sink` (live UI). Budget-
         routed: streams from the remote model while budget remains, else falls back to
-        the LOCAL model (no streaming). Same EgressGuard gate + session transcript."""
-        log("• asking the outside model to write the program (streaming)…")
+        the LOCAL model (no streaming). Same EgressGuard gate + session transcript.
+        """
+        if self.budget.depleted():
+            log(
+                "• no remote budget — writing the program on the LOCAL"
+                " on-device model (slower; set ANTHROPIC_API_KEY for the fast"
+                " frontier model)…"
+            )
+        else:
+            log("• asking the frontier model to write the program (streaming)…")
+        var tags = self._vault_tags()
+        if tags.byte_length() > 0:
+            log("• available category tags sent to the model: " + tags)
         var user_msg = (
             String("Question: ")
             + question
             + "\n\nVault manifest (aliases only — you never see real"
             " content):\n"
             + manifest
+            + _tags_context(tags)
             + "\n\nWrite the Mojo program (`from vault import *`) that"
             " answers it."
         )

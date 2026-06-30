@@ -56,6 +56,7 @@ from vault.derive.categorize import (
     parse_rules,
     merge_registry,
     registry_template,
+    tag_names,
 )
 
 
@@ -903,6 +904,14 @@ def _load_registry() raises -> Registry:
         except:
             pass  # best-effort; never fail indexing over the template write
     return reg^
+
+
+def effective_tags() raises -> List[String]:
+    """The tag NAMES the effective registry (built-in defaults + the user's
+    categories.txt) can assign — what `millfolio tags` prints and codegen
+    advertises to the model so it can filter `transactions()` on `.tags`,
+    including the user's own categories."""
+    return tag_names(_load_registry())
 
 
 def _load_txn_rows() raises -> List[TxnRow]:
