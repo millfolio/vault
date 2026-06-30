@@ -142,16 +142,16 @@
     inputEl?.focus();
   }
 
-  // Demo auto-approve: the public demo shouldn't park on the "Approve" gate (the
-  // single-threaded server would wedge), so in demo mode an unresolved approval gets
-  // a 15s countdown and then auto-approves. "+1 min" extends it for a closer look.
-  // (The real product keeps manual approval — gated on `demo`.)
+  // Auto-approve countdown: an unresolved approval gets a 15s countdown then
+  // auto-approves, with "+1 min" to extend for a closer look. Used in BOTH the real
+  // product and the public demo (the demo also can't park on the gate — its
+  // single-threaded server would wedge). Immediate Approve and Reject stay available.
   const AUTO_APPROVE_SECS = 15;
   let remaining = $state(0); // seconds left on the current auto-approve countdown
   // The id of the approval currently awaiting a decision (null if none). $derived so it
   // recomputes reactively for EVERY question, not just the first.
   const pendingApprovalId = $derived<string | null>(
-    demo ? ([...items].reverse().find((x) => x.kind === "approval" && !x.resolved)?.id ?? null) : null,
+    [...items].reverse().find((x) => x.kind === "approval" && !x.resolved)?.id ?? null,
   );
   function bumpTimer() {
     remaining += 60;
@@ -317,9 +317,9 @@
           {:else}
             <div class="actions">
               <button class="approve" onclick={() => onapprove(it.id, it.stepId ?? "")}>
-                {#if demo && it.id === pendingApprovalId}Approve ({remaining}s){:else}Approve{/if}
+                {#if it.id === pendingApprovalId}Approve ({remaining}s){:else}Approve{/if}
               </button>
-              {#if demo && it.id === pendingApprovalId}
+              {#if it.id === pendingApprovalId}
                 <button class="bump" onclick={bumpTimer} title="Give yourself another minute to review">+1 min</button>
               {/if}
               <button class="reject" onclick={() => onreject(it.id, it.stepId ?? "")}>Reject</button>

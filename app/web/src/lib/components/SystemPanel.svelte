@@ -16,6 +16,10 @@
     logs?: Logs;
   };
 
+  // `demo` masks absolute home paths (the public demo shouldn't leak the server's
+  // real home dir / username — show $HOME instead).
+  let { demo = false }: { demo?: boolean } = $props();
+
   let sys = $state<Sys | null>(null);
   let loaded = $state(false);
   let failed = $state(false);
@@ -27,6 +31,13 @@
     const explicit = new URLSearchParams(location.search).get("api");
     if (explicit) return explicit.replace(/\/$/, "");
     return "";
+  }
+
+  // In demo mode, replace a leading home dir (/Users/<u> or /home/<u>) with $HOME so
+  // the public demo never shows the server account's real path. No-op otherwise.
+  function shown(path: string): string {
+    if (!demo) return path;
+    return path.replace(/^\/Users\/[^/]+/, "$HOME").replace(/^\/home\/[^/]+/, "$HOME");
   }
 
   onMount(() => {
@@ -42,6 +53,7 @@
       });
   });
 
+  // Copy the displayed (masked) path — never the raw home path in demo mode.
   async function copy(path: string) {
     try {
       await navigator.clipboard.writeText(path);
@@ -64,6 +76,34 @@
   ]);
 </script>
 
+{#snippet pathRow(label: string, path: string, hint: string)}
+  <div class="row">
+    <div class="rlabel">{label}<span class="hint">{hint}</span></div>
+    <div class="rpath">
+      <code>{shown(path)}</code>
+      <button
+        type="button"
+        class="copy"
+        class:copied={copied === shown(path)}
+        onclick={() => copy(shown(path))}
+        aria-label={copied === shown(path) ? "Copied" : "Copy path"}
+        title={copied === shown(path) ? "Copied" : "Copy path"}
+      >
+        {#if copied === shown(path)}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        {:else}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        {/if}
+      </button>
+    </div>
+  </div>
+{/snippet}
+
 <section class="system">
   <header>
     <h2>System</h2>
@@ -83,38 +123,18 @@
     <div class="group">
       <h3>Data</h3>
       {#each dataRows as [label, path, hint]}
-        {#if path}
-          <div class="row">
-            <div class="rlabel">{label}<span class="hint">{hint}</span></div>
-            <div class="rpath">
-              <code>{path}</code>
-              <button type="button" class="copy" onclick={() => copy(path)} title="Copy path">
-                {copied === path ? "✓" : "Copy"}
-              </button>
-            </div>
-          </div>
-        {/if}
+        {#if path}{@render pathRow(label, path, hint)}{/if}
       {/each}
     </div>
 
     <div class="group">
       <h3>Logs</h3>
       {#each logRows as [label, path, hint]}
-        {#if path}
-          <div class="row">
-            <div class="rlabel">{label}<span class="hint">{hint}</span></div>
-            <div class="rpath">
-              <code>{path}</code>
-              <button type="button" class="copy" onclick={() => copy(path)} title="Copy path">
-                {copied === path ? "✓" : "Copy"}
-              </button>
-            </div>
-          </div>
-        {/if}
+        {#if path}{@render pathRow(label, path, hint)}{/if}
       {/each}
       <p class="tip">
         Tail a log live in Terminal, e.g.
-        <code>tail -f "{sys?.logs?.app ?? "~/Library/Application Support/Millfolio/Millfolio.log"}"</code>
+        <code>tail -f "{shown(sys?.logs?.app ?? "~/Library/Application Support/Millfolio/Millfolio.log")}"</code>
       </p>
     </div>
   {/if}
@@ -191,20 +211,35 @@
     border-radius: var(--radius);
     font-size: 12px;
   }
+  /* Icon-only copy affordance: hidden until the row is hovered/focused (or just
+     copied, so the ✓ feedback is visible), copies on click. */
   .copy {
     flex: none;
-    padding: 5px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border-radius: var(--radius);
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     background: transparent;
     color: var(--text-dim);
     cursor: pointer;
-    font: inherit;
-    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .rpath:hover .copy,
+  .copy:focus-visible,
+  .copy.copied {
+    opacity: 1;
   }
   .copy:hover {
     color: var(--text);
     border-color: var(--accent);
+  }
+  .copy.copied {
+    color: var(--ok, #3fb950);
   }
   .tip {
     margin: 10px 0 0;

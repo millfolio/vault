@@ -276,7 +276,7 @@
     {:else if view === "tags"}
       <TagsPanel demo={isDemo} />
     {:else if view === "system"}
-      <SystemPanel />
+      <SystemPanel demo={isDemo} />
     {:else}
       <StatsPanel />
     {/if}
