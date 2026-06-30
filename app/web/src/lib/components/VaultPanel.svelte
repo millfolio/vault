@@ -62,6 +62,20 @@
     text: string;
   }
 
+  // Category tags stamped on transactions at index time (GET /api/tags). Shown
+  // read-only here so the vault view surfaces the derived attributes, not just
+  // file aliases; the full editor lives in the Tags tab.
+  interface Tag {
+    name: string;
+    count: number;
+  }
+  const MOCK_TAGS: Tag[] = [
+    { name: "phone", count: 12 },
+    { name: "travel", count: 34 },
+    { name: "groceries", count: 88 },
+  ];
+  let tags = $state<Tag[]>([]);
+
   let info = $state<VaultInfo | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -93,6 +107,7 @@
     const base = apiBase();
     if (base === null) {
       info = MOCK;
+      tags = MOCK_TAGS;
       mock = true;
       loading = false;
       return;
@@ -106,6 +121,13 @@
       error = e instanceof Error ? e.message : String(e);
     } finally {
       loading = false;
+    }
+    // Best-effort — the tag strip just disappears if tags can't be loaded.
+    try {
+      const r = await fetch(`${base}/api/tags`, { headers: { accept: "application/json" } });
+      if (r.ok) tags = ((await r.json()).tags ?? []) as Tag[];
+    } catch {
+      /* leave tags empty */
     }
   }
 
@@ -278,6 +300,26 @@
       </div>
 
       {#if hits === null}
+      {#if tags.length > 0}
+        <div class="tagstrip">
+          <div class="tshead">
+            <span class="tslabel">Category tags</span>
+            <a class="tslink" href="/tags">edit →</a>
+          </div>
+          <div class="tschips">
+            {#each tags as t}
+              <span class="tagchip" title={`${t.count} transaction${t.count === 1 ? "" : "s"}`}>
+                {t.name}<span class="tcount">{t.count}</span>
+              </span>
+            {/each}
+          </div>
+          <p class="tshint">
+            Stamped on your transactions at index time — so "how much on phone" is a fast,
+            exact filter. The frontier model is told these tag <em>names</em> (never your
+            keyword rules).
+          </p>
+        </div>
+      {/if}
       <dl class="paths">
         <dt>Indexed from</dt>
         <dd><code>{info.sourceDir || info.vaultDir}</code></dd>
@@ -555,6 +597,64 @@
   }
   .dot.warn {
     background: var(--warn);
+  }
+  .tagstrip {
+    margin: 0 0 18px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+  }
+  .tshead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 9px;
+  }
+  .tslabel {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .tslink {
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .tslink:hover {
+    text-decoration: underline;
+  }
+  .tschips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tagchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 2px 6px 2px 9px;
+    border-radius: 999px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .tcount {
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 0 6px;
+  }
+  .tshint {
+    margin: 9px 0 0;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.5;
   }
   .paths {
     margin: 0 0 18px;
