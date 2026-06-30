@@ -59,6 +59,7 @@ from vault.derive.store import (
     save_categories,
     preview_categories,
     effective_tags,
+    effective_tag_descriptions,
 )
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
@@ -1091,18 +1092,19 @@ def on_connect(mut conn: WsConnection) raises:
         # filter `.tags`) — show them in the same debug dropdown, since they're sent
         # too. Never the keyword RULES (those hold real merchant strings → on-device).
         var _avail = effective_tags()
-        var _tags_csv = String("")
+        var _adesc = effective_tag_descriptions()
+        var _tags_block = String("")
         for _i in range(len(_avail)):
-            if _i > 0:
-                _tags_csv += ", "
-            _tags_csv += _avail[_i]
+            _tags_block += "\n- " + _avail[_i]
+            if _i < len(_adesc) and _adesc[_i].byte_length() > 0:
+                _tags_block += " — " + _adesc[_i]
         var _dbg = manifest
-        if _tags_csv.byte_length() > 0:
+        if _tags_block.byte_length() > 0:
             _dbg += (
-                "\n\nCategory tags also sent (the model filters .tags on"
-                " these): "
+                "\n\nCategory tags also sent (name + scope note; the model"
+                " filters .tags on these):"
             )
-            _dbg += _tags_csv
+            _dbg += _tags_block
         conn.send_text(
             debug_event(
                 "manifest",
