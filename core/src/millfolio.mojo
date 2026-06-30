@@ -20,6 +20,9 @@ from vault.index import (
     Chunk,
     vault_files,
     effective_tags,
+    effective_retag,
+    tags_report,
+    TagInfo,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
 
@@ -118,10 +121,30 @@ def _embed_url() raises -> String:
     return getenv("MILLFOLIO_EMBED_URL", "http://127.0.0.1:8000/v1")
 
 
+def _print_tags_json() raises:
+    """`{"tags":[{"name","keywords":[…],"count":N}]}` for the UI Tags panel."""
+    var infos = tags_report()
+    var out = String('{"tags":[')
+    for i in range(len(infos)):
+        if i > 0:
+            out += ","
+        ref ti = infos[i]
+        out += '{"name":' + _json_str(ti.name) + ',"keywords":['
+        for k in range(len(ti.keywords)):
+            if k > 0:
+                out += ","
+            out += _json_str(ti.keywords[k])
+        out += '],"count":' + String(ti.count) + "}"
+    out += "]}"
+    print(out)
+
+
 def main() raises:
     var args = argv()
     if len(args) < 2:
-        print("usage: millfolio <manifest|read|embed|index|search|tags> ...")
+        print(
+            "usage: millfolio <manifest|read|embed|index|search|tags|retag> ..."
+        )
         return
     var cmd = String(args[1])
     if cmd == "manifest":
@@ -175,19 +198,36 @@ def main() raises:
         else:
             _search(query, k)
     elif cmd == "tags":
-        # The effective category tag NAMES (built-in defaults + the user's
-        # categories.txt), comma-joined. The codegen orchestrator captures this
-        # to tell the frontier model which `.tags` it can filter on. Names only —
-        # never the keyword rules (on-device matching detail).
-        var names = effective_tags()
-        var out = String("")
-        for i in range(len(names)):
-            if i > 0:
-                out += ", "
-            out += names[i]
-        print(out)
+        # `tags`        → the effective tag NAMES, comma-joined (the codegen
+        #                 orchestrator captures this to tell the frontier model
+        #                 which `.tags` it can filter on — names only).
+        # `tags --json` → {"tags":[{"name","keywords":[…],"count":N}]} for the UI
+        #                 Tags panel (per-tag keyword rules + how many stored
+        #                 transactions carry each tag).
+        if len(args) >= 3 and String(args[2]) == "--json":
+            _print_tags_json()
+        else:
+            var names = effective_tags()
+            var out = String("")
+            for i in range(len(names)):
+                if i > 0:
+                    out += ", "
+                out += names[i]
+            print(out)
+    elif cmd == "retag":
+        # Re-apply the current category rules to the stored transactions (no file
+        # scan, no embedding) — the app server runs this after the user edits
+        # their categories so the change applies without a full re-index.
+        var changed = effective_retag()
+        print(
+            "re-tagged "
+            + String(changed)
+            + " transaction(s) from the current category rules"
+        )
     else:
-        print("usage: millfolio <manifest|read|embed|index|search|tags> ...")
+        print(
+            "usage: millfolio <manifest|read|embed|index|search|tags|retag> ..."
+        )
 
 
 def _embed(text: String) raises:

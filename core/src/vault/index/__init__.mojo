@@ -12,6 +12,9 @@ from vault.index.index import (
     vault_files,
     index_manifest,
     effective_tags,
+    effective_retag,
+    tags_report,
+    TagInfo,
     Chunk,
 )
 from vault.index.manifest import build_manifest, FileInfo, _csv_columns

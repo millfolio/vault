@@ -682,7 +682,7 @@ def build_index(
         # re-tag the stored transactions (cheap, pure) and persist if anything moved.
         var only_trows = _load_txn_rows()
         var retagged = _retag(only_trows, reg)
-        if retagged:
+        if retagged > 0:
             _write_txn_rows(only_trows)
         print(
             "index up to date — "
@@ -690,7 +690,10 @@ def build_index(
             + " file(s), "
             + String(_total_chunks(new_entries))
             + " chunk(s); "
-            + ("re-applied category tags" if retagged else "nothing changed")
+            + (
+                "re-applied category tags" if retagged
+                > 0 else "nothing changed"
+            )
         )
         return
 
@@ -988,20 +991,61 @@ def _tags_equal(a: List[String], b: List[String]) -> Bool:
     return True
 
 
-def _retag(mut rows: List[TxnRow], reg: Registry) raises -> Bool:
+def _retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
     """Re-apply `reg`'s tags to every stored transaction in place (pure — no model
-    call, no re-embed). Returns True if any row's tags changed, so callers persist
-    only when something moved. This is what makes a plain `mill index` re-tag after
-    the user edits categories.txt, instead of needing a forced re-embed."""
-    var changed = False
+    call, no re-embed). Returns the COUNT of rows whose tags changed, so callers
+    persist only when something moved. This is what makes a plain `mill index`
+    re-tag after the user edits categories.txt, instead of a forced re-embed."""
+    var changed = 0
     for i in range(len(rows)):
         var new_tags = reg.tags_for(rows[i].desc)
         if not _tags_equal(rows[i].tags, new_tags):
             var r = rows[i].copy()
             r.tags = new_tags^
             rows[i] = r^
-            changed = True
+            changed += 1
     return changed
+
+
+def effective_retag() raises -> Int:
+    """Re-apply the current registry to the stored transactions and persist —
+    standalone (no file scan, no embedding). Backs `millfolio retag`, which the
+    app server runs after the user edits their categories. Returns rows changed.
+    """
+    var reg = _load_registry()
+    var trows = _load_txn_rows()
+    var changed = _retag(trows, reg)
+    if changed > 0:
+        _write_txn_rows(trows)
+    return changed
+
+
+@fieldwise_init
+struct TagInfo(Copyable, Movable):
+    """One tag for the UI Tags panel: its name, the keywords that assign it, and
+    how many stored transactions currently carry it."""
+
+    var name: String
+    var keywords: List[String]
+    var count: Int
+
+
+def tags_report() raises -> List[TagInfo]:
+    """Per-tag (name, keywords, count) over the effective registry + the stored
+    transactions — what `millfolio tags --json` emits for the Tags panel."""
+    var reg = _load_registry()
+    var trows = _load_txn_rows()
+    var out = List[TagInfo]()
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        var n = 0
+        for t in range(len(trows)):
+            for g in range(len(trows[t].tags)):
+                if trows[t].tags[g] == r.tag:
+                    n += 1
+                    break
+        out.append(TagInfo(r.tag.copy(), r.keywords.copy(), n))
+    return out^
 
 
 def _load_txn_rows() raises -> List[TxnRow]:
