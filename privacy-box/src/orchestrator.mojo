@@ -80,18 +80,41 @@ def _session_append(text: String):
         pass
 
 
-def _tags_context(tags: String) -> String:
-    """Format the available-tags line for the codegen prompt, or empty when there
-    are none (nothing indexed / no registry). Tells the model the category
-    vocabulary so it can filter `transactions()` on `.tags` — including the
-    user's own categories, which the static system prompt can't know."""
+def _tags_context(tags: String) raises -> String:
+    """Format the available-tags block for the codegen prompt, or empty when there
+    are none. `tags` is one `name <TAB> description` per line (from `millfolio
+    tags --describe`). Renders a bulleted `- name — description` list + the rule
+    that the model must pick a tag ONLY when its description clearly fits —
+    otherwise propose a new one. The description is what stops the `gym` → `health`
+    misfire: the model sees `health — … NOT gyms/fitness` and won't force it. Never
+    the keyword rules (on-device detail; they hold merchant strings the user typed).
+    """
     if tags.byte_length() == 0:
         return String("")
+    var bullets = String("")
+    var lines = tags.split("\n")
+    for i in range(len(lines)):
+        var line = String(lines[i])
+        if String(line.strip()).byte_length() == 0:
+            continue
+        var parts = line.split("\t")
+        var name = String(String(parts[0]).strip())
+        if name.byte_length() == 0:
+            continue
+        bullets += "\n- " + name
+        if len(parts) > 1:
+            var desc = String(String(parts[1]).strip())
+            if desc.byte_length() > 0:
+                bullets += " — " + desc
+    if bullets.byte_length() == 0:
+        return String("")
     return (
-        "\n\nAvailable category tags (each Txn's `.tags` is drawn from these;"
-        ' filter transactions() on them for category questions, e.g. `"phone"'
-        " in t.tags`): "
-        + tags
+        "\n\nAvailable category tags — each Txn's `.tags` is drawn from these."
+        ' Filter transactions() on a tag for category questions (e.g. `"phone"'
+        " in t.tags`), but ONLY when its description clearly fits the question."
+        " If none fits, do NOT force a near-match — propose a new tag"
+        " (# SUGGEST_TAG) or classify inline:"
+        + bullets
     )
 
 
@@ -186,7 +209,11 @@ struct Orchestrator(Movable):
         names the user typed). Best-effort: an empty string (→ no tags line in
         the prompt) when the binary can't produce them, so codegen never fails
         over tags."""
-        var argv: List[String] = [millfolio_bin(), String("tags")]
+        var argv: List[String] = [
+            millfolio_bin(),
+            String("tags"),
+            String("--describe"),
+        ]
         var t = self.sandbox.capture(argv)
         if t.exit_code != 0:
             return String("")
@@ -213,7 +240,7 @@ struct Orchestrator(Movable):
             log("• asking the frontier model to write the program…")
         var tags = self._vault_tags()
         if tags.byte_length() > 0:
-            log("• available category tags sent to the model: " + tags)
+            log("• category tags + scope notes sent to the model")
         var user_msg = (
             String("Question: ")
             + question
@@ -259,7 +286,7 @@ struct Orchestrator(Movable):
             log("• asking the frontier model to write the program (streaming)…")
         var tags = self._vault_tags()
         if tags.byte_length() > 0:
-            log("• available category tags sent to the model: " + tags)
+            log("• category tags + scope notes sent to the model")
         var user_msg = (
             String("Question: ")
             + question

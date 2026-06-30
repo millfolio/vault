@@ -20,6 +20,7 @@ from vault.derive.categorize import (
     default_registry,
     parse_rules,
     tag_names,
+    tag_descriptions,
     rules_canon,
     registry_to_text,
 )
@@ -164,6 +165,12 @@ def effective_tags() raises -> List[String]:
     return tag_names(load_registry())
 
 
+def effective_tag_descriptions() raises -> List[String]:
+    """Per-tag scope notes, parallel to `effective_tags()` (empty when none) —
+    sent to codegen alongside the names so the model picks the right tag."""
+    return tag_descriptions(load_registry())
+
+
 def _tags_equal(a: List[String], b: List[String]) -> Bool:
     """Order-sensitive tag-list equality (tags_for is deterministic in registry
     order, so a positional compare is enough)."""
@@ -283,17 +290,20 @@ def ml_materialize(base_url: String) raises -> Int:
 
 @fieldwise_init
 struct TagInfo(Copyable, Movable):
-    """One tag for the UI Tags panel: its name, the keywords that assign it, and
-    how many stored transactions currently carry it."""
+    """One tag for the UI Tags panel: its name, the keywords that assign it (or
+    the ML question), its scope description, and how many stored transactions
+    currently carry it."""
 
     var name: String
     var keywords: List[String]
     var count: Int
+    var description: String
+    var ml_prompt: String
 
 
 def tags_report() raises -> List[TagInfo]:
-    """Per-tag (name, keywords, count) over the effective registry + the stored
-    transactions — what the Tags panel renders."""
+    """Per-tag (name, keywords, count, description, ml_prompt) over the effective
+    registry + the stored transactions — what the Tags panel renders."""
     var reg = load_registry()
     var trows = load_txn_rows()
     var out = List[TagInfo]()
@@ -305,7 +315,15 @@ def tags_report() raises -> List[TagInfo]:
                 if trows[t].tags[g] == r.tag:
                     n += 1
                     break
-        out.append(TagInfo(r.tag.copy(), r.keywords.copy(), n))
+        out.append(
+            TagInfo(
+                r.tag.copy(),
+                r.keywords.copy(),
+                n,
+                r.description.copy(),
+                r.ml_prompt.copy(),
+            )
+        )
     return out^
 
 
@@ -386,6 +404,9 @@ def tags_report_json() raises -> String:
             if k > 0:
                 out += ","
             out += _json_str(ti.keywords[k])
-        out += '],"count":' + String(ti.count) + "}"
+        out += "],"
+        out += '"description":' + _json_str(ti.description) + ","
+        out += '"ml":' + _json_str(ti.ml_prompt) + ","
+        out += '"count":' + String(ti.count) + "}"
     out += "]}"
     return out^

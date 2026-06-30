@@ -14,6 +14,7 @@ from vault.derive.categorize import (
     parse_rules,
     merge_registry,
     tag_names,
+    tag_descriptions,
     rules_canon,
     registry_to_text,
 )
@@ -229,6 +230,62 @@ def main() raises:
     expect(
         rules_canon(mlround) == rules_canon(mlreg),
         "ML rules round-trip through registry_to_text (canon stable)",
+    )
+
+    # ── per-tag descriptions: `<tag> (note) = …` — the model's disambiguator ─────
+    # The note goes in parens after the tag, BEFORE the separator; it may contain
+    # commas / '=' / ':' (split off first) and never breaks the rule parse.
+    var drules = parse_rules(
+        String(
+            "health (medical care — NOT gyms or fitness) = pharmacy, cvs\n"
+            "gym (gyms & fitness studios) : is this a gym?\n"
+            "weird (a = b, c: d) = kw\n"  # separators inside the note are safe
+            "plain = visa\n"  # no note → empty description
+        )
+    )
+    expect(
+        drules[0].description == "medical care — NOT gyms or fitness",
+        "keyword rule note parsed (em-dash + 'NOT gyms' survives)",
+    )
+    expect(
+        _has(drules[0].keywords, "pharmacy")
+        and _has(drules[0].keywords, "cvs"),
+        "keyword rule with a note still parses its keywords",
+    )
+    expect(
+        drules[1].is_ml() and drules[1].description == "gyms & fitness studios",
+        "ML rule carries a note too",
+    )
+    expect(
+        drules[2].description == "a = b, c: d"
+        and _has(drules[2].keywords, "kw"),
+        "'=' and ':' inside the note don't confuse the rule parse",
+    )
+    expect(
+        drules[3].description == "", "a rule with no note → empty description"
+    )
+    # tag_descriptions is parallel to tag_names
+    var dreg = Registry(drules.copy())
+    var dn = tag_names(dreg)
+    var dd = tag_descriptions(dreg)
+    expect(
+        len(dn) == len(dd) and dd[1] == "gyms & fitness studios",
+        "tag_descriptions parallels tag_names",
+    )
+    # the built-in health tag now disambiguates away from gyms
+    var dflt_d = tag_descriptions(default_registry())
+    var dflt_n = tag_names(default_registry())
+    var health_has_not_gyms = False
+    for i in range(len(dflt_n)):
+        if dflt_n[i] == "health" and "NOT gyms" in dflt_d[i]:
+            health_has_not_gyms = True
+    expect(health_has_not_gyms, "built-in health description excludes gyms")
+    # notes round-trip through the file format (canon stable with descriptions)
+    var droundtext = registry_to_text(dreg, String("d00d"))
+    var dround = Registry(parse_rules(droundtext))
+    expect(
+        rules_canon(dround) == rules_canon(dreg),
+        "descriptions round-trip through registry_to_text (canon stable)",
     )
 
     print("ok: all categorize tests passed")

@@ -49,12 +49,19 @@ struct Rule(Copyable, Movable):
       non-empty marks the rule ML; such a rule never matches by keyword
       (``matches`` returns False) — it's materialized separately, at index time,
       by `vault.derive.store` calling the engine, and the result is cached in the
-      ``.tags`` column (see QUERY_FLOW). Deterministic rules leave it empty."""
+      ``.tags`` column (see QUERY_FLOW). Deterministic rules leave it empty.
+
+    ``description`` is an OPTIONAL one-line scope note shown to the codegen model
+    alongside the tag NAME (never the keyword rules) — so it picks a tag only when
+    the description clearly fits, instead of guessing from the name alone (the
+    `gym` → `health` misfire: `health`'s description says "NOT gyms/fitness"). It
+    holds no transaction data, so it's frontier-safe like the name."""
 
     var tag: String
     var keywords: List[String]
     var excludes: List[String]
     var ml_prompt: String
+    var description: String
 
     def is_ml(self) -> Bool:
         """An ML rule (classified by the on-device model at index time) rather
@@ -100,15 +107,20 @@ struct Registry(Copyable, Movable):
         return tags^
 
 
-def _rule(var tag: String, var keywords: List[String]) -> Rule:
-    """A keyword-only deterministic rule (no excludes, no ML)."""
-    return Rule(tag^, keywords^, List[String](), String(""))
+def _rule(
+    var tag: String, var keywords: List[String], var description: String = ""
+) -> Rule:
+    """A keyword-only deterministic rule (no excludes, no ML), with an optional
+    one-line scope description for the codegen model."""
+    return Rule(tag^, keywords^, List[String](), String(""), description^)
 
 
-def _ml_rule(var tag: String, var prompt: String) -> Rule:
+def _ml_rule(
+    var tag: String, var prompt: String, var description: String = ""
+) -> Rule:
     """An ML rule — `tag` is assigned when the on-device model answers yes to
     `prompt` for a transaction (materialized at index time, cached)."""
-    return Rule(tag^, List[String](), List[String](), prompt^)
+    return Rule(tag^, List[String](), List[String](), prompt^, description^)
 
 
 def default_registry() -> Registry:
@@ -135,6 +147,7 @@ def default_registry() -> Registry:
                 "xfinity mobile",
                 "metro by t-mobile",
             ],
+            "mobile phone carriers — your monthly cell-phone bill",
         )
     )
     rules.append(
@@ -160,6 +173,7 @@ def default_registry() -> Registry:
                 "amtrak",
                 "hotel",
             ],
+            "flights, hotels, car rental, trains — trips away from home",
         )
     )
     rules.append(
@@ -182,6 +196,7 @@ def default_registry() -> Registry:
                 "sushi",
                 "diner",
             ],
+            "restaurants, cafés, coffee, and food delivery — dining out",
         )
     )
     rules.append(
@@ -201,6 +216,7 @@ def default_registry() -> Registry:
                 "wegmans",
                 "sprouts",
             ],
+            "supermarkets & grocery stores — food shopping, not dining out",
         )
     )
     rules.append(
@@ -218,6 +234,10 @@ def default_registry() -> Registry:
                 "dentist",
                 "optometr",
             ],
+            (
+                "pharmacies, doctors, hospitals, dental — medical care; NOT"
+                " gyms or fitness"
+            ),
         )
     )
     return Registry(rules^)
@@ -238,6 +258,8 @@ def _valid_tag_name(name: String) -> Bool:
         "," in name
         or "=" in name
         or ":" in name
+        or "(" in name
+        or ")" in name
         or "\t" in name
         or "\n" in name
     ):
@@ -256,19 +278,59 @@ def parse_rules(text: String) raises -> List[Rule]:
     itself contain `=`. Blank lines and `#` comments are ignored; tag/keywords/
     prompt are trimmed; a malformed line (bad tag, no keywords, empty prompt)
     yields no rule rather than an error. Excludes aren't exposed in the user
-    format yet."""
+    format yet.
+
+    An OPTIONAL one-line description goes in parentheses right after the tag name,
+    BEFORE the `=`/`:` — `tag (scope note) = kw, kw` or `tag (note) : question`.
+    It's split off first (so a `=`/`:`/`,` inside the note doesn't confuse the
+    rule parse) and shown to the codegen model alongside the name."""
     var out = List[Rule]()
     var lines = text.split("\n")
     for i in range(len(lines)):
         var line = String(lines[i].strip())
         if line.byte_length() == 0 or line.startswith("#"):
             continue
-        var eq = line.find("=")
-        var colon = line.find(":")
+
+        # Split off a LEADING `(description)` — only when the '(' precedes the
+        # rule separator (so a '(' inside a keyword/question value is left alone).
+        # Done via split (UTF-8-safe — the note may hold an em-dash) not slicing.
+        var eq0 = line.find("=")
+        var colon0 = line.find(":")
+        var first_sep = eq0
+        if colon0 != -1 and (eq0 == -1 or colon0 < eq0):
+            first_sep = colon0
+        var lp = line.find("(")
+        var rp = line.find(")")
+        var description = String("")
+        var work = line
+        if (
+            lp != -1
+            and rp != -1
+            and lp < rp
+            and (first_sep == -1 or lp < first_sep)
+        ):
+            var p1 = line.split("(")
+            var before = String(p1[0])
+            var after_open = String("")
+            for k in range(1, len(p1)):
+                if k > 1:
+                    after_open += "("
+                after_open += String(p1[k])
+            var p2 = after_open.split(")")
+            description = String(String(p2[0]).strip())
+            var after_close = String("")
+            for k in range(1, len(p2)):
+                if k > 1:
+                    after_close += ")"
+                after_close += String(p2[k])
+            work = String(before + after_close)
+
+        var eq = work.find("=")
+        var colon = work.find(":")
         # ML rule when ':' is present and comes before any '=' (or there's no '=').
         var is_ml = colon != -1 and (eq == -1 or colon < eq)
         var sep = ":" if is_ml else "="
-        var parts = line.split(sep)
+        var parts = work.split(sep)
         if len(parts) < 2:
             continue
         var tag = String(parts[0].strip())
@@ -283,7 +345,15 @@ def parse_rules(text: String) raises -> List[Rule]:
                 prompt += String(parts[k])
             prompt = String(prompt.strip())
             if prompt.byte_length() > 0:
-                out.append(Rule(tag^, List[String](), List[String](), prompt^))
+                out.append(
+                    Rule(
+                        tag^,
+                        List[String](),
+                        List[String](),
+                        prompt^,
+                        description^,
+                    )
+                )
             continue
         var kw_parts = String(parts[1]).split(",")
         var kws = List[String]()
@@ -292,7 +362,9 @@ def parse_rules(text: String) raises -> List[Rule]:
             if kw.byte_length() > 0:
                 kws.append(kw^)
         if len(kws) > 0:
-            out.append(Rule(tag^, kws^, List[String](), String("")))
+            out.append(
+                Rule(tag^, kws^, List[String](), String(""), description^)
+            )
     return out^
 
 
@@ -317,6 +389,8 @@ def merge_registry(var base: Registry, extra: List[Rule]) raises -> Registry:
                 r.ml_prompt = (
                     er.ml_prompt.copy()
                 )  # an ML rule overrides the prompt
+            if er.description.byte_length() > 0:
+                r.description = er.description.copy()  # a given note overrides
             base.rules[found] = r^
         else:
             base.rules.append(er.copy())
@@ -329,6 +403,16 @@ def tag_names(reg: Registry) raises -> List[String]:
     var out = List[String]()
     for i in range(len(reg.rules)):
         out.append(reg.rules[i].tag.copy())
+    return out^
+
+
+def tag_descriptions(reg: Registry) raises -> List[String]:
+    """The per-tag scope descriptions, parallel to `tag_names` (empty string when
+    a rule has none) — paired with the names for the codegen context + the UI.
+    """
+    var out = List[String]()
+    for i in range(len(reg.rules)):
+        out.append(reg.rules[i].description.copy())
     return out^
 
 
@@ -350,6 +434,10 @@ def rules_canon(reg: Registry) -> String:
                 if k > 0:
                     out += ","
                 out += r.keywords[k]
+        # Append the description as a tab-prefixed field ONLY when present, so a
+        # description-less rule's canon (and the historical checksum) is unchanged.
+        if r.description.byte_length() > 0:
+            out += "\t#" + r.description
         out += "\n"
     return out^
 
@@ -366,8 +454,11 @@ def registry_to_text(reg: Registry, checksum: String) raises -> String:
         " freely.\n# Format: <tag> = keyword, keyword, …   (case-insensitive"
         " substring match).\n# Or an ML rule — <tag> : <yes/no question> — the"
         " on-device model decides at\n# index time, for the fuzzy tail no"
-        " keyword list captures.\n# A tag name may contain spaces but not a"
-        " comma, '=' or ':' (separators).\n# Lines starting with # are"
+        " keyword list captures.\n# Add an optional scope note in parentheses"
+        " after the tag — <tag> (note) = … — shown\n# to the model (with the"
+        " name, never your keywords) so it picks the right tag.\n# A tag name"
+        " may contain spaces but not a comma, '=', ':' or parens"
+        " (separators).\n# Lines starting with # are"
         " comments. Re-run `mill index` after editing.\n#\n# The rules below"
         " are the built-in defaults. While you leave them unchanged\n# they"
         " auto-update on upgrade; once you edit any rule, the file is yours\n#"
@@ -377,10 +468,14 @@ def registry_to_text(reg: Registry, checksum: String) raises -> String:
     out += checksum + "\n"
     for i in range(len(reg.rules)):
         ref r = reg.rules[i]
+        # Optional `(description)` right after the tag name, before the separator.
+        var name = r.tag
+        if r.description.byte_length() > 0:
+            name += " (" + r.description + ")"
         if r.is_ml():
-            out += r.tag + " : " + r.ml_prompt + "\n"
+            out += name + " : " + r.ml_prompt + "\n"
             continue
-        out += r.tag + " = "
+        out += name + " = "
         for k in range(len(r.keywords)):
             if k > 0:
                 out += ", "

@@ -19,6 +19,7 @@ from vault.index.index import (
 # CLI) keep their imports.
 from vault.derive.store import (
     effective_tags,
+    effective_tag_descriptions,
     effective_retag,
     ml_materialize,
     tags_report,

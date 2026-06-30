@@ -20,6 +20,7 @@ from vault.index import (
     Chunk,
     vault_files,
     effective_tags,
+    effective_tag_descriptions,
     effective_retag,
     ml_materialize,
     tags_report_json,
@@ -188,6 +189,19 @@ def main() raises:
         #                 transactions carry each tag).
         if len(args) >= 3 and String(args[2]) == "--json":
             print(tags_report_json())
+        elif len(args) >= 3 and String(args[2]) == "--describe":
+            # One tag per line, `name <TAB> description` (description may be
+            # empty) — the codegen orchestrator formats this into the prompt so
+            # the model picks a tag by its scope, not just its name.
+            var names = effective_tags()
+            var descs = effective_tag_descriptions()
+            var out = String("")
+            for i in range(len(names)):
+                out += names[i] + "\t"
+                if i < len(descs):
+                    out += descs[i]
+                out += "\n"
+            print(out)
         else:
             var names = effective_tags()
             var out = String("")
