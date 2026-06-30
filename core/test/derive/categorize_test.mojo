@@ -114,6 +114,43 @@ def main() raises:
         len(user) == 3, "parse_rules: 3 valid rules (skips malformed/empty-tag)"
     )
 
+    # ── malformed tag NAMES are dropped (separators would corrupt .tags) ─────────
+    # A tag name may contain SPACES (multi-word categories) but must NOT contain a
+    # field separator: `,` (splits the comma-joined .tags column / codegen list),
+    # `=` (the tag/keyword separator), or tab/newline. Such rules are skipped.
+    var dangerous = parse_rules(
+        String(
+            "bad,name = x\n"  # comma → would split into phantom 'bad'/'name' tags
+            "a=b = x\n"  # '=' in name; split-on-'=' must not yield an 'a=b' tag
+            "credit cards = visa, mastercard\n"  # SPACES are fine — must survive
+            "bad\tname = y\n"  # tab in name → dropped
+        )
+    )
+    var dnames = tag_names(Registry(dangerous.copy()))
+    expect(
+        not _has(dnames, "bad,name") and not _has(dnames, "bad"),
+        "comma in tag name → rule dropped (no 'bad,name'/'bad' tag)",
+    )
+    # `a=b = x` splits on '=' BEFORE validation → parts[0] is just 'a', so the
+    # dangerous 'a=b' tag is never formed (a benign 'a'→'b' rule survives instead).
+    expect(not _has(dnames, "a=b"), "'=' in tag name → no 'a=b' tag")
+    expect(not _has(dnames, "bad\tname"), "tab in tag name → rule dropped")
+    expect(
+        _has(dnames, "credit cards"),
+        "multi-word tag name with spaces still parses ('credit cards')",
+    )
+    # only the two structurally-safe rules survive: 'credit cards' and 'a'
+    # (the comma/tab rules are dropped, 'a=b' never forms).
+    expect(
+        len(dangerous) == 2,
+        "comma/tab rules dropped; only 'credit cards' + benign 'a' survive",
+    )
+    var cc = merge_registry(default_registry(), dangerous)
+    expect(
+        _has(cc.tags_for("AMEX CREDIT CARDS PMT VISA 0012"), "credit cards"),
+        "multi-word 'credit cards' tag matches via its keyword",
+    )
+
     var merged = merge_registry(default_registry(), user)
 
     # new tag from a user-only keyword

@@ -202,6 +202,18 @@ def default_registry() -> Registry:
 # ── user-editable registry: parse + merge a config file ───────────────────────
 
 
+def _valid_tag_name(name: String) -> Bool:
+    """A tag name may contain spaces but must not be empty or contain a field
+    separator — `,` (splits the stored comma-joined `.tags` column + the codegen
+    tag list), `=` (the tag/keywords separator), tab or newline (TSV/line
+    separators). Letting one through would silently split into phantom tags."""
+    if name.byte_length() == 0:
+        return False
+    if "," in name or "=" in name or "\t" in name or "\n" in name:
+        return False
+    return True
+
+
 def parse_rules(text: String) raises -> List[Rule]:
     """Parse user category rules from the config-file format. One rule per
     non-comment line:
@@ -223,7 +235,7 @@ def parse_rules(text: String) raises -> List[Rule]:
         if len(parts) < 2:
             continue
         var tag = String(parts[0].strip())
-        if tag.byte_length() == 0:
+        if not _valid_tag_name(tag):
             continue
         var kw_parts = String(parts[1]).split(",")
         var kws = List[String]()
@@ -295,8 +307,10 @@ def registry_to_text(reg: Registry, checksum: String) raises -> String:
     var out = String(
         "# millfolio category rules — THIS FILE IS THE SOURCE OF TRUTH; edit"
         " freely.\n# Format: <tag> = keyword, keyword, …   (case-insensitive"
-        " substring match).\n# Lines starting with # are comments. Re-run `mill"
-        " index` after editing.\n#\n# The rules below are the built-in"
+        " substring match).\n# A tag name may contain spaces but not a comma or"
+        " '=' (those are separators).\n# Lines starting with # are comments."
+        " Re-run `mill index` after editing.\n#\n# The rules below are the"
+        " built-in"
         " defaults. While you leave them unchanged\n# they auto-update on"
         " upgrade; once you edit any rule, the file is yours\n# and we won't"
         " overwrite it. Add your own categories by adding lines.\n#"
