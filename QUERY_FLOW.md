@@ -81,6 +81,80 @@ context, like the manifest is today, so the model knows what exists.
    current flat side-table today; LanceDB is the scale + index upgrade, not a
    prerequisite.
 
+## Tag mechanics: mechanism × persistence, and validation
+
+Two **independent** axes govern every tag. Conflating them is the main source of
+confusion; keep them separate.
+
+|                          | **Transient** (query-scoped)               | **Stored** (registry + materialized to `.tags`)        |
+| ------------------------ | ------------------------------------------ | ------------------------------------------------------ |
+| **Deterministic** (kw/regex) | one-off slice ("names containing 'yoga'") | the default for durable categories (phone, travel)     |
+| **ML** (`ask_local` classify) | one-off semantic slice ("felt like impulse buys") | the long tail — **pay the cost once at index, reuse** |
+
+### How codegen decides deterministic vs ML
+
+The model runs this in order:
+
+1. **Does an existing tag cover it?** → `"x" in t.tags`. No interruption (common case).
+2. **Is it keyword-able?** — can the model *name* the discriminating merchants from
+   world knowledge? `phone → {verizon, at&t, t-mobile, mint, …}` is a closed,
+   nameable set → **deterministic**. Only a genuinely semantic boundary no keyword
+   list captures (`"business expense"`) → **ML via `ask_local`**.
+3. **Durable or one-off?** — a noun-category you'd ask again (phone, groceries) →
+   propose a *stored* tag. An ad-hoc slice for this question only → *inline/transient*.
+
+So **"how much on phone"** should propose a deterministic, durable `phone` tag and
+validate it — NOT loop `ask_local` per txn (the slow, non-deterministic path that
+produced the "$224,303 phone bill"). The codegen system prompt must bias toward
+"define a reusable deterministic tag when you can name the merchants." That one
+prompt rule is the highest-leverage fix.
+
+**Confidentiality is what makes proposing keywords safe:** the model sees only
+aliases, so it picks keywords from *world knowledge* (`verizon` is a phone company),
+never from your data. General knowledge comes from the cloud model; the private
+specifics (which actually appear in *your* statements, which false-positive) come
+from on-device validation. That separation is load-bearing.
+
+### Propose, don't write — and ML in "ingest mode"
+
+The untrusted frontier model must **propose, never write** the registry
+(`categories.txt` is a trusted, user-owned, on-device file; a model write is a
+privilege escalation, and it can't validate anyway since it can't see real
+descriptions). It emits a **structured proposal** `{name, mechanism,
+keywords | ml_prompt}`; the trusted on-device layer (`vault.derive.store`) commits
+it **after the user approves**.
+
+Extend the registry with a second rule type beside keyword rules: an **ML rule**
+= `tag : <classification prompt>`, materialized at index time by batched
+`ask_local` over each txn into the same `.tags` column. The slow cost is paid
+**once per statement at ingest**; every later query is a free exact filter,
+identical downstream to a deterministic tag. ML+transient stays the one-off escape
+hatch; ML+stored is the new capability the model can propose.
+
+### The validation workflow (chat UI, on the existing `WorkflowPanel`)
+
+Triggered when the model proposes a new tag, or the user edits a definition:
+
+1. **Announce** — a workflow step: "New tag `phone` — validate before saving",
+   showing the proposed definition.
+2. **Dry-run, time-boxed.** Run the candidate on-device over a sample. Deterministic
+   → near-instant over all txns; ML → `ask_local` over a **stratified** sample
+   (clear positives, clear negatives, and the **boundary/low-confidence** cases)
+   within a **~20s budget**, reporting coverage ("validated 40 of 312").
+3. **Show stats + examples.** Match rate, **positive examples**, and — most
+   important — likely **errors**: false positives (the Chase "Crd Epay …3934444444"
+   surfaces here as a `phone` match to reject) and false negatives (unmatched txns
+   that look phone-related → a missing keyword).
+4. **Edit → loop.** User tweaks keywords / the ML prompt → re-run step 2. On
+   **Approve** → `save_categories` + re-tag (instant for deterministic; backfill via
+   `ask_local` for ML).
+
+**Hard constraint:** past the proposal the loop is **on-device only**. Dry-run
+results (matched descriptions, false positives) must **never** go back to the
+frontier model — that would leak exactly the data we alias. Refinement is the user
++ optionally the trusted local model, which (seeing real text) can *suggest* missing
+keywords the frontier model couldn't safely give.
+
 ## Storage
 
 ### Today (flat TSV side-tables)
