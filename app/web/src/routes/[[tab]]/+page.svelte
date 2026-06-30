@@ -278,6 +278,7 @@
       <a class:active={view === "stats"} href="/stats">Stats</a>
       {#if !isDemo}<a class:active={view === "system"} href="/system">System</a>{/if}
     </nav>
+    <a class="community" href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener" title="Join the discussion">Community ↗</a>
   </header>
   {#if vaultEmpty && view === "chat"}
     <div class="notice" role="status">
@@ -308,7 +309,6 @@
       </span>
     {/if}
     <span class="spacer"></span>
-    <a class="barlink" href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener">Community ↗</a>
     <span class="ver" title="build (app SHA · release version)">{buildLabel}</span>
   </footer>
 </main>
@@ -359,6 +359,17 @@
     background: var(--surface-2);
     border-color: var(--border);
     color: var(--text);
+  }
+  .community {
+    margin-left: auto; /* push to the top-right */
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 13px;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .community:hover {
+    color: var(--accent);
   }
   .single {
     flex: 1;
@@ -490,14 +501,6 @@
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
-  }
-  .statusbar .barlink {
-    color: var(--text-dim);
-    font-weight: 600;
-    text-decoration: none;
-  }
-  .statusbar .barlink:hover {
-    color: var(--accent);
   }
   .statusbar .ver {
     opacity: 0.6;
