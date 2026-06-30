@@ -276,6 +276,46 @@ def _json_str(s: String) -> String:
     return out^
 
 
+def preview_categories(text: String) raises -> String:
+    """Dry-run EDITED categories text against the stored transactions WITHOUT
+    saving — the validation loop: how many transactions each rule would tag, plus
+    a few example descriptions so the user can spot false positives (e.g. a credit
+    `Crd Epay` digit-run wrongly matching `phone`) BEFORE committing. Deterministic
+    rules are evaluated exactly; an ML rule can't be here (it needs the engine at
+    index time) so it reports `ml:true` with no count. Parses `text` the same way
+    the loader would treat an authoritative file. Returns
+    `{"tags":[{"name","ml":bool,"count":N,"examples":[desc,…]}]}`."""
+    var reg = Registry(parse_rules(text))
+    var trows = load_txn_rows()
+    var counts = List[Int]()
+    var examples = List[List[String]]()
+    for _i in range(len(reg.rules)):
+        counts.append(0)
+        examples.append(List[String]())
+    for t in range(len(trows)):
+        var tg = reg.tags_for(trows[t].desc)  # deterministic only
+        for i in range(len(reg.rules)):
+            if _contains(tg, reg.rules[i].tag):
+                counts[i] += 1
+                if len(examples[i]) < 5:
+                    examples[i].append(trows[t].desc.copy())
+    var out = String('{"tags":[')
+    for i in range(len(reg.rules)):
+        if i > 0:
+            out += ","
+        ref r = reg.rules[i]
+        out += '{"name":' + _json_str(r.tag)
+        out += ',"ml":' + ("true" if r.is_ml() else "false")
+        out += ',"count":' + String(counts[i]) + ',"examples":['
+        for e in range(len(examples[i])):
+            if e > 0:
+                out += ","
+            out += _json_str(examples[i][e])
+        out += "]}"
+    out += "]}"
+    return out^
+
+
 def tags_report_json() raises -> String:
     """`{"tags":[{"name","keywords":[…],"count":N}]}` — the SAME payload the CLI
     `tags --json` prints and the app server's GET /api/tags returns."""
