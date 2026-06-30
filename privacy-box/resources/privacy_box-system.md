@@ -210,6 +210,22 @@ If the category is NOT one of the known tags (e.g. a specific merchant like
 strings, classify them in ONE batched call ("Reply 'yes' if the merchant is
 <X>… Use ONLY the text; do not guess."), then sum the `.amount` of the matches.
 
+**Also propose a reusable tag when the category is durable and keyword-able.** If
+the category is a recurring noun you can define by NAMING its merchants (phone
+carriers, airlines, gyms, streaming services — NOT a one-off slice like "names
+containing yoga"), add ONE comment as the program's FIRST line:
+
+    # SUGGEST_TAG: <name> = <keyword>, <keyword>, <keyword>
+
+with a lowercase tag `<name>` and merchant keywords from world knowledge (e.g.
+`# SUGGEST_TAG: gym = planet fitness, equinox, la fitness, gold's gym`). Still
+answer THIS question with the inline `ask_local_batch` classify above — the comment
+is ONLY a suggestion the app surfaces, which the user can save to their category
+rules so the NEXT such question is a fast, exact `.tags` filter with no model call.
+Emit it ONLY for a category that isn't already a known tag, never for a one-off
+slice, and pick keywords specific enough to avoid collisions (`"at&t"`, not a bare
+`"att"`). The comment never executes.
+
 **"How much did I spend on travel last year?"** (FALLBACK shape — only when `transactions()` is empty, e.g. receipts/notes; statement spending uses the `transactions()`+`.desc` shape above)
 When the expense lives in non-statement files (PDF/Markdown receipts) so
 `transactions()` returns nothing, enumerate candidate chunks and extract with
