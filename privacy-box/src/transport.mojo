@@ -20,6 +20,7 @@ from flare.http import HttpClient, Request
 from flare.tls import TlsStream, TlsConfig
 from json import loads
 from egress import EgressGuard
+from vaultcfg import resource_path
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -165,14 +166,15 @@ def _default_codegen_system() -> String:
     return s
 
 
-def _prompt_path() -> String:
+def _prompt_path() raises -> String:
     """Where to load the system prompt from. `PRIVACY_BOX_PROMPT` overrides; otherwise
-    `resources/privacy_box-system.md` relative to the install dir (cwd), matching how
-    the sandbox templates are resolved (see wiring.mojo)."""
+    `resources/privacy_box-system.md` resolved under `PRIVACY_BOX_HOME` (the launcher
+    sets it) so it does NOT depend on cwd — falling back to the cwd-relative path in a
+    dev `pixi run`. Same resolution as the sandbox templates (see vaultcfg)."""
     var override = getenv("PRIVACY_BOX_PROMPT", "")
     if override != "":
         return override
-    return String("resources/privacy_box-system.md")
+    return resource_path(String("resources/privacy_box-system.md"))
 
 
 def _codegen_system() -> String:
@@ -389,9 +391,9 @@ struct RemoteClient(Movable):
             toks = 0
         return Generated(code^, toks)
 
-    def _anthropic_stream[S: DeltaSink](
-        self, prompt: String, mut sink: S
-    ) raises -> Generated:
+    def _anthropic_stream[
+        S: DeltaSink
+    ](self, prompt: String, mut sink: S) raises -> Generated:
         """Streaming codegen — same request as `_anthropic` but `stream:true`, driven
         over a raw TlsStream (flare's HttpClient reads the whole body at once). SSE is
         Anthropic-specific so it lives here. Parses `content_block_delta` events as the
@@ -399,9 +401,17 @@ struct RemoteClient(Movable):
         the program. Byte-level line extraction keeps UTF-8 valid across read
         boundaries (a multibyte codepoint can't span the `\\n` we split on)."""
         var sys = _codegen_system()
-        var body = String('{"model":"') + self.model + '","max_tokens":8192,"stream":true,'
+        var body = (
+            String('{"model":"')
+            + self.model
+            + '","max_tokens":8192,"stream":true,'
+        )
         body += '"system":"' + _json_escape(sys) + '",'
-        body += '"messages":[{"role":"user","content":"' + _json_escape(prompt) + '"}]}'
+        body += (
+            '"messages":[{"role":"user","content":"'
+            + _json_escape(prompt)
+            + '"}]}'
+        )
 
         # base_url e.g. https://api.anthropic.com/v1 → host `api.anthropic.com`,
         # request target `/v1/messages`.
@@ -423,7 +433,9 @@ struct RemoteClient(Movable):
         wire += "connection: close\r\n\r\n"
         wire += body
 
-        var stream = TlsStream.connect_timeout(host, UInt16(443), TlsConfig(), 120000)
+        var stream = TlsStream.connect_timeout(
+            host, UInt16(443), TlsConfig(), 120000
+        )
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
 
@@ -433,7 +445,9 @@ struct RemoteClient(Movable):
         # lines, so chunk-size framing lines are ignored.
         var rbuf = List[UInt8](capacity=16384)
         rbuf.resize(16384, 0)
-        var buf = List[UInt8](capacity=65536)  # received bytes not yet line-consumed
+        var buf = List[UInt8](
+            capacity=65536
+        )  # received bytes not yet line-consumed
         var consumed = 0
         var headers_done = False
         var code = String("")
@@ -456,10 +470,14 @@ struct RemoteClient(Movable):
                 if nl == -1:
                     break
                 var end = nl
-                if end > consumed and Int(buf[end - 1]) == 13:  # strip trailing '\r'
+                if (
+                    end > consumed and Int(buf[end - 1]) == 13
+                ):  # strip trailing '\r'
                     end -= 1
                 var line = String(
-                    String(unsafe_from_utf8=Span[UInt8, _](buf[consumed:end])).strip()
+                    String(
+                        unsafe_from_utf8=Span[UInt8, _](buf[consumed:end])
+                    ).strip()
                 )
                 consumed = nl + 1
                 if not line.startswith("data:"):
@@ -476,12 +494,17 @@ struct RemoteClient(Movable):
                         sink.on_delta(txt)  # LIVE: surface the chunk
                     elif t == "message_delta":
                         try:
-                            if ev["delta"]["stop_reason"].string_value() == "max_tokens":
+                            if (
+                                ev["delta"]["stop_reason"].string_value()
+                                == "max_tokens"
+                            ):
                                 truncated = True
                         except:
                             pass
                         try:
-                            toks += Int(ev["usage"]["output_tokens"].int_value())
+                            toks += Int(
+                                ev["usage"]["output_tokens"].int_value()
+                            )
                         except:
                             pass
                 except:
@@ -489,7 +512,8 @@ struct RemoteClient(Movable):
         stream.close()
         if truncated:
             raise Error(
-                "codegen truncated: the model hit max_tokens before finishing the"
-                " program (stop_reason=max_tokens). Raise max_tokens or simplify."
+                "codegen truncated: the model hit max_tokens before finishing"
+                " the program (stop_reason=max_tokens). Raise max_tokens or"
+                " simplify."
             )
         return Generated(_strip_fences(code), toks)

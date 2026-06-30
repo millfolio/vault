@@ -25,6 +25,22 @@ else (flare/json/…) is a sibling of millfolio, matching millfolio/pixi.toml's 
 from std.os import getenv
 
 
+def resource_path(rel: String) raises -> String:
+    """Resolve a privacy_box resource (a `sandbox/*.sb.template` profile, the
+    `resources/privacy_box-system.md` prompt) to an ABSOLUTE path under
+    `PRIVACY_BOX_HOME` when that's set — so resolution does NOT depend on the
+    process's cwd. The launcher (mill's run wrapper / the app-server launch agent)
+    exports `PRIVACY_BOX_HOME` = the privacy_box install dir. An already-absolute
+    `rel` is returned unchanged; with no `PRIVACY_BOX_HOME` (a dev `pixi run`) we
+    fall back to the historical cwd-relative path."""
+    if rel.startswith("/"):
+        return rel
+    var home = getenv("PRIVACY_BOX_HOME", "")
+    if home == "":
+        return rel
+    return home + "/" + rel
+
+
 def _split_colon(s: String) raises -> List[String]:
     var out = List[String]()
     var parts = s.split(":")

@@ -27,6 +27,7 @@ from std.ffi import external_call, c_int, c_char, CStringSlice
 from std.memory import UnsafePointer, stack_allocation
 from std.os import getenv
 from logging import log
+from vaultcfg import resource_path
 
 
 # ── posix_spawn-based exec ────────────────────────────────────────────────────
@@ -464,7 +465,7 @@ struct Sandbox(Movable):
             String("privacy_box.sb.template"),
             String("privacy_box-vault.sb.template"),
         ) if is_vault else self.template_path
-        var tmpl = _read(tmpl_path)
+        var tmpl = _read(resource_path(tmpl_path))
         var data_c = _canonical(self.policy.data_dir)
         var home_c = _canonical(getenv("HOME", "/"))
         # The Mojo runtime/toolchain (pixi env) lives under $HOME; allow reading it
@@ -659,7 +660,7 @@ struct Sandbox(Movable):
             String("privacy_box.sb.template"),
             String("compile.sb.template"),
         )
-        var tmpl = _read(tmpl_path)
+        var tmpl = _read(resource_path(tmpl_path))
         var home_c = _canonical(getenv("HOME", "/"))
         var tmp_c = _canonical(getenv("TMPDIR", "/tmp"))
         # Canonicalize the runtime prefix too (it exists whenever CONDA_PREFIX is

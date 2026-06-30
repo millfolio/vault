@@ -965,6 +965,8 @@ public final class Bootstrapper: ObservableObject {
         let body = """
         #!/bin/bash
         cd '\(privacy_boxDir.path)'
+        # Resolve sandbox/*.sb.template + resources/ by ABSOLUTE path (not cwd).
+        export PRIVACY_BOX_HOME='\(privacy_boxDir.path)'
         export CONDA_PREFIX='\(privacy_boxMojoPrefix.path)'
         export MODULAR_HOME='\(modularHome)'
         export PATH='\(mojoBin)':"$PATH"
@@ -1443,6 +1445,10 @@ public final class Bootstrapper: ObservableObject {
             "MILLFOLIO_LOCAL_URL": "http://127.0.0.1:8000/v1",
             // The chat WS compiles the generated program against the millfolio sources.
             "PRIVACY_BOX_MILLFOLIO": millfolioDir.path,
+            // The privacy_box install dir — so it resolves its sandbox/*.sb.template
+            // profiles + resources/privacy_box-system.md by ABSOLUTE path, not the
+            // process cwd (WorkingDirectory below is belt-and-suspenders).
+            "PRIVACY_BOX_HOME": privacy_boxDir.path,
             // Serve the built UI by ABSOLUTE path so it doesn't depend on cwd.
             "MILLFOLIO_WEB_DIR": appRoot.appendingPathComponent("web/dist").path,
             "MILLFOLIO_RUN_SCRIPT": runScript.path,
