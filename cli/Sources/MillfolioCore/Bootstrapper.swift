@@ -1213,6 +1213,10 @@ public final class Bootstrapper: ObservableObject {
             "-I", privacy_boxRoot.appendingPathComponent("json").path,
             "-I", privacy_boxRoot.appendingPathComponent("jinja2.mojo/src").path,
             "-I", privacy_boxRoot.appendingPathComponent("logging.mojo/src").path,  // server.mojo: from logging import log
+            // server.mojo: `from vault.derive.store import …` (Tags panel + category
+            // editor, in-process). The precompiled vault.mojoc carries the store; it's
+            // LanceDB-free so nothing here dlopens lancedb (it's never constructed).
+            "-I", millfolioDir.appendingPathComponent("pkgs").path,
         ]
         let env = privacy_boxMojoEnv(python: python)
         // `mojo build -o build/…` won't create the output dir, and the app bundle
