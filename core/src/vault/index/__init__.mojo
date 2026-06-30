@@ -11,11 +11,18 @@ from vault.index.index import (
     file_transactions,
     vault_files,
     index_manifest,
+    Chunk,
+)
+
+# The registry/tags/retag store is LanceDB-free (vault.derive.store) and shared
+# with the app server; re-exported here so existing `vault.index` callers (the
+# CLI) keep their imports.
+from vault.derive.store import (
     effective_tags,
     effective_retag,
     tags_report,
+    tags_report_json,
     TagInfo,
-    Chunk,
 )
 from vault.index.manifest import build_manifest, FileInfo, _csv_columns
 from vault.index.readers import (

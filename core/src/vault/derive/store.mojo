@@ -1,0 +1,272 @@
+"""Store — the on-device derived-attribute store + registry I/O.
+
+The `~/.config/millfolio/` files that back categorization: `categories.txt` (the
+tag registry — SOURCE OF TRUTH, seeded with the built-in defaults, see
+`vault.derive.categorize`) and the `.tags` column of `transactions.tsv`.
+
+This module is deliberately **LanceDB-free** (it touches only those two files +
+pure helpers), so BOTH the `millfolio` CLI and the app server import it and call
+the SAME functions in-process — no spawning a separate engine binary for tags /
+retag / category edits. The heavy index/embedding work stays in `vault.index`.
+"""
+
+from std.os import getenv
+from std.os.path import exists
+
+from vault.extract.transactions import TxnRow, tsv_to_txn_rows, txn_rows_to_tsv
+from vault.index.sha256 import sha256_hex
+from vault.derive.categorize import (
+    Registry,
+    default_registry,
+    parse_rules,
+    tag_names,
+    rules_canon,
+    registry_to_text,
+)
+
+
+# ── paths ─────────────────────────────────────────────────────────────────────
+
+
+def config_dir() raises -> String:
+    return getenv("HOME", ".") + "/.config/millfolio"
+
+
+def txns_path() raises -> String:
+    return config_dir() + "/transactions.tsv"
+
+
+def categories_path() raises -> String:
+    return config_dir() + "/categories.txt"
+
+
+# ── transactions side-table I/O ───────────────────────────────────────────────
+
+
+def load_txn_rows() raises -> List[TxnRow]:
+    if not exists(txns_path()):
+        return List[TxnRow]()
+    var text: String
+    with open(txns_path(), "r") as f:
+        text = f.read()
+    return tsv_to_txn_rows(text)
+
+
+def write_txn_rows(rows: List[TxnRow]) raises:
+    with open(txns_path(), "w") as f:
+        f.write(txn_rows_to_tsv(rows))
+
+
+# ── registry (categories.txt is the source of truth) ──────────────────────────
+
+
+def _sha_str(s: String) -> String:
+    """Hex SHA-256 of a string's bytes."""
+    var b = List[UInt8]()
+    var p = s.unsafe_ptr()
+    for i in range(s.byte_length()):
+        b.append(p[i])
+    return sha256_hex(b)
+
+
+def _extract_checksum(text: String) raises -> String:
+    """The value of the `# managed-checksum:` line, or "" if there is none."""
+    var lines = text.split("\n")
+    for i in range(len(lines)):
+        var ln = String(lines[i].strip())
+        if ln.startswith("# managed-checksum:"):
+            return String(ln.removeprefix("# managed-checksum:").strip())
+    return String("")
+
+
+def _write_categories(path: String, text: String):
+    """Best-effort write of the categories file — never fail over it."""
+    try:
+        with open(path, "w") as f:
+            f.write(text)
+    except:
+        pass
+
+
+def load_registry() raises -> Registry:
+    """The effective tag registry. `categories.txt` is the SOURCE OF TRUTH: it's
+    seeded with the real built-in defaults (as editable rules) on first run, and
+    the loader honors it verbatim — so the user can edit, remove, or add anything.
+
+    `# managed-checksum:` records the rules we last wrote. If the file's rules
+    still hash to it (UNTOUCHED), the defaults auto-refresh on upgrade; once the
+    user edits a rule the checksum diverges and the file becomes authoritative —
+    we never overwrite it. A legacy/commented/empty file (no checksum, no rules)
+    is (re)seeded so it never yields an empty registry."""
+    var path = categories_path()
+    var defaults = default_registry()
+    var seed_sum = _sha_str(rules_canon(defaults))
+
+    if not exists(path):
+        _write_categories(path, registry_to_text(defaults, seed_sum))
+        return defaults^
+
+    var text: String
+    with open(path, "r") as f:
+        text = f.read()
+    var user = Registry(parse_rules(text))
+    var stored_sum = _extract_checksum(text)
+
+    # Untouched managed file → its rules still hash to the checksum we wrote.
+    if (
+        stored_sum.byte_length() > 0
+        and _sha_str(rules_canon(user)) == stored_sum
+    ):
+        if stored_sum != seed_sum:
+            # Defaults improved this version and the user hasn't edited → refresh.
+            _write_categories(path, registry_to_text(defaults, seed_sum))
+        return defaults^
+
+    # No managed checksum AND no active rules = the legacy commented template (or
+    # an emptied file) → the user hasn't defined anything, so seed the defaults.
+    if stored_sum.byte_length() == 0 and len(user.rules) == 0:
+        _write_categories(path, registry_to_text(defaults, seed_sum))
+        return defaults^
+
+    # Otherwise the user has made it their own → the file is authoritative.
+    return user^
+
+
+def read_categories() raises -> String:
+    """The raw `categories.txt` text for the editor — seeds the file first (via
+    the loader's side effect) so it's never empty/missing."""
+    _ = load_registry()  # seed/refresh if needed
+    var path = categories_path()
+    if not exists(path):
+        return String("")
+    var text: String
+    with open(path, "r") as f:
+        text = f.read()
+    return text^
+
+
+def save_categories(text: String) raises -> Int:
+    """Overwrite `categories.txt` with the editor's content (this makes the file
+    'touched' → authoritative) and re-tag the stored transactions. Returns the
+    number of transactions whose tags changed."""
+    _write_categories(categories_path(), text)
+    return effective_retag()
+
+
+# ── tags: names, materialization, report ──────────────────────────────────────
+
+
+def effective_tags() raises -> List[String]:
+    """The tag NAMES the effective registry can assign — what `millfolio tags`
+    prints and codegen advertises to the model so it can filter `transactions()`
+    on `.tags`, including the user's own categories."""
+    return tag_names(load_registry())
+
+
+def _tags_equal(a: List[String], b: List[String]) -> Bool:
+    """Order-sensitive tag-list equality (tags_for is deterministic in registry
+    order, so a positional compare is enough)."""
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        if a[i] != b[i]:
+            return False
+    return True
+
+
+def retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
+    """Re-apply `reg`'s tags to every stored transaction in place (pure — no model
+    call, no re-embed). Returns the COUNT of rows whose tags changed, so callers
+    persist only when something moved. This is what makes a plain `mill index`
+    re-tag after the user edits categories.txt, instead of a forced re-embed."""
+    var changed = 0
+    for i in range(len(rows)):
+        var new_tags = reg.tags_for(rows[i].desc)
+        if not _tags_equal(rows[i].tags, new_tags):
+            var r = rows[i].copy()
+            r.tags = new_tags^
+            rows[i] = r^
+            changed += 1
+    return changed
+
+
+def effective_retag() raises -> Int:
+    """Re-apply the current registry to the stored transactions and persist —
+    standalone (no file scan, no embedding). Backs `millfolio retag` and the app
+    server's category save. Returns the number of rows changed."""
+    var reg = load_registry()
+    var trows = load_txn_rows()
+    var changed = retag(trows, reg)
+    if changed > 0:
+        write_txn_rows(trows)
+    return changed
+
+
+@fieldwise_init
+struct TagInfo(Copyable, Movable):
+    """One tag for the UI Tags panel: its name, the keywords that assign it, and
+    how many stored transactions currently carry it."""
+
+    var name: String
+    var keywords: List[String]
+    var count: Int
+
+
+def tags_report() raises -> List[TagInfo]:
+    """Per-tag (name, keywords, count) over the effective registry + the stored
+    transactions — what the Tags panel renders."""
+    var reg = load_registry()
+    var trows = load_txn_rows()
+    var out = List[TagInfo]()
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        var n = 0
+        for t in range(len(trows)):
+            for g in range(len(trows[t].tags)):
+                if trows[t].tags[g] == r.tag:
+                    n += 1
+                    break
+        out.append(TagInfo(r.tag.copy(), r.keywords.copy(), n))
+    return out^
+
+
+def _json_str(s: String) -> String:
+    """`s` as a JSON string literal (quoted + escaped)."""
+    var out = String('"')
+    for cp in s.codepoints():
+        var c = Int(cp)
+        if c == 34:
+            out += '\\"'
+        elif c == 92:
+            out += "\\\\"
+        elif c == 10:
+            out += "\\n"
+        elif c == 13:
+            out += "\\r"
+        elif c == 9:
+            out += "\\t"
+        elif c < 32:
+            out += " "
+        else:
+            out += chr(c)
+    out += '"'
+    return out^
+
+
+def tags_report_json() raises -> String:
+    """`{"tags":[{"name","keywords":[…],"count":N}]}` — the SAME payload the CLI
+    `tags --json` prints and the app server's GET /api/tags returns."""
+    var infos = tags_report()
+    var out = String('{"tags":[')
+    for i in range(len(infos)):
+        if i > 0:
+            out += ","
+        ref ti = infos[i]
+        out += '{"name":' + _json_str(ti.name) + ',"keywords":['
+        for k in range(len(ti.keywords)):
+            if k > 0:
+                out += ","
+            out += _json_str(ti.keywords[k])
+        out += '],"count":' + String(ti.count) + "}"
+    out += "]}"
+    return out^

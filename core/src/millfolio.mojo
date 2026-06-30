@@ -21,8 +21,7 @@ from vault.index import (
     vault_files,
     effective_tags,
     effective_retag,
-    tags_report,
-    TagInfo,
+    tags_report_json,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
 
@@ -121,24 +120,6 @@ def _embed_url() raises -> String:
     return getenv("MILLFOLIO_EMBED_URL", "http://127.0.0.1:8000/v1")
 
 
-def _print_tags_json() raises:
-    """`{"tags":[{"name","keywords":[…],"count":N}]}` for the UI Tags panel."""
-    var infos = tags_report()
-    var out = String('{"tags":[')
-    for i in range(len(infos)):
-        if i > 0:
-            out += ","
-        ref ti = infos[i]
-        out += '{"name":' + _json_str(ti.name) + ',"keywords":['
-        for k in range(len(ti.keywords)):
-            if k > 0:
-                out += ","
-            out += _json_str(ti.keywords[k])
-        out += '],"count":' + String(ti.count) + "}"
-    out += "]}"
-    print(out)
-
-
 def main() raises:
     var args = argv()
     if len(args) < 2:
@@ -205,7 +186,7 @@ def main() raises:
         #                 Tags panel (per-tag keyword rules + how many stored
         #                 transactions carry each tag).
         if len(args) >= 3 and String(args[2]) == "--json":
-            _print_tags_json()
+            print(tags_report_json())
         else:
             var names = effective_tags()
             var out = String("")

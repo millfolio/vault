@@ -39,24 +39,21 @@ from vault.index.manifest import (
 from vault.index.readers import csv_rows, md_text, pdf_text, docx_text
 import vault.index.readers as readers
 from vault.index.embed import embed, embed_batch, EMBED_DIM
-from vault.index.sha256 import sha256_file_hex, sha256_hex
+from vault.index.sha256 import sha256_file_hex
 from vault.extract.transactions import (
     Txn,
     extract_transactions,
     TxnRow,
-    txn_rows_to_tsv,
-    tsv_to_txn_rows,
     drop_aliases,
     select_txns,
     texts_for_alias,
 )
-from vault.derive.categorize import (
-    Registry,
-    default_registry,
-    parse_rules,
-    tag_names,
-    rules_canon,
-    registry_to_text,
+from vault.derive.store import (
+    config_dir,
+    load_registry,
+    load_txn_rows,
+    write_txn_rows,
+    retag,
 )
 
 
@@ -114,20 +111,16 @@ struct SideTable(Copyable, Movable):
 # ── paths ─────────────────────────────────────────────────────────────────────
 
 
-def _config_dir() raises -> String:
-    return getenv("HOME", ".") + "/.config/millfolio"
-
-
 def _db_uri() raises -> String:
-    return _config_dir() + "/index.db"
+    return config_dir() + "/index.db"
 
 
 def _sidetable_path() raises -> String:
-    return _config_dir() + "/chunks.tsv"
+    return config_dir() + "/chunks.tsv"
 
 
 def _manifest_path() raises -> String:
-    return _config_dir() + "/manifest.tsv"
+    return config_dir() + "/manifest.tsv"
 
 
 # ── small helpers ─────────────────────────────────────────────────────────────
@@ -567,7 +560,7 @@ def build_index(
     Requires the inference-server embeddings endpoint live at `base_url`
     (e.g. http://127.0.0.1:8000/v1); a failed embed aborts with a clear error.
     """
-    makedirs(_config_dir(), exist_ok=True)
+    makedirs(config_dir(), exist_ok=True)
 
     # Normalise roots (drop trailing slashes), then derive the source base + the
     # explicit candidate-file set across every root (dirs recursed, files direct).
@@ -675,15 +668,15 @@ def build_index(
     # to the stored transactions on EVERY index. That decouples categorization from
     # embedding: editing categories.txt (or upgrading to a tags-aware build) re-tags
     # on a plain `mill index`, with no forced re-embed.
-    var reg = _load_registry()
+    var reg = load_registry()
 
     if len(emb_idx) == 0 and len(del_starts) == 0:
         # Embedding is up to date — but the category rules may have changed, so
         # re-tag the stored transactions (cheap, pure) and persist if anything moved.
-        var only_trows = _load_txn_rows()
-        var retagged = _retag(only_trows, reg)
+        var only_trows = load_txn_rows()
+        var retagged = retag(only_trows, reg)
         if retagged > 0:
-            _write_txn_rows(only_trows)
+            write_txn_rows(only_trows)
         print(
             "index up to date — "
             + String(len(new_entries))
@@ -714,7 +707,7 @@ def build_index(
 
     # Structured transactions live in their own side-table; evict the re-embedded +
     # removed files' rows, then re-extract the embedded ones below (in lockstep).
-    var trows = _load_txn_rows()
+    var trows = load_txn_rows()
     var txn_drop = removed_aliases.copy()
     for t in range(len(emb_alias)):
         txn_drop.append(emb_alias[t].copy())
@@ -812,8 +805,8 @@ def build_index(
     _write_sidetable(st)
     # Tag EVERY transaction (newly-extracted AND unchanged-file rows carried over)
     # from the current registry — one pure pass, the single source of tags.
-    _ = _retag(trows, reg)
-    _write_txn_rows(trows)
+    _ = retag(trows, reg)
+    write_txn_rows(trows)
     _write_manifest(Manifest(new_entries^, next_id, next_alias, base))
     print(
         "index updated — "
@@ -887,179 +880,9 @@ def file_chunks(file_alias: String) raises -> List[String]:
 
 
 # ── structured transactions (reconcile-validated, extracted at index time) ────
-# The row type + (de)serialization + selection live in vault.transactions (pure,
-# hermetically tested); here we only add the file I/O around them.
-
-
-def _txns_path() raises -> String:
-    return _config_dir() + "/transactions.tsv"
-
-
-def _categories_path() raises -> String:
-    return _config_dir() + "/categories.txt"
-
-
-def _sha_str(s: String) -> String:
-    """Hex SHA-256 of a string's bytes."""
-    var b = List[UInt8]()
-    var p = s.unsafe_ptr()
-    for i in range(s.byte_length()):
-        b.append(p[i])
-    return sha256_hex(b)
-
-
-def _extract_checksum(text: String) raises -> String:
-    """The value of the `# managed-checksum:` line, or "" if there is none."""
-    var lines = text.split("\n")
-    for i in range(len(lines)):
-        var ln = String(lines[i].strip())
-        if ln.startswith("# managed-checksum:"):
-            return String(ln.removeprefix("# managed-checksum:").strip())
-    return String("")
-
-
-def _write_categories(path: String, text: String):
-    """Best-effort write of the categories file — never fail indexing over it.
-    """
-    try:
-        with open(path, "w") as f:
-            f.write(text)
-    except:
-        pass
-
-
-def _load_registry() raises -> Registry:
-    """The effective tag registry. `categories.txt` is the SOURCE OF TRUTH: it's
-    seeded with the real built-in defaults (as editable rules) on first run, and
-    the loader honors it verbatim — so the user can edit, remove, or add anything.
-
-    `# managed-checksum:` records the rules we last wrote. If the file's rules
-    still hash to it (UNTOUCHED), the defaults auto-refresh on upgrade; once the
-    user edits a rule the checksum diverges and the file becomes authoritative —
-    we never overwrite it. A legacy/commented/empty file (no checksum, no rules)
-    is (re)seeded so it never yields an empty registry."""
-    var path = _categories_path()
-    var defaults = default_registry()
-    var seed_sum = _sha_str(rules_canon(defaults))
-
-    if not exists(path):
-        _write_categories(path, registry_to_text(defaults, seed_sum))
-        return defaults^
-
-    var text: String
-    with open(path, "r") as f:
-        text = f.read()
-    var user = Registry(parse_rules(text))
-    var stored_sum = _extract_checksum(text)
-
-    # Untouched managed file → its rules still hash to the checksum we wrote.
-    if (
-        stored_sum.byte_length() > 0
-        and _sha_str(rules_canon(user)) == stored_sum
-    ):
-        if stored_sum != seed_sum:
-            # Defaults improved this version and the user hasn't edited → refresh.
-            _write_categories(path, registry_to_text(defaults, seed_sum))
-        return defaults^
-
-    # No managed checksum AND no active rules = the legacy commented template (or
-    # an emptied file) → the user hasn't defined anything, so seed the defaults.
-    if stored_sum.byte_length() == 0 and len(user.rules) == 0:
-        _write_categories(path, registry_to_text(defaults, seed_sum))
-        return defaults^
-
-    # Otherwise the user has made it their own → the file is authoritative.
-    return user^
-
-
-def effective_tags() raises -> List[String]:
-    """The tag NAMES the effective registry (built-in defaults + the user's
-    categories.txt) can assign — what `millfolio tags` prints and codegen
-    advertises to the model so it can filter `transactions()` on `.tags`,
-    including the user's own categories."""
-    return tag_names(_load_registry())
-
-
-def _tags_equal(a: List[String], b: List[String]) -> Bool:
-    """Order-sensitive tag-list equality (tags_for is deterministic in registry
-    order, so a positional compare is enough)."""
-    if len(a) != len(b):
-        return False
-    for i in range(len(a)):
-        if a[i] != b[i]:
-            return False
-    return True
-
-
-def _retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
-    """Re-apply `reg`'s tags to every stored transaction in place (pure — no model
-    call, no re-embed). Returns the COUNT of rows whose tags changed, so callers
-    persist only when something moved. This is what makes a plain `mill index`
-    re-tag after the user edits categories.txt, instead of a forced re-embed."""
-    var changed = 0
-    for i in range(len(rows)):
-        var new_tags = reg.tags_for(rows[i].desc)
-        if not _tags_equal(rows[i].tags, new_tags):
-            var r = rows[i].copy()
-            r.tags = new_tags^
-            rows[i] = r^
-            changed += 1
-    return changed
-
-
-def effective_retag() raises -> Int:
-    """Re-apply the current registry to the stored transactions and persist —
-    standalone (no file scan, no embedding). Backs `millfolio retag`, which the
-    app server runs after the user edits their categories. Returns rows changed.
-    """
-    var reg = _load_registry()
-    var trows = _load_txn_rows()
-    var changed = _retag(trows, reg)
-    if changed > 0:
-        _write_txn_rows(trows)
-    return changed
-
-
-@fieldwise_init
-struct TagInfo(Copyable, Movable):
-    """One tag for the UI Tags panel: its name, the keywords that assign it, and
-    how many stored transactions currently carry it."""
-
-    var name: String
-    var keywords: List[String]
-    var count: Int
-
-
-def tags_report() raises -> List[TagInfo]:
-    """Per-tag (name, keywords, count) over the effective registry + the stored
-    transactions — what `millfolio tags --json` emits for the Tags panel."""
-    var reg = _load_registry()
-    var trows = _load_txn_rows()
-    var out = List[TagInfo]()
-    for i in range(len(reg.rules)):
-        ref r = reg.rules[i]
-        var n = 0
-        for t in range(len(trows)):
-            for g in range(len(trows[t].tags)):
-                if trows[t].tags[g] == r.tag:
-                    n += 1
-                    break
-        out.append(TagInfo(r.tag.copy(), r.keywords.copy(), n))
-    return out^
-
-
-def _load_txn_rows() raises -> List[TxnRow]:
-    if not exists(_txns_path()):
-        return List[TxnRow]()
-    var text: String
-    with open(_txns_path(), "r") as f:
-        text = f.read()
-    return tsv_to_txn_rows(text)
-
-
-def _write_txn_rows(rows: List[TxnRow]) raises:
-    with open(_txns_path(), "w") as f:
-        f.write(txn_rows_to_tsv(rows))
+# The row type + (de)serialization + selection live in vault.extract.transactions
+# (pure); the registry + tags + transactions.tsv I/O live in vault.derive.store
+# (LanceDB-free, shared by the CLI + app server). `build_index` just calls them.
 
 
 def file_transactions(file_alias: String) raises -> List[Txn]:
@@ -1068,4 +891,4 @@ def file_transactions(file_alias: String) raises -> List[Txn]:
     could not be reconciled against the statement's own totals — in which case the
     caller should fall back to `file_chunks()` + `ask_local`, not trust a guess.
     """
-    return select_txns(_load_txn_rows(), file_alias)
+    return select_txns(load_txn_rows(), file_alias)
