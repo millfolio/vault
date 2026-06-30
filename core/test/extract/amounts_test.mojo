@@ -63,6 +63,19 @@ def main() raises:
     ok = _eq(parse_amount(" 7.50 "), 7.50, "surrounding spaces") and ok
     ok = _eq(parse_amount("none"), 0.0, "non-number -> 0") and ok
     ok = _eq(parse_amount(""), 0.0, "empty -> 0") and ok
+    # A 100+ digit string (a buggy program that concatenated many amounts) must NOT
+    # crash atof ("number is too long") — it's garbage, so return 0.0.
+    ok = (
+        _eq(
+            parse_amount(
+                "285744071319178.847151907133007151907133207715190713420532583"
+                + "658497151907139722543872971607151900001797575488160054371297"
+            ),
+            0.0,
+            "absurdly long number -> 0 (no atof crash)",
+        )
+        and ok
+    )
 
     # The point: a sum over mixed strings doesn't crash and is correct.
     var total = (

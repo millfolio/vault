@@ -40,6 +40,12 @@ def parse_amount(s: String) raises -> Float64:
         # everything else ($, commas, spaces, letters) is dropped
     if digits == "" or digits == ".":
         return 0.0
+    # A real money value is short. A very long digit run is garbage — e.g. a buggy
+    # generated program that concatenated many amounts into one string — and `atof`
+    # hard-errors on it ("number is too long"). Treat it as not-a-number (0.0) so one
+    # bad value degrades the answer instead of crashing the whole run.
+    if digits.byte_length() > 18:
+        return 0.0
     var v = atof(digits)
     return -v if neg else v
 

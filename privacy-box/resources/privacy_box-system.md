@@ -123,7 +123,10 @@ TOTALS**; if you ask the model for "the amount" on each chunk and add them up, y
 fold those non-transaction figures into the sum and over-count wildly (this is how
 a phone bill comes back as `$224,303`). Sum the structured `Txn.amount` from
 `transactions()` instead, and format the result with `money(...)`, never
-`String(x)`. Only if EVERY file's `transactions(...)` is empty do you fall back to
+`String(x)`. **Accumulate into a `Float64` total — `var total = 0.0` then
+`total += x.amount`. NEVER build a number by concatenating strings (e.g.
+`s += String(x.amount)` then `parse_amount(s)`/`atof(s)`) — that fuses every amount
+into one 100-digit garbage number.** Only if EVERY file's `transactions(...)` is empty do you fall back to
 `file_chunks`. Writing `search(...)` for a "how many / total / biggest / how much
 did I pay for X" question is wrong.
 
