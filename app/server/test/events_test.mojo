@@ -9,6 +9,7 @@ from events import (
     json_escape,
     field,
     status,
+    tags_event,
     debug_event,
     approval,
     message,
@@ -45,6 +46,12 @@ def main() raises:
     )
 
     # debug / approval: check structure + payload shape
+    expect_eq(
+        tags_event("phone,travel"),
+        '{"type":"tags","tags":"phone,travel"}',
+        "tags_event encoding",
+    )
+
     var d = debug_event("codegen", "Generated program", "x", "mojo")
     expect(d.find('"type":"debug"') != -1, "debug type")
     expect(d.find('"language":"mojo"') != -1, "debug language")

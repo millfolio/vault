@@ -50,12 +50,22 @@ from orchestrator import (
 )
 from transport import DeltaSink
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
+
+# The LanceDB-free registry/tags/retag store — the SAME functions the `millfolio`
+# CLI uses, so the Tags panel + category editor run in-process (no engine spawn).
+from vault.derive.store import (
+    tags_report_json,
+    read_categories,
+    save_categories,
+    effective_tags,
+)
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
 from logging import log
 from events import (
     field,
     status,
+    tags_event,
     debug_event,
     approval,
     message,
@@ -319,6 +329,23 @@ def _cors(var resp: Response) -> Response:
     return resp^
 
 
+def _tags_in_program(code: String) raises -> String:
+    """The available category tag NAMES the generated program filters on —
+    detected as a quoted literal (`"phone"`) alongside `.tags`. Comma-joined, in
+    registry order; "" when the program used no tag (it read each transaction).
+    """
+    if code.find(".tags") == -1:
+        return String("")
+    var avail = effective_tags()
+    var used = String("")
+    for i in range(len(avail)):
+        if code.find('"' + avail[i] + '"') != -1:
+            if used.byte_length() > 0:
+                used += ","
+            used += avail[i]
+    return used^
+
+
 @fieldwise_init
 struct Api(Copyable, Handler, Movable):
     var st: UnsafePointer[MillfolioState, MutUntrackedOrigin]
@@ -352,6 +379,14 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_history()
         if path == "/api/system":
             return self.handle_system()
+        # Category tags: the panel's list (names + keywords + per-tag counts) and
+        # the editable registry file. All in-process via vault.derive.store.
+        if path == "/api/tags":
+            return self.handle_tags()
+        if path == "/api/categories":
+            if req.method == Method.POST:
+                return self.handle_categories_save(req)
+            return self.handle_categories_get()
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -450,6 +485,30 @@ struct Api(Copyable, Handler, Movable):
                 )
             )
         )
+
+    def handle_tags(self) raises -> Response:
+        """GET /api/tags → {"tags":[{name,keywords,count}]} for the Tags panel —
+        in-process (vault.derive.store), the SAME payload `millfolio tags --json`
+        prints. No engine spawn."""
+        return _cors(ok_json(tags_report_json()))
+
+    def handle_categories_get(self) raises -> Response:
+        """GET /api/categories → {"text": <raw categories.txt>} for the editor
+        (the file is seeded with the built-in defaults if absent)."""
+        return _cors(ok_json('{"text":' + json_escape(read_categories()) + "}"))
+
+    def handle_categories_save(self, req: Request) raises -> Response:
+        """POST /api/categories {"text": …} → overwrite categories.txt (it becomes
+        the user's authoritative registry) and re-tag the stored transactions
+        in-process. Returns {"ok":true,"retagged":N}."""
+        var text: String
+        try:
+            var j = loads(req.text())
+            text = j["text"].string_value()
+        except:
+            return _cors(bad_request('{"error":"expected {text}"}'))
+        var changed = save_categories(text)
+        return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
@@ -992,6 +1051,12 @@ def on_connect(mut conn: WsConnection) raises:
             debug_event("codegen", "Generated program", code, "mojo")
         )
         conn.send_text(status("codegen", "Writing the program", "done"))
+        # Surface which category tags the program filtered on (so the user knows
+        # the answer came from a tag, not a guess) — the available tag NAMES that
+        # appear as a quoted literal in the program (`"phone" in t.tags`).
+        var used = _tags_in_program(code)
+        if used.byte_length() > 0:
+            conn.send_text(tags_event(used))
         pre_ms = _ms_since(
             t_total0
         )  # manifest + codegen, before the approval pause

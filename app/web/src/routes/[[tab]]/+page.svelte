@@ -5,6 +5,7 @@
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import StatsPanel from "$lib/components/StatsPanel.svelte";
   import SystemPanel from "$lib/components/SystemPanel.svelte";
+  import TagsPanel from "$lib/components/TagsPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
   import type { ServerEvent, Session, MillfolioClient, StepState } from "$lib/protocol";
@@ -15,6 +16,7 @@
     | { kind: "user" | "assistant"; id: string; text: string; source?: string; sourceAlias?: string }
     | { kind: "status"; id: string; stepId: string; label: string; state: StepState; detail?: string }
     | { kind: "debug"; id: string; title: string; body: string; language?: string }
+    | { kind: "tags"; id: string; tags: string }
     | {
         kind: "approval";
         id: string;
@@ -76,14 +78,16 @@
   // The active tab is driven by the URL ([[tab]] optional-param route): "/" → chat,
   // "/vault" → vault, "/stats" → stats, "/system" → system. One component serves all
   // tabs, so switching is a same-route param change (no remount) — the chat survives.
-  const view = $derived<"chat" | "vault" | "stats" | "system">(
+  const view = $derived<"chat" | "vault" | "stats" | "system" | "tags">(
     page.params.tab === "vault"
       ? "vault"
       : page.params.tab === "stats"
         ? "stats"
         : page.params.tab === "system"
           ? "system"
-          : "chat",
+          : page.params.tab === "tags"
+            ? "tags"
+            : "chat",
   );
   // Run-queue position — shown as a floating bottom-right badge, not inline.
   let queueMsg = $state<string | null>(null);
@@ -169,6 +173,11 @@
       case "approval-request":
         items.push({ kind: "approval", id: uid(), stepId: e.stepId, title: e.payload.title, body: e.payload.body, language: e.payload.language });
         break;
+      case "tags":
+        // Which category tags the generated program filtered on — a chip so the
+        // user knows the answer came from a tag, not a guess.
+        if (e.tags) items.push({ kind: "tags", id: uid(), tags: e.tags });
+        break;
       case "debug":
         items.push({ kind: "debug", id: uid(), title: e.title, body: e.body, language: e.language });
         break;
@@ -245,6 +254,7 @@
     <nav class="tabs">
       <a class:active={view === "chat"} href="/">Chat</a>
       <a class:active={view === "vault"} href="/vault">Vault</a>
+      <a class:active={view === "tags"} href="/tags">Tags</a>
       <a class:active={view === "stats"} href="/stats">Stats</a>
       {#if !isDemo}<a class:active={view === "system"} href="/system">System</a>{/if}
     </nav>
@@ -263,6 +273,8 @@
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
     {:else if view === "vault"}
       <VaultPanel />
+    {:else if view === "tags"}
+      <TagsPanel demo={isDemo} />
     {:else if view === "system"}
       <SystemPanel />
     {:else}

@@ -51,11 +51,18 @@ export interface ErrorEvent {
   message: string;
 }
 
+/** Category tags the generated program filtered on (comma-joined) → a chip. */
+export interface TagsEvent {
+  type: "tags";
+  tags: string;
+}
+
 export type ServerEvent =
   | StatusEvent
   | ApprovalRequestEvent
   | DebugEvent
   | MessageEvent
+  | TagsEvent
   | ErrorEvent;
 
 /** A live session: receives server events, can answer approval gates. */

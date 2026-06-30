@@ -33,9 +33,12 @@ flare-ffi = "bash -c 'source ../../flare/flare/tls/ffi/build.sh; source ../../fl
 # chat on one :10000 listener (flare's serve(handler, ws_handler)). `-I src`
 # resolves the sibling events.mojo (WS event serialization); imports the privacy_box
 # orchestrator (wiring/orchestrator/settings/vaultcfg) via -I ../../vault/privacy-box/src,
-# plus flare/json/jinja2. The vault gen program's extra shims (zlib/lancedb) are NOT
-# needed here: it's compiled + run as a separate subprocess at request time.
-build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -I ../../logging.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
+# plus flare/json/jinja2. `-I ../../vault/core/src` pulls vault.derive.store (the
+# LanceDB-free registry/tags/retag store — same functions the `millfolio` CLI uses,
+# so /api/tags + category edits run IN-PROCESS, no spawning the engine binary). The
+# vault gen program's extra shims (zlib/lancedb) are NOT needed here: it's compiled +
+# run as a separate subprocess at request time.
+build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../vault/privacy-box/src -I ../../vault/core/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -I ../../logging.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
 
 # Unit-test the protocol wire helpers (events.mojo) — no flare/privacy_box, only json.
 test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../../json -o build/events-test && ./build/events-test" }

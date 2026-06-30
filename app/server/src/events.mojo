@@ -55,6 +55,12 @@ def status(step: String, label: String, state: String) -> String:
     )
 
 
+def tags_event(names: String) -> String:
+    """The category tags the generated program filtered on (comma-joined) — the UI
+    shows a chip so the user knows the answer came from a tag, not a guess."""
+    return '{"type":"tags","tags":' + json_escape(names) + "}"
+
+
 def debug_event(
     step: String, title: String, body: String, language: String
 ) -> String:

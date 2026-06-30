@@ -6,9 +6,10 @@
   // rendered in place — status/debug small, approval at regular font. Mirrors the
   // ChatItem union in routes/+page.svelte.
   interface Item {
-    kind: "user" | "assistant" | "status" | "debug" | "approval";
+    kind: "user" | "assistant" | "status" | "debug" | "approval" | "tags";
     id: string;
     text?: string;
+    tags?: string;         // tags: comma-joined category tags the program filtered on
     stepId?: string;
     label?: string;
     state?: StepState;
@@ -294,6 +295,11 @@
           <span class="label">{it.label}</span>
           {#if it.detail}<span class="detail">— {it.detail}</span>{/if}
           {#if it.id === activeStepId && stepElapsed >= 2}<span class="elapsed">· {fmtElapsed(stepElapsed)}</span>{/if}
+        </div>
+      {:else if it.kind === "tags"}
+        <div class="tagsused" title="The answer was computed by filtering your transactions on these category tags">
+          <span class="tlabel">filtered by tag</span>
+          {#each (it.tags ?? "").split(",") as t}<span class="chip">{t}</span>{/each}
         </div>
       {:else if it.kind === "debug"}
         <details class="debug">
@@ -623,6 +629,30 @@
   .status .elapsed {
     opacity: 0.6;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* tags used — chips showing which category tag(s) answered the question */
+  .tagsused {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 2px 0;
+    font-size: 11.5px;
+  }
+  .tagsused .tlabel {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10px;
+  }
+  .tagsused .chip {
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--accent-dim, rgba(255, 122, 28, 0.12));
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    font-weight: 600;
   }
 
   /* debug — small, collapsible */
