@@ -57,6 +57,7 @@ from vault.derive.store import (
     tags_report_json,
     read_categories,
     save_categories,
+    preview_categories,
     effective_tags,
 )
 from vaultcfg import vault_dir as resolve_vault_dir
@@ -421,6 +422,8 @@ struct Api(Copyable, Handler, Movable):
         # the editable registry file. All in-process via vault.derive.store.
         if path == "/api/tags":
             return self.handle_tags()
+        if path == "/api/categories/preview":
+            return self.handle_categories_preview(req)
         if path == "/api/categories":
             if req.method == Method.POST:
                 return self.handle_categories_save(req)
@@ -547,6 +550,19 @@ struct Api(Copyable, Handler, Movable):
             return _cors(bad_request('{"error":"expected {text}"}'))
         var changed = save_categories(text)
         return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
+
+    def handle_categories_preview(self, req: Request) raises -> Response:
+        """POST /api/categories/preview {"text": …} → dry-run the edited rules over
+        the stored transactions WITHOUT saving (the validation loop): per-tag match
+        counts + a few example descriptions to spot false positives before saving.
+        Returns {"tags":[{name,ml,count,examples}]} from preview_categories."""
+        var text: String
+        try:
+            var j = loads(req.text())
+            text = j["text"].string_value()
+        except:
+            return _cors(bad_request('{"error":"expected {text}"}'))
+        return _cors(ok_json(preview_categories(text)))
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's

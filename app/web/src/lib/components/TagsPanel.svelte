@@ -39,6 +39,7 @@
 
   async function openEditor() {
     saveMsg = "";
+    preview = null;
     try {
       const r = await fetch(`${apiBase()}/api/categories`);
       text = (await r.json()).text ?? "";
@@ -46,6 +47,29 @@
     } catch {
       saveMsg = "Couldn't load the rules file.";
     }
+  }
+
+  // Validation dry-run: run the EDITED rules over the stored transactions without
+  // saving — per-tag match counts + example descriptions, so you can spot a false
+  // positive (or a rule that matches nothing) before committing. Deterministic
+  // rules are exact here; an ML rule (`tag : question`) is evaluated at index time.
+  type PreviewTag = { name: string; ml: boolean; count: number; examples: string[] };
+  let preview = $state<PreviewTag[] | null>(null);
+  let previewing = $state(false);
+  async function doPreview() {
+    previewing = true;
+    saveMsg = "";
+    try {
+      const r = await fetch(`${apiBase()}/api/categories/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      preview = ((await r.json()).tags ?? []) as PreviewTag[];
+    } catch {
+      saveMsg = "Couldn't preview the rules.";
+    }
+    previewing = false;
   }
 
   async function save() {
@@ -117,10 +141,40 @@
             <button type="button" class="btn primary" disabled={saving} onclick={save}>
               {saving ? "Saving…" : "Save & re-tag"}
             </button>
-            <button type="button" class="btn" disabled={saving} onclick={() => (editing = false)}>
+            <button type="button" class="btn" disabled={saving || previewing} onclick={doPreview}>
+              {previewing ? "Checking…" : "Preview matches"}
+            </button>
+            <button type="button" class="btn" disabled={saving} onclick={() => { editing = false; preview = null; }}>
               Cancel
             </button>
           </div>
+          {#if preview}
+            <div class="preview">
+              <p class="phint">
+                What these rules would tag in your stored transactions — <em>not saved yet</em>.
+                Eyeball the examples for false positives before you save.
+              </p>
+              {#each preview as p}
+                <div class="prow">
+                  <div class="phead">
+                    <span class="pname">{p.name}</span>
+                    {#if p.ml}
+                      <span class="pml">ML · evaluated at index time</span>
+                    {:else}
+                      <span class="pcount">{p.count} txn{p.count === 1 ? "" : "s"}</span>
+                    {/if}
+                  </div>
+                  {#if p.examples.length}
+                    <ul class="pex">
+                      {#each p.examples as ex}<li>{ex}</li>{/each}
+                    </ul>
+                  {:else if !p.ml}
+                    <p class="pnone">no matches — check the keywords</p>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
         {/if}
         {#if saveMsg}<p class="savemsg">{saveMsg}</p>{/if}
       </div>
@@ -247,6 +301,59 @@
     margin: 10px 0 0;
     font-size: 12.5px;
     color: var(--accent);
+  }
+  .preview {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .phint {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .prow {
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+  }
+  .prow:first-of-type {
+    border-top: none;
+  }
+  .phead {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .pname {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .pcount {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .pml {
+    font-size: 11px;
+    color: var(--accent);
+  }
+  .pex {
+    margin: 5px 0 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .pex li {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  .pnone {
+    margin: 4px 0 0;
+    font-size: 11.5px;
+    color: var(--warn, #d29922);
   }
   .muted {
     color: var(--text-dim);
