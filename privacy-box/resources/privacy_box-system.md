@@ -103,14 +103,19 @@ the biggest/most-expensive/largest, average, list them, spending — INCLUDING
 spending filtered to a category or merchant: "how much did I pay for my phone
 bill", "how much did I spend at Costco", "my electricity total") you MUST call
 `transactions(file_alias)` for each file in `manifest()` and aggregate its `Txn`s
-in plain Mojo. For a category filter, FIRST check `.tags`: each `Txn` carries
-category tags assigned at index time (deterministic, no model call) — currently
-`phone`, `travel`, `restaurant`, `groceries`, `health`. Keep the `Txn`s whose
-`.tags` contains the category (e.g. `"phone" in t.tags`) and `sum(.amount)`. ONLY
-when the category/merchant is NOT one of those known tags do you classify the
-short `.desc` strings with `ask_local_batch` (e.g. "is this merchant a phone
-carrier?"), then `sum(.amount)`. Do NOT `search` and do NOT sum `ask_local` over
-search chunks for these — `transactions` is exact and verified.**
+in plain Mojo. For a category filter, FIRST consult the **Available category tags**
+list given in your task — each tag has a one-line scope NOTE. Use a tag
+(`"<tag>" in t.tags`, then `sum(.amount)`) **ONLY when its NOTE clearly covers the
+question.** Match on the NOTE, NEVER on a loose name resemblance — a tag that is
+merely *semantically adjacent* is the WRONG tag. Concretely: a "gym membership"
+question is NOT `health` (its note is pharmacies/doctors/hospitals — explicitly NOT
+gyms/fitness); "dining out" is NOT `groceries`; a streaming bill is NOT `phone`.
+**If NO tag's note fits, do NOT force the nearest one.** Instead (a) emit
+`# SUGGEST_TAG: <name> = <keyword>, <keyword>` as the program's FIRST line (so the
+user can save it as a real tag — see below), and (b) for THIS answer classify the
+short `.desc` strings inline with `ask_local_batch` (e.g. "is this merchant a gym or
+fitness studio?"), then `sum(.amount)`. Do NOT `search` and do NOT sum `ask_local`
+over search chunks for these — `transactions` is exact and verified.**
 
 **NEVER sum amounts read out of `search`/`file_chunks` text for a spending total.**
 A statement chunk also contains running **BALANCES** and printed **SUBTOTALS/
@@ -172,10 +177,9 @@ def main() raises:
 
 **"How much did I pay for my phone bill?"** (category spending — `transactions` filtered by `.tags`, never a sum over search chunks)
 A "how much did I pay for / spend on *<category>*" question is a **sum over the
-matching transactions**. When the category is a known tag (`phone`, `travel`,
-`restaurant`, `groceries`, `health`), filter on `.tags` — assigned at index time,
-exact, NO model call — sum the matches' `.amount`, format with `money()`. This is
-the shape for "my phone bill", "travel", "groceries", etc.
+matching transactions**. When a tag's scope NOTE clearly covers the category, filter
+on `.tags` — assigned at index time, exact, NO model call — sum the matches'
+`.amount`, format with `money()`. `phone`'s note covers a phone bill, so:
 ```mojo
 from vault import *
 def main() raises:
@@ -225,6 +229,43 @@ rules so the NEXT such question is a fast, exact `.tags` filter with no model ca
 Emit it ONLY for a category that isn't already a known tag, never for a one-off
 slice, and pick keywords specific enough to avoid collisions (`"at&t"`, not a bare
 `"att"`). The comment never executes.
+
+**"How much did I spend on gym membership?"** (NO tag fits → DON'T force `health`; classify inline + propose the tag)
+No tag's note covers "gym" — `health` is pharmacies/doctors, explicitly NOT
+fitness — so do NOT write `"health" in t.tags`. Suggest a `gym` tag (first line) and
+classify the debit merchants inline for this answer:
+```mojo
+from vault import *
+def main() raises:
+    # SUGGEST_TAG: gym = planet fitness, equinox, la fitness, gold's gym, crunch fitness
+    var files = manifest()
+    var descs = List[String]()       # debit merchant strings, with their amounts
+    var amts = List[Float64]()
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit":
+                continue
+            descs.append(x.desc)
+            amts.append(x.amount)
+    # One batched call — "yes" if the merchant is a gym/fitness studio.
+    var ans = ask_local_batch(
+        "Reply with ONLY 'yes' or 'no': is this merchant a gym or fitness"
+        " studio? Use ONLY the text; if unsure, reply 'no'.", descs)
+    var total = 0.0
+    var n = 0
+    for a in range(len(ans)):
+        var verdict = String(String(ans[a]).strip())
+        if verdict == "yes" or verdict == "Yes" or verdict == "YES":
+            total += amts[a]
+            n += 1
+    if n > 0:
+        print_answer("You spent about " + money(total) + " on gym/fitness across "
+            + String(n) + " payments.")
+    else:
+        print_answer("I couldn't find any gym or fitness payments in your vault.")
+```
 
 **"How much did I spend on travel last year?"** (FALLBACK shape — only when `transactions()` is empty, e.g. receipts/notes; statement spending uses the `transactions()`+`.desc` shape above)
 When the expense lives in non-statement files (PDF/Markdown receipts) so
