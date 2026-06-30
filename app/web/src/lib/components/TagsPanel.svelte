@@ -1,19 +1,29 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  // The Tags tab: the category tags that get stamped on your transactions at index
-  // time (so "how much on phone" is a fast, exact filter), and an editor for the
-  // rules. Everything is served in-process by the app server (vault.derive.store) —
-  // the SAME registry the `millfolio` CLI uses; no model, no network.
+  // The Tags tab: the category tags stamped on your transactions at index time (so
+  // "how much on phone" is a fast, exact filter). Edited INLINE here — one row per
+  // tag (name, scope note, keywords or an AI question) — and saved by reconstructing
+  // the categories.txt the app server's in-process registry reads (no model, no
+  // network). The note is the disambiguator sent to the codegen model (never the
+  // keywords) so it picks the right tag — that's the gym-vs-health fix.
   let { demo = false }: { demo?: boolean } = $props();
 
-  type Tag = { name: string; keywords: string[]; count: number };
+  type Tag = {
+    name: string;
+    keywords: string[];
+    description: string;
+    ml: string; // the AI rule's yes/no question, "" for a keyword rule
+    count: number;
+  };
   let tags = $state<Tag[]>([]);
   let loaded = $state(false);
   let failed = $state(false);
 
+  // Structured edit draft — one editable row per tag.
+  type Row = { name: string; description: string; kw: string; ml: string; isMl: boolean };
   let editing = $state(false);
-  let text = $state("");
+  let rows = $state<Row[]>([]);
   let saving = $state(false);
   let saveMsg = $state("");
 
@@ -37,22 +47,63 @@
     }
   }
 
-  async function openEditor() {
+  function openEditor() {
     saveMsg = "";
     preview = null;
-    try {
-      const r = await fetch(`${apiBase()}/api/categories`);
-      text = (await r.json()).text ?? "";
-      editing = true;
-    } catch {
-      saveMsg = "Couldn't load the rules file.";
-    }
+    rows = tags.map((t) => ({
+      name: t.name,
+      description: t.description ?? "",
+      kw: (t.keywords ?? []).join(", "),
+      ml: t.ml ?? "",
+      isMl: !!t.ml,
+    }));
+    editing = true;
+  }
+  function cancelEdit() {
+    editing = false;
+    preview = null;
+    saveMsg = "";
+  }
+  function addRow() {
+    rows = [...rows, { name: "", description: "", kw: "", ml: "", isMl: false }];
+  }
+  function removeRow(i: number) {
+    rows = rows.filter((_, j) => j !== i);
+    preview = null;
   }
 
-  // Validation dry-run: run the EDITED rules over the stored transactions without
-  // saving — per-tag match counts + example descriptions, so you can spot a false
-  // positive (or a rule that matches nothing) before committing. Deterministic
-  // rules are exact here; an ML rule (`tag : question`) is evaluated at index time.
+  // A tag name can't hold a separator (',' '=' ':' parens); a description can't hold
+  // parens (they delimit `tag (note) = …`). Strip them so a stray char can't corrupt
+  // the file — mirrors the registry's own validation.
+  const cleanName = (s: string) => s.replace(/[,=:()\t\n]/g, "").trim();
+  const cleanDesc = (s: string) => s.replace(/[()\t\n]/g, "").trim();
+
+  // Reconstruct categories.txt from the rows (the same format the registry seeds).
+  function rowsToText(rs: Row[]): string {
+    let out = "# millfolio category rules — edited in the Tags page.\n";
+    for (const r of rs) {
+      const name = cleanName(r.name);
+      if (!name) continue;
+      const desc = cleanDesc(r.description);
+      const head = desc ? `${name} (${desc})` : name;
+      if (r.isMl) {
+        const q = r.ml.trim();
+        if (q) out += `${head} : ${q}\n`;
+      } else {
+        const kw = r.kw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join(", ");
+        if (kw) out += `${head} = ${kw}\n`;
+      }
+    }
+    return out;
+  }
+
+  // Validation dry-run over the stored transactions, WITHOUT saving: per-tag match
+  // counts + example descriptions, so you can spot a false positive (or a no-match
+  // rule) before committing. Keyword rules are exact; an AI rule is index-time.
   type PreviewTag = { name: string; ml: boolean; count: number; examples: string[] };
   let preview = $state<PreviewTag[] | null>(null);
   let previewing = $state(false);
@@ -63,7 +114,7 @@
       const r = await fetch(`${apiBase()}/api/categories/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: rowsToText(rows) }),
       });
       preview = ((await r.json()).tags ?? []) as PreviewTag[];
     } catch {
@@ -79,13 +130,14 @@
       const r = await fetch(`${apiBase()}/api/categories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: rowsToText(rows) }),
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error();
       const n = d.retagged ?? 0;
       saveMsg = `Saved — re-tagged ${n} transaction${n === 1 ? "" : "s"}.`;
       editing = false;
+      preview = null;
       await loadTags();
     } catch {
       saveMsg = "Save failed.";
@@ -101,7 +153,9 @@
     <h2>Category tags</h2>
     <p class="meta">
       Deterministic rules that tag your transactions at index time — so a question
-      like "how much on phone" is a fast, exact filter, not a guess.
+      like "how much on phone" is a fast, exact filter, not a guess. The scope note
+      is what the codegen model sees (with the name, never your keywords) so it picks
+      the right tag.
     </p>
   </header>
 
@@ -109,17 +163,24 @@
     <p class="muted">Loading…</p>
   {:else if failed}
     <p class="muted">Tags unavailable — start millfolio with <code>mill start</code>.</p>
-  {:else}
+  {:else if !editing}
+    <!-- ── read-only list ── -->
     <div class="list">
       {#each tags as t}
         <div class="row">
           <div class="rhead">
             <span class="name">{t.name}</span>
+            {#if t.ml}<span class="mltag">AI rule</span>{/if}
             <span class="count">{t.count} txn{t.count === 1 ? "" : "s"}</span>
           </div>
-          <div class="kw">
-            {#each t.keywords as k}<span class="kchip">{k}</span>{/each}
-          </div>
+          {#if t.description}<p class="desc">{t.description}</p>{/if}
+          {#if t.ml}
+            <p class="mlq">“{t.ml}”</p>
+          {:else}
+            <div class="kw">
+              {#each t.keywords as k}<span class="kchip">{k}</span>{/each}
+            </div>
+          {/if}
         </div>
       {/each}
       {#if tags.length === 0}<p class="muted">No tags defined.</p>{/if}
@@ -127,60 +188,93 @@
 
     {#if !demo}
       <div class="edit">
-        {#if !editing}
-          <button type="button" class="btn" onclick={openEditor}>Edit categories…</button>
-          <span class="edithint">add your own, or change the built-ins — then it re-tags</span>
-        {:else}
-          <p class="hint">
-            One rule per line: <code>tag = keyword, keyword, …</code> (case-insensitive
-            substring match), or an ML rule <code>tag : a yes/no question</code> the
-            on-device model answers. Lines starting with <code>#</code> are comments.
-            Saving re-tags immediately for keyword rules; <strong>ML rules materialize
-            on the next index</strong> (they need the model).
-          </p>
-          <textarea bind:value={text} spellcheck="false" rows="14"></textarea>
-          <div class="actions">
-            <button type="button" class="btn primary" disabled={saving} onclick={save}>
-              {saving ? "Saving…" : "Save & re-tag"}
-            </button>
-            <button type="button" class="btn" disabled={saving || previewing} onclick={doPreview}>
-              {previewing ? "Checking…" : "Preview matches"}
-            </button>
-            <button type="button" class="btn" disabled={saving} onclick={() => { editing = false; preview = null; }}>
-              Cancel
-            </button>
-          </div>
-          {#if preview}
-            <div class="preview">
-              <p class="phint">
-                What these rules would tag in your stored transactions — <em>not saved yet</em>.
-                Eyeball the examples for false positives before you save.
-              </p>
-              {#each preview as p}
-                <div class="prow">
-                  <div class="phead">
-                    <span class="pname">{p.name}</span>
-                    {#if p.ml}
-                      <span class="pml">ML · evaluated at index time</span>
-                    {:else}
-                      <span class="pcount">{p.count} txn{p.count === 1 ? "" : "s"}</span>
-                    {/if}
-                  </div>
-                  {#if p.examples.length}
-                    <ul class="pex">
-                      {#each p.examples as ex}<li>{ex}</li>{/each}
-                    </ul>
-                  {:else if !p.ml}
-                    <p class="pnone">no matches — check the keywords</p>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
-        {/if}
+        <button type="button" class="btn" onclick={openEditor}>Edit tags…</button>
+        <span class="edithint">add your own, tweak the built-ins, or write a scope note — then it re-tags</span>
         {#if saveMsg}<p class="savemsg">{saveMsg}</p>{/if}
       </div>
     {/if}
+  {:else}
+    <!-- ── inline structured editor ── -->
+    <div class="editor">
+      <p class="hint">
+        One row per tag. <strong>Keywords</strong> are case-insensitive substring
+        matches (comma-separated). The <strong>scope note</strong> disambiguates the
+        tag for the model. Toggle <strong>AI rule</strong> to classify by a yes/no
+        question instead (evaluated on-device at index time).
+      </p>
+
+      {#each rows as r, i (i)}
+        <div class="erow">
+          <div class="eline">
+            <input class="ename" placeholder="tag name" bind:value={r.name} spellcheck="false" />
+            <label class="mltoggle" title="Classify with the on-device model instead of keywords">
+              <input type="checkbox" bind:checked={r.isMl} /> AI rule
+            </label>
+            <button type="button" class="del" title="Delete tag" aria-label="Delete tag" onclick={() => removeRow(i)}>×</button>
+          </div>
+          <input
+            class="edesc"
+            placeholder="scope note (shown to the model) — e.g. pharmacies, doctors; NOT gyms"
+            bind:value={r.description}
+            spellcheck="false"
+          />
+          {#if r.isMl}
+            <input
+              class="ekw"
+              placeholder="yes/no question — e.g. is this a gym or fitness studio?"
+              bind:value={r.ml}
+              spellcheck="false"
+            />
+          {:else}
+            <input
+              class="ekw"
+              placeholder="keywords, comma, separated — e.g. verizon, at&t, t-mobile"
+              bind:value={r.kw}
+              spellcheck="false"
+            />
+          {/if}
+        </div>
+      {/each}
+
+      <button type="button" class="btn addrow" onclick={addRow}>+ Add tag</button>
+
+      <div class="actions">
+        <button type="button" class="btn primary" disabled={saving} onclick={save}>
+          {saving ? "Saving…" : "Save & re-tag"}
+        </button>
+        <button type="button" class="btn" disabled={saving || previewing} onclick={doPreview}>
+          {previewing ? "Checking…" : "Preview matches"}
+        </button>
+        <button type="button" class="btn" disabled={saving} onclick={cancelEdit}>Cancel</button>
+      </div>
+      {#if saveMsg}<p class="savemsg">{saveMsg}</p>{/if}
+
+      {#if preview}
+        <div class="preview">
+          <p class="phint">
+            What these rules would tag in your stored transactions — <em>not saved yet</em>.
+            Eyeball the examples for false positives before you save.
+          </p>
+          {#each preview as p}
+            <div class="prow">
+              <div class="phead">
+                <span class="pname">{p.name}</span>
+                {#if p.ml}
+                  <span class="pml">AI · evaluated at index time</span>
+                {:else}
+                  <span class="pcount">{p.count} txn{p.count === 1 ? "" : "s"}</span>
+                {/if}
+              </div>
+              {#if p.examples.length}
+                <ul class="pex">{#each p.examples as ex}<li>{ex}</li>{/each}</ul>
+              {:else if !p.ml}
+                <p class="pnone">no matches — check the keywords</p>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
   {/if}
 </section>
 
@@ -204,7 +298,7 @@
     margin: 4px 0 0;
     font-size: 12.5px;
     color: var(--text-dim);
-    max-width: 60ch;
+    max-width: 64ch;
   }
   .list {
     display: flex;
@@ -224,10 +318,30 @@
     font-weight: 600;
     color: var(--text);
   }
+  .mltag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    padding: 0 6px;
+  }
   .count {
     font-size: 11.5px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
+  }
+  .desc {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .mlq {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--text);
+    font-style: italic;
   }
   .kw {
     display: flex;
@@ -253,28 +367,85 @@
     font-size: 12px;
     color: var(--text-dim);
   }
+  /* editor */
+  .editor {
+    margin-top: 6px;
+  }
   .hint {
     font-size: 12.5px;
     color: var(--text-dim);
-    margin: 0 0 8px;
+    margin: 0 0 12px;
+    max-width: 64ch;
   }
-  textarea {
+  .erow {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+  }
+  .eline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ename {
+    flex: 1;
+    font-weight: 600;
+  }
+  .mltoggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .del {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .del:hover {
+    color: var(--err, #f85149);
+    border-color: var(--err, #f85149);
+  }
+  .ename,
+  .edesc,
+  .ekw {
     width: 100%;
     box-sizing: border-box;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: inherit;
     font-size: 12.5px;
-    line-height: 1.6;
     color: var(--text);
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 10px;
-    resize: vertical;
+    padding: 6px 9px;
+  }
+  .edesc,
+  .ekw {
+    color: var(--text-dim);
+  }
+  .erow input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .addrow {
+    margin-top: 12px;
   }
   .actions {
     display: flex;
     gap: 8px;
-    margin-top: 10px;
+    margin-top: 16px;
+    flex-wrap: wrap;
   }
   .btn {
     padding: 6px 12px;
@@ -304,6 +475,7 @@
     font-size: 12.5px;
     color: var(--accent);
   }
+  /* preview */
   .preview {
     margin-top: 14px;
     padding-top: 12px;
