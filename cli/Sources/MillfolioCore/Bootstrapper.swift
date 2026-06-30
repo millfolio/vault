@@ -1465,6 +1465,13 @@ public final class Bootstrapper: ObservableObject {
         if FileManager.default.fileExists(atPath: "/etc/ssl/cert.pem") {
             env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
         }
+        // The release tag (e.g. "v0.4.39-rc.2") this CLI is pinned to — surfaced as
+        // the running version in /api/system + the UI build stamp. Empty for an
+        // unmanaged source build (then the server reports "dev").
+        let cliVersion = brewCliVersion()
+        if !cliVersion.isEmpty {
+            env["MILLFOLIO_VERSION"] = cliVersion
+        }
         // Forward the frontier-model credentials from the invoking shell into the
         // daemon. launchd agents DON'T inherit the login shell, so without this the
         // app server sees no ANTHROPIC_API_KEY → settings.load_config sets
