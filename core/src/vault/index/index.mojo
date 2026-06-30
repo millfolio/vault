@@ -670,13 +670,27 @@ def build_index(
             del_counts.append(old[oi].chunk_count)
             removed_aliases.append(old[oi].falias.copy())
 
+    # The effective tag registry (built-in defaults + the user's categories.txt),
+    # loaded once. Tagging is PURE — no model call, no re-embed — so we re-apply it
+    # to the stored transactions on EVERY index. That decouples categorization from
+    # embedding: editing categories.txt (or upgrading to a tags-aware build) re-tags
+    # on a plain `mill index`, with no forced re-embed.
+    var reg = _load_registry()
+
     if len(emb_idx) == 0 and len(del_starts) == 0:
+        # Embedding is up to date — but the category rules may have changed, so
+        # re-tag the stored transactions (cheap, pure) and persist if anything moved.
+        var only_trows = _load_txn_rows()
+        var retagged = _retag(only_trows, reg)
+        if retagged:
+            _write_txn_rows(only_trows)
         print(
             "index up to date — "
             + String(len(new_entries))
             + " file(s), "
             + String(_total_chunks(new_entries))
-            + " chunk(s); nothing changed"
+            + " chunk(s); "
+            + ("re-applied category tags" if retagged else "nothing changed")
         )
         return
 
@@ -716,9 +730,6 @@ def build_index(
     )
 
     # Embed only new + changed files; append to LanceDB + the side-table.
-    # The derived-tag registry (built-in defaults + the user's categories.txt)
-    # is loaded once and matched over each reconciled transaction's description.
-    var reg = _load_registry()
     for t in range(len(emb_idx)):
         var i = emb_idx[t]
         var falias = emb_alias[t].copy()
@@ -742,10 +753,8 @@ def build_index(
             if ext.reconciled:
                 for x in range(len(ext.txns)):
                     ref tx = ext.txns[x]
-                    # Materialise derived tags ONCE here (deterministic rule
-                    # match over the description; no model call) so category
-                    # questions become a stored-tag filter, not a per-row model
-                    # call. See QUERY_FLOW.md / vault.derive.
+                    # Tags are filled by the single _retag pass before write (the
+                    # one source of tags), so extraction here stays tag-agnostic.
                     trows.append(
                         TxnRow(
                             falias.copy(),
@@ -753,7 +762,7 @@ def build_index(
                             tx.amount,
                             tx.direction.copy(),
                             tx.desc.copy(),
-                            reg.tags_for(tx.desc),
+                            List[String](),
                         )
                     )
 
@@ -798,6 +807,9 @@ def build_index(
         store.optimize()
 
     _write_sidetable(st)
+    # Tag EVERY transaction (newly-extracted AND unchanged-file rows carried over)
+    # from the current registry — one pure pass, the single source of tags.
+    _ = _retag(trows, reg)
     _write_txn_rows(trows)
     _write_manifest(Manifest(new_entries^, next_id, next_alias, base))
     print(
@@ -912,6 +924,33 @@ def effective_tags() raises -> List[String]:
     advertises to the model so it can filter `transactions()` on `.tags`,
     including the user's own categories."""
     return tag_names(_load_registry())
+
+
+def _tags_equal(a: List[String], b: List[String]) -> Bool:
+    """Order-sensitive tag-list equality (tags_for is deterministic in registry
+    order, so a positional compare is enough)."""
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        if a[i] != b[i]:
+            return False
+    return True
+
+
+def _retag(mut rows: List[TxnRow], reg: Registry) raises -> Bool:
+    """Re-apply `reg`'s tags to every stored transaction in place (pure — no model
+    call, no re-embed). Returns True if any row's tags changed, so callers persist
+    only when something moved. This is what makes a plain `mill index` re-tag after
+    the user edits categories.txt, instead of needing a forced re-embed."""
+    var changed = False
+    for i in range(len(rows)):
+        var new_tags = reg.tags_for(rows[i].desc)
+        if not _tags_equal(rows[i].tags, new_tags):
+            var r = rows[i].copy()
+            r.tags = new_tags^
+            rows[i] = r^
+            changed = True
+    return changed
 
 
 def _load_txn_rows() raises -> List[TxnRow]:
