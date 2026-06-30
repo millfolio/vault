@@ -37,18 +37,36 @@ def _lower(s: String) -> String:
 
 @fieldwise_init
 struct Rule(Copyable, Movable):
-    """One tag and the keywords that assign it. ``keywords`` and ``excludes``
-    are matched as case-insensitive SUBSTRINGS of the description; a rule
-    matches when ANY keyword is present and NO exclude is. Keep keywords
-    specific enough to avoid substring collisions (e.g. ``"at&t"`` /
-    ``"att*bill"``, not a bare ``"att"`` that would hit ``"mattress"``)."""
+    """One tag and how it's assigned. A rule is ONE of two kinds:
+
+    - **deterministic** (the common, cheap, pure case): ``keywords`` /
+      ``excludes`` matched as case-insensitive SUBSTRINGS of the description; it
+      matches when ANY keyword is present and NO exclude is. Keep keywords
+      specific enough to avoid collisions (``"at&t"`` / ``"att*bill"``, not a
+      bare ``"att"`` that would hit ``"mattress"``).
+    - **ML** (the fuzzy tail): ``ml_prompt`` is a yes/no classification question
+      for the on-device model (e.g. ``"is this merchant a gym?"``). ``ml_prompt``
+      non-empty marks the rule ML; such a rule never matches by keyword
+      (``matches`` returns False) — it's materialized separately, at index time,
+      by `vault.derive.store` calling the engine, and the result is cached in the
+      ``.tags`` column (see QUERY_FLOW). Deterministic rules leave it empty."""
 
     var tag: String
     var keywords: List[String]
     var excludes: List[String]
+    var ml_prompt: String
+
+    def is_ml(self) -> Bool:
+        """An ML rule (classified by the on-device model at index time) rather
+        than a deterministic keyword rule."""
+        return self.ml_prompt.byte_length() > 0
 
     def matches(self, desc_lower: String) -> Bool:
-        """Whether this rule applies to an already-lowercased description."""
+        """Whether this DETERMINISTIC rule applies to an already-lowercased
+        description. ML rules never match here (they're materialized separately,
+        with a model call) — so `tags_for` stays pure and model-free."""
+        if self.is_ml():
+            return False
         var hit = False
         for i in range(len(self.keywords)):
             if _lower(self.keywords[i]) in desc_lower:
@@ -83,8 +101,14 @@ struct Registry(Copyable, Movable):
 
 
 def _rule(var tag: String, var keywords: List[String]) -> Rule:
-    """A keyword-only rule (no excludes)."""
-    return Rule(tag^, keywords^, List[String]())
+    """A keyword-only deterministic rule (no excludes, no ML)."""
+    return Rule(tag^, keywords^, List[String](), String(""))
+
+
+def _ml_rule(var tag: String, var prompt: String) -> Rule:
+    """An ML rule — `tag` is assigned when the on-device model answers yes to
+    `prompt` for a transaction (materialized at index time, cached)."""
+    return Rule(tag^, List[String](), List[String](), prompt^)
 
 
 def default_registry() -> Registry:
@@ -205,37 +229,61 @@ def default_registry() -> Registry:
 def _valid_tag_name(name: String) -> Bool:
     """A tag name may contain spaces but must not be empty or contain a field
     separator — `,` (splits the stored comma-joined `.tags` column + the codegen
-    tag list), `=` (the tag/keywords separator), tab or newline (TSV/line
-    separators). Letting one through would silently split into phantom tags."""
+    tag list), `=` (the keyword-rule separator), `:` (the ML-rule separator),
+    tab or newline (TSV/line separators). Letting one through would silently
+    split into phantom tags."""
     if name.byte_length() == 0:
         return False
-    if "," in name or "=" in name or "\t" in name or "\n" in name:
+    if (
+        "," in name
+        or "=" in name
+        or ":" in name
+        or "\t" in name
+        or "\n" in name
+    ):
         return False
     return True
 
 
 def parse_rules(text: String) raises -> List[Rule]:
     """Parse user category rules from the config-file format. One rule per
-    non-comment line:
+    non-comment line, in ONE of two forms:
 
-        <tag> = <keyword>, <keyword>, ...
+        <tag> = <keyword>, <keyword>, ...   (deterministic — substring match)
+        <tag> : <yes/no question>           (ML — on-device model at index time)
 
-    matched case-insensitively as substrings. Blank lines and lines starting
-    with `#` are ignored; tag/keywords are trimmed and empty keywords dropped
-    (so a malformed line yields no rule rather than an error). Keywords must not
-    contain `=` or `,` (the field separators). Excludes aren't exposed in the
-    user format yet — every parsed rule is keyword-only."""
+    The separator is whichever of `=` / `:` appears FIRST, so an ML question may
+    itself contain `=`. Blank lines and `#` comments are ignored; tag/keywords/
+    prompt are trimmed; a malformed line (bad tag, no keywords, empty prompt)
+    yields no rule rather than an error. Excludes aren't exposed in the user
+    format yet."""
     var out = List[Rule]()
     var lines = text.split("\n")
     for i in range(len(lines)):
         var line = String(lines[i].strip())
         if line.byte_length() == 0 or line.startswith("#"):
             continue
-        var parts = line.split("=")
+        var eq = line.find("=")
+        var colon = line.find(":")
+        # ML rule when ':' is present and comes before any '=' (or there's no '=').
+        var is_ml = colon != -1 and (eq == -1 or colon < eq)
+        var sep = ":" if is_ml else "="
+        var parts = line.split(sep)
         if len(parts) < 2:
             continue
         var tag = String(parts[0].strip())
         if not _valid_tag_name(tag):
+            continue
+        if is_ml:
+            # Rejoin on ':' so a question keeps its own colons/equals.
+            var prompt = String("")
+            for k in range(1, len(parts)):
+                if k > 1:
+                    prompt += ":"
+                prompt += String(parts[k])
+            prompt = String(prompt.strip())
+            if prompt.byte_length() > 0:
+                out.append(Rule(tag^, List[String](), List[String](), prompt^))
             continue
         var kw_parts = String(parts[1]).split(",")
         var kws = List[String]()
@@ -244,7 +292,7 @@ def parse_rules(text: String) raises -> List[Rule]:
             if kw.byte_length() > 0:
                 kws.append(kw^)
         if len(kws) > 0:
-            out.append(Rule(tag^, kws^, List[String]()))
+            out.append(Rule(tag^, kws^, List[String](), String("")))
     return out^
 
 
@@ -265,6 +313,10 @@ def merge_registry(var base: Registry, extra: List[Rule]) raises -> Registry:
             var r = base.rules[found].copy()
             for k in range(len(er.keywords)):
                 r.keywords.append(er.keywords[k].copy())
+            if er.is_ml():
+                r.ml_prompt = (
+                    er.ml_prompt.copy()
+                )  # an ML rule overrides the prompt
             base.rules[found] = r^
         else:
             base.rules.append(er.copy())
@@ -289,10 +341,15 @@ def rules_canon(reg: Registry) -> String:
     for i in range(len(reg.rules)):
         ref r = reg.rules[i]
         out += r.tag + "\t"
-        for k in range(len(r.keywords)):
-            if k > 0:
-                out += ","
-            out += r.keywords[k]
+        if r.is_ml():
+            # ':' marks an ML rule (a keyword list never starts with ':'), so the
+            # all-keyword default registry's canon — and its checksum — is unchanged.
+            out += ":" + r.ml_prompt
+        else:
+            for k in range(len(r.keywords)):
+                if k > 0:
+                    out += ","
+                out += r.keywords[k]
         out += "\n"
     return out^
 
@@ -307,18 +364,22 @@ def registry_to_text(reg: Registry, checksum: String) raises -> String:
     var out = String(
         "# millfolio category rules — THIS FILE IS THE SOURCE OF TRUTH; edit"
         " freely.\n# Format: <tag> = keyword, keyword, …   (case-insensitive"
-        " substring match).\n# A tag name may contain spaces but not a comma or"
-        " '=' (those are separators).\n# Lines starting with # are comments."
-        " Re-run `mill index` after editing.\n#\n# The rules below are the"
-        " built-in"
-        " defaults. While you leave them unchanged\n# they auto-update on"
-        " upgrade; once you edit any rule, the file is yours\n# and we won't"
-        " overwrite it. Add your own categories by adding lines.\n#"
-        " managed-checksum: "
+        " substring match).\n# Or an ML rule — <tag> : <yes/no question> — the"
+        " on-device model decides at\n# index time, for the fuzzy tail no"
+        " keyword list captures.\n# A tag name may contain spaces but not a"
+        " comma, '=' or ':' (separators).\n# Lines starting with # are"
+        " comments. Re-run `mill index` after editing.\n#\n# The rules below"
+        " are the built-in defaults. While you leave them unchanged\n# they"
+        " auto-update on upgrade; once you edit any rule, the file is yours\n#"
+        " and we won't overwrite it. Add your own categories by adding"
+        " lines.\n# managed-checksum: "
     )
     out += checksum + "\n"
     for i in range(len(reg.rules)):
         ref r = reg.rules[i]
+        if r.is_ml():
+            out += r.tag + " : " + r.ml_prompt + "\n"
+            continue
         out += r.tag + " = "
         for k in range(len(r.keywords)):
             if k > 0:

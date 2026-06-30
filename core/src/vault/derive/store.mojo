@@ -174,14 +174,37 @@ def _tags_equal(a: List[String], b: List[String]) -> Bool:
     return True
 
 
+def _contains(xs: List[String], s: String) -> Bool:
+    for i in range(len(xs)):
+        if xs[i] == s:
+            return True
+    return False
+
+
 def retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
-    """Re-apply `reg`'s tags to every stored transaction in place (pure — no model
-    call, no re-embed). Returns the COUNT of rows whose tags changed, so callers
-    persist only when something moved. This is what makes a plain `mill index`
-    re-tag after the user edits categories.txt, instead of a forced re-embed."""
+    """Re-apply the registry's DETERMINISTIC tags to every stored transaction in
+    place (pure — no model call, no re-embed), PRESERVING any ML-rule tags already
+    materialized on the row. `tags_for` is deterministic-only (an ML rule never
+    matches by keyword), so without the carry-over a plain re-tag would strip the
+    ML tags that were assigned, at index time, with a model call. Returns the
+    COUNT of rows whose tags changed, so callers persist only when something
+    moved — this is what makes a plain `mill index` re-tag after the user edits
+    categories.txt, instead of a forced re-embed."""
+    var ml = List[String]()  # the registry's ML-rule tag names (preserved)
+    for i in range(len(reg.rules)):
+        if reg.rules[i].is_ml():
+            ml.append(reg.rules[i].tag.copy())
     var changed = 0
     for i in range(len(rows)):
-        var new_tags = reg.tags_for(rows[i].desc)
+        var new_tags = reg.tags_for(
+            rows[i].desc
+        )  # deterministic, registry order
+        # Carry over any ML tag already on the row (it was a model call to compute,
+        # cached here — re-materialized only at index time for new transactions).
+        for g in range(len(rows[i].tags)):
+            ref t = rows[i].tags[g]
+            if _contains(ml, t) and not _contains(new_tags, t):
+                new_tags.append(t.copy())
         if not _tags_equal(rows[i].tags, new_tags):
             var r = rows[i].copy()
             r.tags = new_tags^

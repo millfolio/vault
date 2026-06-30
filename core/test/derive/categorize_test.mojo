@@ -199,4 +199,36 @@ def main() raises:
         "adding a rule changes the canon (the loader sees it as edited)",
     )
 
+    # ── ML rules: `<tag> : <question>` parse, stay deterministic-free, round-trip ──
+    var mlrules = parse_rules(
+        String(
+            "gym : is this merchant a gym or fitness studio?\n"  # ML rule
+            "phone = verizon, at&t\n"  # a normal keyword rule alongside
+            "vibe : was this an impulse splurge = treat?\n"  # ':' before '=' → ML; '=' kept
+        )
+    )
+    var mlreg = Registry(mlrules.copy())
+    # the ML tag is advertised (codegen sees it) but NEVER matches by keyword —
+    # tags_for is deterministic-only, so an ML category is materialised separately.
+    expect(_has(tag_names(mlreg), "gym"), "ML tag name is advertised")
+    expect(
+        len(mlreg.tags_for("PLANET FITNESS 0042")) == 0,
+        "ML rule never matches deterministically (no model call in tags_for)",
+    )
+    expect(mlrules[0].is_ml(), "'gym :' parsed as an ML rule")
+    expect(not mlrules[1].is_ml(), "'phone =' stays a keyword rule")
+    expect(
+        mlrules[2].is_ml()
+        and mlrules[2].ml_prompt == "was this an impulse splurge = treat?",
+        "':' before '=' → ML rule whose question keeps its '='",
+    )
+    # ML rules round-trip through the editable file format AND the canon (so the
+    # loader's untouched-vs-edited checksum still works with ML rules present).
+    var mltext = registry_to_text(mlreg, String("cafef00d"))
+    var mlround = Registry(parse_rules(mltext))
+    expect(
+        rules_canon(mlround) == rules_canon(mlreg),
+        "ML rules round-trip through registry_to_text (canon stable)",
+    )
+
     print("ok: all categorize tests passed")
