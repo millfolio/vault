@@ -6,10 +6,12 @@
   // rendered in place — status/debug small, approval at regular font. Mirrors the
   // ChatItem union in routes/+page.svelte.
   interface Item {
-    kind: "user" | "assistant" | "status" | "debug" | "approval" | "tags";
+    kind: "user" | "assistant" | "status" | "debug" | "approval" | "tags" | "tag-proposal";
     id: string;
     text?: string;
     tags?: string;         // tags: comma-joined category tags the program filtered on
+    name?: string;         // tag-proposal: suggested tag name
+    keywords?: string;     // tag-proposal: suggested keywords (comma-joined)
     stepId?: string;
     label?: string;
     state?: StepState;
@@ -156,6 +158,38 @@
   function bumpTimer() {
     remaining += 60;
   }
+
+  // Accept a model-proposed reusable tag: append `name = keywords` to the category
+  // rules (read-modify-write /api/categories) so it becomes a permanent fast tag —
+  // the SAME store the Tags tab edits. Disabled in the read-only demo.
+  function apiBase(): string {
+    if (typeof location === "undefined") return "";
+    const explicit = new URLSearchParams(location.search).get("api");
+    if (explicit) return explicit.replace(/\/$/, "");
+    return "";
+  }
+  let proposalState = $state<Record<string, "saving" | "added" | "error">>({});
+  async function acceptProposal(id: string, name: string, keywords: string) {
+    if (demo || !name || !keywords) return;
+    proposalState = { ...proposalState, [id]: "saving" };
+    try {
+      const base = apiBase();
+      const cur = await (await fetch(`${base}/api/categories`)).json();
+      let text: string = cur.text ?? "";
+      if (text.length && !text.endsWith("\n")) text += "\n";
+      text += `${name} = ${keywords}\n`;
+      const r = await fetch(`${base}/api/categories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error();
+      proposalState = { ...proposalState, [id]: "added" };
+    } catch {
+      proposalState = { ...proposalState, [id]: "error" };
+    }
+  }
   // One countdown per pending approval; the effect's cleanup clears the interval when
   // the pending id changes (next question) or the component unmounts.
   $effect(() => {
@@ -300,6 +334,29 @@
         <div class="tagsused" title="The answer was computed by filtering your transactions on these category tags">
           <span class="tlabel">filtered by tag</span>
           {#each (it.tags ?? "").split(",") as t}<span class="chip">{t}</span>{/each}
+        </div>
+      {:else if it.kind === "tag-proposal"}
+        <div class="proposal" title="Save this as a category tag so the next such question is a fast, exact filter — no model call">
+          <div class="ptext">
+            <span class="plabel">💡 Make <strong>{it.name}</strong> a reusable tag?</span>
+            <span class="pkw">{it.keywords}</span>
+          </div>
+          {#if !demo}
+            {#if proposalState[it.id] === "added"}
+              <span class="padded">✓ Saved to your tags</span>
+            {:else}
+              <div class="pactions">
+                <button
+                  class="padd"
+                  disabled={proposalState[it.id] === "saving"}
+                  onclick={() => acceptProposal(it.id, it.name ?? "", it.keywords ?? "")}
+                >
+                  {proposalState[it.id] === "saving" ? "Adding…" : "Add tag"}
+                </button>
+                {#if proposalState[it.id] === "error"}<span class="perr">Couldn't save</span>{/if}
+              </div>
+            {/if}
+          {/if}
         </div>
       {:else if it.kind === "debug"}
         <details class="debug">
@@ -653,6 +710,67 @@
     color: var(--accent);
     border: 1px solid var(--accent);
     font-weight: 600;
+  }
+
+  /* tag-proposal — a dashed callout offering to save a model-suggested tag */
+  .proposal {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0;
+    padding: 8px 12px;
+    border: 1px dashed var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-dim, rgba(255, 122, 28, 0.08));
+  }
+  .proposal .ptext {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .proposal .plabel {
+    font-size: 12.5px;
+  }
+  .proposal .plabel strong {
+    color: var(--accent);
+  }
+  .proposal .pkw {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+  }
+  .proposal .pactions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+  }
+  .proposal .padd {
+    padding: 5px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #06101f;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .proposal .padd:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .proposal .padded {
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .proposal .perr {
+    font-size: 11.5px;
+    color: var(--err, #f85149);
   }
 
   /* debug — small, collapsible */

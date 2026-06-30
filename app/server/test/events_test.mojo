@@ -10,6 +10,7 @@ from events import (
     field,
     status,
     tags_event,
+    tag_proposal_event,
     debug_event,
     approval,
     message,
@@ -50,6 +51,14 @@ def main() raises:
         tags_event("phone,travel"),
         '{"type":"tags","tags":"phone,travel"}',
         "tags_event encoding",
+    )
+    expect_eq(
+        tag_proposal_event("gym", "planet fitness, equinox"),
+        (
+            '{"type":"tag-proposal","name":"gym","keywords":"planet fitness,'
+            ' equinox"}'
+        ),
+        "tag_proposal_event encoding",
     )
 
     var d = debug_event("codegen", "Generated program", "x", "mojo")

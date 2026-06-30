@@ -61,6 +61,20 @@ def tags_event(names: String) -> String:
     return '{"type":"tags","tags":' + json_escape(names) + "}"
 
 
+def tag_proposal_event(name: String, keywords: String) -> String:
+    """A reusable-tag suggestion the model emitted (`# SUGGEST_TAG: name = kw, kw`)
+    for a durable category that isn't a tag yet. The UI offers to save it to
+    `categories.txt` so the next such question is a fast, exact `.tags` filter
+    instead of an inline per-transaction classify (the slow path)."""
+    return (
+        '{"type":"tag-proposal","name":'
+        + json_escape(name)
+        + ',"keywords":'
+        + json_escape(keywords)
+        + "}"
+    )
+
+
 def debug_event(
     step: String, title: String, body: String, language: String
 ) -> String:

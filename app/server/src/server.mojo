@@ -66,6 +66,7 @@ from events import (
     field,
     status,
     tags_event,
+    tag_proposal_event,
     debug_event,
     approval,
     message,
@@ -344,6 +345,43 @@ def _tags_in_program(code: String) raises -> String:
                 used += ","
             used += avail[i]
     return used^
+
+
+def _tag_proposal_in_program(code: String) raises -> List[String]:
+    """A reusable-tag suggestion the model emitted as a program comment
+    `# SUGGEST_TAG: <name> = <kw>, <kw>` (for a durable, keyword-able category
+    that isn't a tag yet — so the next such question is a fast `.tags` filter
+    instead of an inline classify). Returns `[name, keywords_csv]` when present,
+    well-formed, and NOT already a known tag; `[]` otherwise. Static scan — the
+    comment never executes, mirroring `_tags_in_program`."""
+    var lines = code.split("\n")
+    var marker = String("# SUGGEST_TAG:")
+    for i in range(len(lines)):
+        var ln = String(lines[i].strip())
+        if not ln.startswith(marker):
+            continue
+        var rest = String(ln.removeprefix(marker).strip())
+        var parts = rest.split("=")
+        if len(parts) < 2:
+            continue
+        var name = String(parts[0].strip())
+        var kws = String(parts[1].strip())
+        if name.byte_length() == 0 or kws.byte_length() == 0:
+            continue
+        # Skip a suggestion for a tag that already exists (redundant).
+        var avail = effective_tags()
+        var dup = False
+        for a in range(len(avail)):
+            if avail[a] == name:
+                dup = True
+                break
+        if dup:
+            continue
+        var out = List[String]()
+        out.append(name^)
+        out.append(kws^)
+        return out^
+    return List[String]()
 
 
 @fieldwise_init
@@ -1057,6 +1095,12 @@ def on_connect(mut conn: WsConnection) raises:
         var used = _tags_in_program(code)
         if used.byte_length() > 0:
             conn.send_text(tags_event(used))
+        # If the model proposed a NEW reusable tag for a category that isn't one
+        # yet, surface it so the user can save it (next time = a fast `.tags`
+        # filter, not an inline classify). A comment in the program; never runs.
+        var prop = _tag_proposal_in_program(code)
+        if len(prop) == 2:
+            conn.send_text(tag_proposal_event(prop[0], prop[1]))
         pre_ms = _ms_since(
             t_total0
         )  # manifest + codegen, before the approval pause

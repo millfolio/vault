@@ -57,12 +57,21 @@ export interface TagsEvent {
   tags: string;
 }
 
+/** A reusable tag the model suggested (`# SUGGEST_TAG`) for a category that isn't
+ *  a tag yet → the UI offers to save it to the category rules. */
+export interface TagProposalEvent {
+  type: "tag-proposal";
+  name: string;
+  keywords: string;
+}
+
 export type ServerEvent =
   | StatusEvent
   | ApprovalRequestEvent
   | DebugEvent
   | MessageEvent
   | TagsEvent
+  | TagProposalEvent
   | ErrorEvent;
 
 /** A live session: receives server events, can answer approval gates. */

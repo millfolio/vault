@@ -17,6 +17,7 @@
     | { kind: "status"; id: string; stepId: string; label: string; state: StepState; detail?: string }
     | { kind: "debug"; id: string; title: string; body: string; language?: string }
     | { kind: "tags"; id: string; tags: string }
+    | { kind: "tag-proposal"; id: string; name: string; keywords: string }
     | {
         kind: "approval";
         id: string;
@@ -177,6 +178,12 @@
         // Which category tags the generated program filtered on — a chip so the
         // user knows the answer came from a tag, not a guess.
         if (e.tags) items.push({ kind: "tags", id: uid(), tags: e.tags });
+        break;
+      case "tag-proposal":
+        // The model suggested a reusable tag for a category that isn't one yet —
+        // surface it so the user can save it (next time = a fast .tags filter).
+        if (e.name && e.keywords)
+          items.push({ kind: "tag-proposal", id: uid(), name: e.name, keywords: e.keywords });
         break;
       case "debug":
         items.push({ kind: "debug", id: uid(), title: e.title, body: e.body, language: e.language });
