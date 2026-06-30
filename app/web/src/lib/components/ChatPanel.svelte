@@ -169,15 +169,50 @@
     return "";
   }
   let proposalState = $state<Record<string, "saving" | "added" | "error">>({});
-  async function acceptProposal(id: string, name: string, keywords: string) {
-    if (demo || !name || !keywords) return;
+  // Per-proposal edit state — the model's suggested keywords are just a starting
+  // point (often not your actual merchants). The user can keep them as-is, edit them,
+  // or switch to an AI rule (the model classifies — no exact keyword list needed).
+  type PEdit = { kw: string; isMl: boolean; ml: string };
+  let proposalEdits = $state<Record<string, PEdit>>({});
+  let customizing = $state<Record<string, boolean>>({});
+  function startCustomize(it: Item) {
+    if (!proposalEdits[it.id]) {
+      proposalEdits = {
+        ...proposalEdits,
+        [it.id]: { kw: it.keywords ?? "", isMl: false, ml: `is this a ${it.name}?` },
+      };
+    }
+    customizing = { ...customizing, [it.id]: true };
+  }
+  function cleanName(s: string): string {
+    return s.replace(/[,=:()\t\n]/g, "").trim();
+  }
+  async function acceptProposal(it: Item) {
+    if (demo) return;
+    const id = it.id;
+    const name = cleanName(it.name ?? "");
+    const e = proposalEdits[id];
+    let rule = "";
+    if (e?.isMl) {
+      const q = (e.ml ?? "").trim();
+      if (!name || !q) return;
+      rule = `${name} : ${q}`;
+    } else {
+      const kw = (e?.kw ?? it.keywords ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(", ");
+      if (!name || !kw) return;
+      rule = `${name} = ${kw}`;
+    }
     proposalState = { ...proposalState, [id]: "saving" };
     try {
       const base = apiBase();
       const cur = await (await fetch(`${base}/api/categories`)).json();
       let text: string = cur.text ?? "";
       if (text.length && !text.endsWith("\n")) text += "\n";
-      text += `${name} = ${keywords}\n`;
+      text += `${rule}\n`;
       const r = await fetch(`${base}/api/categories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -339,20 +374,35 @@
         <div class="proposal" title="Save this as a category tag so the next such question is a fast, exact filter — no model call">
           <div class="ptext">
             <span class="plabel">💡 Make <strong>{it.name}</strong> a reusable tag?</span>
-            <span class="pkw">{it.keywords}</span>
+            {#if !customizing[it.id]}<span class="pkw">{it.keywords}</span>{/if}
           </div>
           {#if !demo}
             {#if proposalState[it.id] === "added"}
               <span class="padded">✓ Saved to your tags</span>
+            {:else if customizing[it.id]}
+              <div class="pcustom">
+                <label class="pmltoggle" title="The model decides per transaction — no keyword list needed (slower, evaluated at index time)">
+                  <input type="checkbox" bind:checked={proposalEdits[it.id].isMl} /> AI rule (model decides — no keyword list)
+                </label>
+                {#if proposalEdits[it.id].isMl}
+                  <input class="pinput" placeholder="yes/no question — e.g. is this a gym or fitness studio?" bind:value={proposalEdits[it.id].ml} spellcheck="false" />
+                {:else}
+                  <input class="pinput" placeholder="keywords, comma, separated — your actual merchants" bind:value={proposalEdits[it.id].kw} spellcheck="false" />
+                {/if}
+                <div class="pactions">
+                  <button class="padd" disabled={proposalState[it.id] === "saving"} onclick={() => acceptProposal(it)}>
+                    {proposalState[it.id] === "saving" ? "Adding…" : "Add tag"}
+                  </button>
+                  <button class="pbtn" onclick={() => (customizing = { ...customizing, [it.id]: false })}>Cancel</button>
+                  {#if proposalState[it.id] === "error"}<span class="perr">Couldn't save</span>{/if}
+                </div>
+              </div>
             {:else}
               <div class="pactions">
-                <button
-                  class="padd"
-                  disabled={proposalState[it.id] === "saving"}
-                  onclick={() => acceptProposal(it.id, it.name ?? "", it.keywords ?? "")}
-                >
-                  {proposalState[it.id] === "saving" ? "Adding…" : "Add tag"}
+                <button class="padd" disabled={proposalState[it.id] === "saving"} onclick={() => acceptProposal(it)}>
+                  {proposalState[it.id] === "saving" ? "Adding…" : "Add as suggested"}
                 </button>
+                <button class="pbtn" onclick={() => startCustomize(it)}>Customize…</button>
                 {#if proposalState[it.id] === "error"}<span class="perr">Couldn't save</span>{/if}
               </div>
             {/if}
@@ -777,6 +827,48 @@
   .proposal .perr {
     font-size: 11.5px;
     color: var(--err, #f85149);
+  }
+  .proposal .pbtn {
+    padding: 5px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .proposal .pbtn:hover {
+    border-color: var(--accent);
+  }
+  .proposal .pcustom {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 4px;
+  }
+  .proposal .pmltoggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .proposal .pinput {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 9px;
+  }
+  .proposal .pinput:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 
   /* debug — small, collapsible */
