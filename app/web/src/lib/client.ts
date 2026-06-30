@@ -50,7 +50,7 @@ class MockSession implements Session {
     const manifest = uid("manifest");
     emit({ type: "status", stepId: manifest, label: "Aliasing vault manifest", state: "running" });
     await this.wait(600);
-    emit({ type: "debug", stepId: manifest, title: "Frontier-safe manifest (aliases only)", body: "file_0  col_0:date  col_1:amount  col_2:merchant\nfile_1  col_0:date  col_1:balance", language: "text" });
+    emit({ type: "debug", stepId: manifest, title: "Frontier-safe view — aliases + category tag names", body: "file_0  col_0:date  col_1:amount  col_2:merchant\nfile_1  col_0:date  col_1:balance\n\nCategory tags also sent (the model filters .tags on these): phone, travel, restaurant, groceries, health", language: "text" });
     emit({ type: "status", stepId: manifest, label: "Aliasing vault manifest", state: "done" });
 
     const gen = uid("codegen");

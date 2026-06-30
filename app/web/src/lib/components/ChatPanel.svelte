@@ -333,7 +333,7 @@
       {:else if it.kind === "tags"}
         <div class="tagsused" title="The answer was computed by filtering your transactions on these category tags">
           <span class="tlabel">filtered by tag</span>
-          {#each (it.tags ?? "").split(",") as t}<span class="chip">{t}</span>{/each}
+          {#each (it.tags ?? "").split(",") as t}<a class="chip" href="/tags" title="See this tag's rule in the Tags tab">{t}</a>{/each}
         </div>
       {:else if it.kind === "tag-proposal"}
         <div class="proposal" title="Save this as a category tag so the next such question is a fast, exact filter — no model call">
@@ -710,6 +710,12 @@
     color: var(--accent);
     border: 1px solid var(--accent);
     font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .tagsused a.chip:hover {
+    background: var(--accent);
+    color: #06101f;
   }
 
   /* tag-proposal — a dashed callout offering to save a model-suggested tag */

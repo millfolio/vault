@@ -409,7 +409,13 @@ struct Api(Copyable, Handler, Movable):
         # The on-device model name — the UI shows it in the bottom bar.
         if path == "/api/model":
             return _cors(
-                ok_json('{"model":' + json_escape(_model_label()) + "}")
+                ok_json(
+                    '{"model":'
+                    + json_escape(_model_label())
+                    + ',"version":'
+                    + json_escape(_app_version())
+                    + "}"
+                )
             )
         # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
         if path == "/api/stats":
@@ -1081,11 +1087,27 @@ def on_connect(mut conn: WsConnection) raises:
         var _t = perf_counter_ns()
         var manifest = orch.vault_manifest(vault_dir)
         _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
+        # The frontier-safe view also carries the category tag NAMES (so the model can
+        # filter `.tags`) — show them in the same debug dropdown, since they're sent
+        # too. Never the keyword RULES (those hold real merchant strings → on-device).
+        var _avail = effective_tags()
+        var _tags_csv = String("")
+        for _i in range(len(_avail)):
+            if _i > 0:
+                _tags_csv += ", "
+            _tags_csv += _avail[_i]
+        var _dbg = manifest
+        if _tags_csv.byte_length() > 0:
+            _dbg += (
+                "\n\nCategory tags also sent (the model filters .tags on"
+                " these): "
+            )
+            _dbg += _tags_csv
         conn.send_text(
             debug_event(
                 "manifest",
-                "Frontier-safe manifest (aliases only)",
-                manifest,
+                "Frontier-safe view — aliases + category tag names",
+                _dbg,
                 "text",
             )
         )

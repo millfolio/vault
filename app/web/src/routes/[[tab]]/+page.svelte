@@ -95,6 +95,16 @@
   // The on-device model the server serves (bottom status bar). Empty under the
   // in-browser mock (:5173, no backend) — the bar just omits it then.
   let modelName = $state("");
+  // Build stamp: the app SHA with the build date stripped. When the server reports a
+  // real release version (a `mill` install — not the demo's "<sha> · <date>" deploy
+  // stamp, nor "dev"), append it: "<sha> · v0.4.39-rc.2".
+  let serverVersion = $state("");
+  const buildSha = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev").split(" · ")[0];
+  const buildLabel = $derived(
+    serverVersion && serverVersion !== "dev" && !serverVersion.includes(buildSha)
+      ? `${buildSha} · ${serverVersion}`
+      : buildSha,
+  );
 
   // Intro disclaimer — ONLY the public demo shows it (it explains the replay/queue
   // caveats that don't apply to a real local install). Remembered per browser session
@@ -122,7 +132,10 @@
     // Ask the server which model it's serving (best-effort; mock has no backend).
     fetch("/api/model")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d && typeof d.model === "string") modelName = d.model; })
+      .then((d) => {
+        if (d && typeof d.model === "string") modelName = d.model;
+        if (d && typeof d.version === "string") serverVersion = d.version;
+      })
       .catch(() => {});
   });
   function dismissIntro() {
@@ -296,7 +309,7 @@
     {/if}
     <span class="spacer"></span>
     <a class="barlink" href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener">Community ↗</a>
-    <span class="ver" title="build">{__APP_VERSION__}</span>
+    <span class="ver" title="build (app SHA · release version)">{buildLabel}</span>
   </footer>
 </main>
 
