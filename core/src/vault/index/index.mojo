@@ -39,7 +39,7 @@ from vault.index.manifest import (
 from vault.index.readers import csv_rows, md_text, pdf_text, docx_text
 import vault.index.readers as readers
 from vault.index.embed import embed, embed_batch, EMBED_DIM
-from vault.index.sha256 import sha256_file_hex
+from vault.index.sha256 import sha256_file_hex, sha256_hex
 from vault.extract.transactions import (
     Txn,
     extract_transactions,
@@ -54,9 +54,9 @@ from vault.derive.categorize import (
     Registry,
     default_registry,
     parse_rules,
-    merge_registry,
-    registry_template,
     tag_names,
+    rules_canon,
+    registry_to_text,
 )
 
 
@@ -896,26 +896,77 @@ def _categories_path() raises -> String:
     return _config_dir() + "/categories.txt"
 
 
+def _sha_str(s: String) -> String:
+    """Hex SHA-256 of a string's bytes."""
+    var b = List[UInt8]()
+    var p = s.unsafe_ptr()
+    for i in range(s.byte_length()):
+        b.append(p[i])
+    return sha256_hex(b)
+
+
+def _extract_checksum(text: String) raises -> String:
+    """The value of the `# managed-checksum:` line, or "" if there is none."""
+    var lines = text.split("\n")
+    for i in range(len(lines)):
+        var ln = String(lines[i].strip())
+        if ln.startswith("# managed-checksum:"):
+            return String(ln.removeprefix("# managed-checksum:").strip())
+    return String("")
+
+
+def _write_categories(path: String, text: String):
+    """Best-effort write of the categories file — never fail indexing over it.
+    """
+    try:
+        with open(path, "w") as f:
+            f.write(text)
+    except:
+        pass
+
+
 def _load_registry() raises -> Registry:
-    """The effective tag registry = built-in defaults + the user's
-    `categories.txt` (merged additively). Writes a commented template the first
-    time so the file is discoverable; an absent/empty file just yields the
-    defaults. Read once per `build_index` and matched over every transaction."""
-    var reg = default_registry()
+    """The effective tag registry. `categories.txt` is the SOURCE OF TRUTH: it's
+    seeded with the real built-in defaults (as editable rules) on first run, and
+    the loader honors it verbatim — so the user can edit, remove, or add anything.
+
+    `# managed-checksum:` records the rules we last wrote. If the file's rules
+    still hash to it (UNTOUCHED), the defaults auto-refresh on upgrade; once the
+    user edits a rule the checksum diverges and the file becomes authoritative —
+    we never overwrite it. A legacy/commented/empty file (no checksum, no rules)
+    is (re)seeded so it never yields an empty registry."""
     var path = _categories_path()
-    if exists(path):
-        var text: String
-        with open(path, "r") as f:
-            text = f.read()
-        reg = merge_registry(reg^, parse_rules(text))
-    else:
-        # Seed a documented template so the user can discover + extend categories.
-        try:
-            with open(path, "w") as f:
-                f.write(registry_template())
-        except:
-            pass  # best-effort; never fail indexing over the template write
-    return reg^
+    var defaults = default_registry()
+    var seed_sum = _sha_str(rules_canon(defaults))
+
+    if not exists(path):
+        _write_categories(path, registry_to_text(defaults, seed_sum))
+        return defaults^
+
+    var text: String
+    with open(path, "r") as f:
+        text = f.read()
+    var user = Registry(parse_rules(text))
+    var stored_sum = _extract_checksum(text)
+
+    # Untouched managed file → its rules still hash to the checksum we wrote.
+    if (
+        stored_sum.byte_length() > 0
+        and _sha_str(rules_canon(user)) == stored_sum
+    ):
+        if stored_sum != seed_sum:
+            # Defaults improved this version and the user hasn't edited → refresh.
+            _write_categories(path, registry_to_text(defaults, seed_sum))
+        return defaults^
+
+    # No managed checksum AND no active rules = the legacy commented template (or
+    # an emptied file) → the user hasn't defined anything, so seed the defaults.
+    if stored_sum.byte_length() == 0 and len(user.rules) == 0:
+        _write_categories(path, registry_to_text(defaults, seed_sum))
+        return defaults^
+
+    # Otherwise the user has made it their own → the file is authoritative.
+    return user^
 
 
 def effective_tags() raises -> List[String]:

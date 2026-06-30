@@ -9,10 +9,13 @@ class the on-device phone classifier hit).
 """
 
 from vault.derive.categorize import (
+    Registry,
     default_registry,
     parse_rules,
     merge_registry,
     tag_names,
+    rules_canon,
+    registry_to_text,
 )
 
 
@@ -140,6 +143,23 @@ def main() raises:
     expect(
         _has(names, "phone") and _has(names, "pets"),
         "tag_names includes built-in + user tags",
+    )
+
+    # ── seed round-trip: the file is the source of truth ─────────────────────────
+    # registry_to_text writes the defaults as editable `tag = kw, kw` lines; an
+    # UNTOUCHED seed must re-parse to exactly the default rules (same canon), so the
+    # loader's "did the user edit?" checksum is stable.
+    var seed = registry_to_text(default_registry(), String("deadbeef"))
+    var reparsed = Registry(parse_rules(seed))
+    expect(
+        rules_canon(reparsed) == rules_canon(default_registry()),
+        "seeded defaults round-trip through the config format (canon stable)",
+    )
+    # an edit changes the canon (→ checksum diverges → file becomes authoritative)
+    var edited = Registry(parse_rules(seed + String("\npets = chewy, petco\n")))
+    expect(
+        rules_canon(edited) != rules_canon(default_registry()),
+        "adding a rule changes the canon (the loader sees it as edited)",
     )
 
     print("ok: all categorize tests passed")

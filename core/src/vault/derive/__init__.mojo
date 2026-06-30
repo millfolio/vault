@@ -17,5 +17,6 @@ from vault.derive.categorize import (
     parse_rules,
     merge_registry,
     tag_names,
-    registry_template,
+    rules_canon,
+    registry_to_text,
 )

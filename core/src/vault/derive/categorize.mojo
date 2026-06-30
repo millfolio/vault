@@ -268,18 +268,47 @@ def tag_names(reg: Registry) raises -> List[String]:
     return out^
 
 
-def registry_template() raises -> String:
-    """The commented config-file template written to
-    `~/.config/millfolio/categories.txt` when absent — documents the format so
-    the user can discover and extend their categories."""
-    return String(
-        "# millfolio category rules — add your own categories here.\n#\n# Each"
-        " non-comment line maps a TAG to comma-separated keywords, matched\n#"
-        " case-insensitively as substrings of the transaction description.\n#"
-        " Repeat a built-in tag to ADD keywords to it; use a new tag name to\n#"
-        " create a new category. Matched at index time — re-run `mill index`\n#"
-        " after editing.\n#\n# Examples (uncomment / edit):\n#   phone = my"
-        " carrier name\n#   pets = chewy, petco, the vet\n#   subscriptions ="
-        " netflix, spotify, hbo max\n#\n# Built-in tags: phone, travel,"
-        " restaurant, groceries, health\n"
+def rules_canon(reg: Registry) -> String:
+    """A deterministic, comment-free serialization of a registry's RULES — used to
+    checksum "has the user changed the rules?" independent of comments/whitespace.
+    `tag <TAB> kw1,kw2,… <NL>` per rule, in order; keywords verbatim (matching
+    lowercases at match time, so case here is part of the rule's identity)."""
+    var out = String("")
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        out += r.tag + "\t"
+        for k in range(len(r.keywords)):
+            if k > 0:
+                out += ","
+            out += r.keywords[k]
+        out += "\n"
+    return out^
+
+
+def registry_to_text(reg: Registry, checksum: String) raises -> String:
+    """Serialize a registry to the editable config-file format — the SOURCE OF
+    TRUTH written to `~/.config/millfolio/categories.txt`. The built-in defaults
+    are written out as real, editable `tag = kw, kw` lines (not hidden in the
+    binary). The `# managed-checksum:` line records the rules we wrote, so the
+    loader can tell an untouched file (auto-refresh the defaults on upgrade) from
+    one the user has edited (leave it alone — it's authoritative)."""
+    var out = String(
+        "# millfolio category rules — THIS FILE IS THE SOURCE OF TRUTH; edit"
+        " freely.\n# Format: <tag> = keyword, keyword, …   (case-insensitive"
+        " substring match).\n# Lines starting with # are comments. Re-run `mill"
+        " index` after editing.\n#\n# The rules below are the built-in"
+        " defaults. While you leave them unchanged\n# they auto-update on"
+        " upgrade; once you edit any rule, the file is yours\n# and we won't"
+        " overwrite it. Add your own categories by adding lines.\n#"
+        " managed-checksum: "
     )
+    out += checksum + "\n"
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        out += r.tag + " = "
+        for k in range(len(r.keywords)):
+            if k > 0:
+                out += ", "
+            out += r.keywords[k]
+        out += "\n"
+    return out^
