@@ -614,7 +614,7 @@
                     {/if}
                   </td>
                   <td class="act">
-                    {#if !mock}
+                    {#if !mock && !demo}
                       <button type="button" class="mini" title="Define a tag from this merchant" aria-label="Define a tag from this record" onclick={() => defineFromRecord(t.desc)}>+ tag</button>
                     {/if}
                   </td>
