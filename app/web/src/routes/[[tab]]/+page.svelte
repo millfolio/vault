@@ -275,8 +275,13 @@
       <a class:active={view === "chat"} href="/">Chat</a>
       <a class:active={view === "vault"} href="/vault">Vault</a>
       <a class:active={view === "tags"} href="/tags">Tags</a>
-      <a class:active={view === "stats"} href="/stats">Stats</a>
-      {#if !isDemo}<a class:active={view === "system"} href="/system">System</a>{/if}
+      {#if isDemo}
+        <!-- The public demo has no System tab, so Stats stays top-level. -->
+        <a class:active={view === "stats"} href="/stats">Stats</a>
+      {:else}
+        <!-- Real install: Stats + Logs + Materialization live under one System tab. -->
+        <a class:active={view === "system" || view === "stats"} href="/system">System</a>
+      {/if}
     </nav>
     <a class="community" href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener" title="Join the discussion">Community ↗</a>
   </header>
@@ -297,9 +302,16 @@
     {:else if view === "tags"}
       <TagsPanel demo={isDemo} />
     {:else if view === "system"}
-      <SystemPanel demo={isDemo} />
+      <SystemPanel demo={isDemo} initialSub="materialization" />
+    {:else if view === "stats"}
+      <!-- Demo keeps a dedicated Stats tab; the real app opens System on its Stats sub-tab. -->
+      {#if isDemo}
+        <StatsPanel />
+      {:else}
+        <SystemPanel demo={isDemo} initialSub="stats" />
+      {/if}
     {:else}
-      <StatsPanel />
+      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
     {/if}
   </div>
   <footer class="statusbar">

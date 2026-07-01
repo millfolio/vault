@@ -7,7 +7,11 @@
   // rule has been materialized (a per-rule completion marker keyed on the insertion
   // generation), lets you drain the queue now, and pause the between-questions
   // worker. Backed by /api/materialize/{status,run,pause,resume}.
-  let { demo = false }: { demo?: boolean } = $props();
+  // `standalone` = rendered as its own tab (System → Materialization) rather than
+  // embedded in another panel: it then owns its padding/scroll and shows an empty
+  // state when there are no AI rules yet.
+  let { demo = false, standalone = false }: { demo?: boolean; standalone?: boolean } =
+    $props();
 
   type PerTag = {
     tag: string;
@@ -104,6 +108,17 @@
   });
 </script>
 
+<div class="wrap" class:standalone>
+{#if loaded && st && st.perTag.length === 0 && standalone}
+  <div class="empty">
+    <h3>AI-tag materialization</h3>
+    <p>
+      No AI category rules yet. An AI rule (<code>tag : question?</code>) is answered
+      by the on-device model and cached, then reused as a fast filter. Add one in the
+      <a href="/tags">Tags</a> tab, and its materialization progress will appear here.
+    </p>
+  </div>
+{/if}
 {#if loaded && st && st.perTag.length > 0}
   <div class="mat">
     <div class="mhead">
@@ -159,8 +174,33 @@
     {/if}
   </div>
 {/if}
+</div>
 
 <style>
+  .wrap.standalone {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    max-width: 820px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .empty {
+    color: var(--text-dim);
+  }
+  .empty h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .empty p {
+    margin: 0;
+    line-height: 1.55;
+    font-size: 13px;
+  }
+  .empty a {
+    color: var(--accent);
+  }
   .mat {
     background: var(--surface-2);
     border: 1px solid var(--border);

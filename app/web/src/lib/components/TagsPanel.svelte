@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import MaterializationPanel from "./MaterializationPanel.svelte";
 
   // The Tags tab: the category tags stamped on your transactions at index time (so
   // "how much on phone" is a fast, exact filter). Edited INLINE here — one row per
@@ -167,36 +166,49 @@
   {:else if failed}
     <p class="muted">Tags unavailable — start millfolio with <code>mill start</code>.</p>
   {:else if !editing}
-    <!-- AI-tag materialization progress + controls (hidden when no AI rules). -->
-    <MaterializationPanel {demo} />
-    <!-- ── read-only list ── -->
-    <div class="list">
-      {#each tags as t}
-        <div class="row">
-          <div class="rhead">
-            <span class="name">{t.name}</span>
-            {#if t.ml}<span class="mltag">AI rule</span>{/if}
-            <span class="count">{t.count} txn{t.count === 1 ? "" : "s"}</span>
-          </div>
-          {#if t.description && !t.ml}<p class="desc">{t.description}</p>{/if}
-          {#if t.ml}
-            <p class="mlq">“{t.ml}”</p>
-          {:else}
-            <div class="kw">
-              {#each t.keywords as k}<span class="kchip">{k}</span>{/each}
-            </div>
-          {/if}
-        </div>
-      {/each}
-      {#if tags.length === 0}<p class="muted">No tags defined.</p>{/if}
-    </div>
-
+    <!-- Edit control at the TOP, above the list. -->
     {#if !demo}
-      <div class="edit">
-        <button type="button" class="btn" onclick={openEditor}>Edit tags…</button>
+      <div class="edit top">
+        <button type="button" class="btn primary" onclick={openEditor}>Edit tags…</button>
         <span class="edithint">add your own, tweak the built-ins, or write a scope note — then it re-tags</span>
-        {#if saveMsg}<p class="savemsg">{saveMsg}</p>{/if}
+        {#if saveMsg}<span class="savemsg">{saveMsg}</span>{/if}
       </div>
+    {/if}
+
+    <!-- ── read-only list, styled like the Records table ── -->
+    {#if tags.length === 0}
+      <p class="muted">No tags defined.</p>
+    {:else}
+      <table class="tagtable">
+        <thead>
+          <tr>
+            <th>Tag</th>
+            <th>Rule</th>
+            <th class="num">Txns</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each tags as t}
+            <tr>
+              <td class="tname">
+                <span class="name">{t.name}</span>
+                {#if t.ml}<span class="mltag">AI</span>{/if}
+              </td>
+              <td class="trule">
+                {#if t.ml}
+                  <span class="mlq">“{t.ml}”</span>
+                {:else}
+                  {#if t.description}<span class="desc">{t.description}</span>{/if}
+                  <span class="kw">
+                    {#each t.keywords as k}<span class="kchip">{k}</span>{/each}
+                  </span>
+                {/if}
+              </td>
+              <td class="num tcount">{t.count}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
     {/if}
   {:else}
     <!-- ── inline structured editor ── -->
@@ -307,25 +319,57 @@
     color: var(--text-dim);
     max-width: 64ch;
   }
-  .list {
+  /* Edit control, at the top */
+  .edit.top {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
   }
-  .row {
-    padding: 10px 0;
-    border-top: 1px solid var(--border);
+  .edithint {
+    font-size: 12px;
+    color: var(--text-dim);
   }
-  .rhead {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
+  .savemsg {
+    font-size: 12px;
+    color: var(--ok);
+  }
+
+  /* Tag list — mirrors the Records table (Vault → Records). */
+  .tagtable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .tagtable th,
+  .tagtable td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+  .tagtable th {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .tagtable .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .tname {
+    white-space: nowrap;
   }
   .name {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text);
   }
   .mltag {
+    margin-left: 6px;
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -334,27 +378,24 @@
     border-radius: 999px;
     padding: 0 6px;
   }
-  .count {
-    font-size: 11.5px;
+  .tcount {
     color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
   }
   .desc {
-    margin: 3px 0 0;
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--text-dim);
   }
   .mlq {
-    margin: 4px 0 0;
+    margin: 0;
     font-size: 12.5px;
     color: var(--text);
     font-style: italic;
   }
   .kw {
-    display: flex;
+    display: inline-flex;
     flex-wrap: wrap;
     gap: 5px;
-    margin-top: 6px;
+    margin-top: 4px;
   }
   .kchip {
     font-size: 11.5px;
@@ -362,16 +403,6 @@
     border-radius: var(--radius);
     background: var(--bg);
     border: 1px solid var(--border);
-    color: var(--text-dim);
-  }
-  .edit {
-    margin-top: 20px;
-    padding-top: 14px;
-    border-top: 1px solid var(--border);
-  }
-  .edithint {
-    margin-left: 10px;
-    font-size: 12px;
     color: var(--text-dim);
   }
   /* editor */

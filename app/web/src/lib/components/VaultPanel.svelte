@@ -2,6 +2,7 @@
   // Vault view — the indexable files in your vault dir + LanceDB index stats,
   // from the local server's GET /api/vault. Read-only; refreshable.
   import { onMount } from "svelte";
+  import SubTabs from "./SubTabs.svelte";
 
   interface VaultFile {
     alias: string;
@@ -287,14 +288,14 @@
       {#if mock}
         <p class="banner">Sample data — open this from <code>mill start</code> (:10000) to see your real vault.</p>
       {/if}
-      <div class="subtabs" role="tablist">
-        <button role="tab" aria-selected={sub === "files"} class:active={sub === "files"} onclick={() => (sub = "files")}>
-          Files
-        </button>
-        <button role="tab" aria-selected={sub === "records"} class:active={sub === "records"} onclick={showRecords}>
-          Records
-        </button>
-      </div>
+      <SubTabs
+        tabs={[
+          { id: "files", label: "Files" },
+          { id: "records", label: "Records" },
+        ]}
+        active={sub}
+        onselect={(id) => (id === "records" ? showRecords() : (sub = "files"))}
+      />
       {#if sub === "files"}
       <form class="search" onsubmit={runSearch}>
         <input
@@ -379,9 +380,13 @@
           </div>
           <div class="tschips">
             {#each tags as t}
-              <span class="tagchip" title={`${t.count} transaction${t.count === 1 ? "" : "s"}`}>
+              <a
+                class="tagchip tclick"
+                href="/tags"
+                title={`${t.count} transaction${t.count === 1 ? "" : "s"} — edit in Tags`}
+              >
                 {t.name}<span class="tcount">{t.count}</span>
-              </span>
+              </a>
             {/each}
           </div>
           <p class="tshint">
@@ -449,6 +454,7 @@
                 <th>Description</th>
                 <th class="num">Amount</th>
                 <th>Tags</th>
+                <th>File</th>
               </tr>
             </thead>
             <tbody>
@@ -461,11 +467,20 @@
                     {#if t.tags.length > 0}
                       <span class="rchips">
                         {#each t.tags as tag}
-                          <span class="tagchip rchip">{tag}</span>
+                          <a class="tagchip rchip tclick" href="/tags" title="Edit in Tags">{tag}</a>
                         {/each}
                       </span>
                     {:else}
                       <span class="muted">—</span>
+                    {/if}
+                  </td>
+                  <td class="rfile">
+                    {#if !mock && fileFor(t.file)}
+                      <button type="button" class="filelink" onclick={() => openHit(t.file)} title="View source document">
+                        <span class="open" aria-hidden="true">↗</span>{nameFor(t.file)}
+                      </button>
+                    {:else}
+                      <span class="muted" title={t.file}>{nameFor(t.file)}</span>
                     {/if}
                   </td>
                 </tr>
@@ -754,6 +769,17 @@
     border: 1px solid var(--border);
     color: var(--text);
   }
+  a.tagchip {
+    text-decoration: none;
+  }
+  a.tagchip.tclick {
+    cursor: pointer;
+    transition: border-color 0.12s ease, color 0.12s ease;
+  }
+  a.tagchip.tclick:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
   .tcount {
     font-size: 10.5px;
     font-variant-numeric: tabular-nums;
@@ -834,32 +860,6 @@
     color: var(--ok);
   }
 
-  /* Files | Records sub-tab switch */
-  .subtabs {
-    display: inline-flex;
-    gap: 2px;
-    padding: 2px;
-    margin-bottom: 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface-2);
-  }
-  .subtabs button {
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    font: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
-    padding: 5px 14px;
-    border-radius: calc(var(--radius) - 2px);
-    cursor: pointer;
-  }
-  .subtabs button.active {
-    background: var(--accent);
-    color: #06101f;
-  }
-
   /* Records table */
   .records td.date {
     color: var(--text-dim);
@@ -886,5 +886,35 @@
     font-size: 11px;
     padding: 1px 9px;
     color: var(--accent);
+  }
+  a.rchip.tclick {
+    text-decoration: none;
+    cursor: pointer;
+  }
+  a.rchip.tclick:hover {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
+  .records td.rfile {
+    overflow-wrap: anywhere;
+    max-width: 220px;
+  }
+  .records td.rfile .muted {
+    font-size: 12px;
+  }
+  button.filelink {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+  button.filelink:hover {
+    text-decoration: underline;
   }
 </style>
