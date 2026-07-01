@@ -726,9 +726,12 @@ def preview_ml_json(base_url: String, prompt: String) raises -> String:
     var rows = load_txn_rows()
     var total = len(rows)
     comptime BUDGET_NS = 5_000_000_000  # ~5 seconds
+    comptime EX_CAP = 4  # example descriptions to surface for each verdict
     var start = perf_counter_ns()
     var evaluated = 0
     var matched = 0
+    var yes_ex = List[String]()  # a few descriptions the model tagged yes
+    var no_ex = List[String]()  # …and a few it tagged no — the sanity check
     var i = 0
     while i < total:
         if perf_counter_ns() - start >= BUDGET_NS:
@@ -744,6 +747,10 @@ def preview_ml_json(base_url: String, prompt: String) raises -> String:
             evaluated += 1
             if verdicts[k]:
                 matched += 1
+                if len(yes_ex) < EX_CAP:
+                    yes_ex.append(rows[i + k].desc.copy())
+            elif len(no_ex) < EX_CAP:
+                no_ex.append(rows[i + k].desc.copy())
         i = end
     return (
         '{"matched":'
@@ -752,6 +759,10 @@ def preview_ml_json(base_url: String, prompt: String) raises -> String:
         + String(evaluated)
         + ',"total":'
         + String(total)
+        + ',"matchedExamples":'
+        + _json_str_list(yes_ex)
+        + ',"unmatchedExamples":'
+        + _json_str_list(no_ex)
         + "}"
     )
 
@@ -865,6 +876,17 @@ def _json_str(s: String) -> String:
     return out^
 
 
+def _json_str_list(xs: List[String]) -> String:
+    """A List[String] as a JSON array of string literals."""
+    var out = String("[")
+    for i in range(len(xs)):
+        if i > 0:
+            out += ","
+        out += _json_str(xs[i])
+    out += "]"
+    return out^
+
+
 def preview_categories(text: String) raises -> String:
     """Dry-run EDITED categories text against the stored transactions WITHOUT
     saving — the validation loop: how many transactions each rule would tag, plus
@@ -877,10 +899,14 @@ def preview_categories(text: String) raises -> String:
     var reg = Registry(parse_rules(text))
     var trows = load_txn_rows()
     var counts = List[Int]()
-    var examples = List[List[String]]()
+    var examples = List[List[String]]()  # a few descriptions each rule DOES tag
+    var non_examples = List[
+        List[String]
+    ]()  # …and a few it does NOT — the sanity check
     for _i in range(len(reg.rules)):
         counts.append(0)
         examples.append(List[String]())
+        non_examples.append(List[String]())
     for t in range(len(trows)):
         var tg = reg.tags_for(trows[t].desc)  # deterministic only
         for i in range(len(reg.rules)):
@@ -888,6 +914,8 @@ def preview_categories(text: String) raises -> String:
                 counts[i] += 1
                 if len(examples[i]) < 5:
                     examples[i].append(trows[t].desc.copy())
+            elif len(non_examples[i]) < 5:
+                non_examples[i].append(trows[t].desc.copy())
     var out = String('{"tags":[')
     for i in range(len(reg.rules)):
         if i > 0:
@@ -895,12 +923,9 @@ def preview_categories(text: String) raises -> String:
         ref r = reg.rules[i]
         out += '{"name":' + _json_str(r.tag)
         out += ',"ml":' + ("true" if r.is_ml() else "false")
-        out += ',"count":' + String(counts[i]) + ',"examples":['
-        for e in range(len(examples[i])):
-            if e > 0:
-                out += ","
-            out += _json_str(examples[i][e])
-        out += "]}"
+        out += ',"count":' + String(counts[i])
+        out += ',"examples":' + _json_str_list(examples[i])
+        out += ',"nonExamples":' + _json_str_list(non_examples[i]) + "}"
     out += "]}"
     return out^
 
