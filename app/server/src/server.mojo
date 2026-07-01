@@ -196,8 +196,14 @@ def _web_root() -> String:
 
 
 def _config_dir() -> String:
-    """Where the index lives — mirrors vault/core index.mojo (_config_dir)."""
-    return getenv("HOME", ".") + "/.config/millfolio"
+    """The on-device DATA dir — MUST match vault/core `store.config_dir()`: the
+    macOS-native `~/Library/Application Support/Millfolio/data`, overridable via
+    `MILLFOLIO_DATA_DIR`. Feeds the vault view + the System page paths + stats/asks.
+    """
+    var d = String(getenv("MILLFOLIO_DATA_DIR", "").strip())
+    if d != "":
+        return d
+    return getenv("HOME", ".") + "/Library/Application Support/Millfolio/data"
 
 
 def _atoi(s: String) -> Int:
@@ -1667,6 +1673,13 @@ def on_connect(mut conn: WsConnection) raises:
 
 def main() raises:
     var cfg = load_config()
+
+    # Ensure the data dir exists (new macOS-native location; no migration) so the
+    # first stats/asks/controller write doesn't race a missing directory.
+    try:
+        makedirs(_config_dir(), exist_ok=True)
+    except:
+        pass
 
     # VAULT-ONLY: build the vault orchestrator over the resolved vault dir
     # (HEADGATE_VAULT_DIR / $MILLFOLIO_VAULT / $HEADGATE_DATA / ~/millfolio) and route
