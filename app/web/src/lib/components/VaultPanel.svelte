@@ -6,6 +6,7 @@
   import SubTabs from "./SubTabs.svelte";
   import TagsPanel from "./TagsPanel.svelte";
   import DefineTagModal from "./DefineTagModal.svelte";
+  import { touchIdAvailable, unlockWithTouchId } from "$lib/touchid";
 
   // Vault sub-tabs: Records | Tags | Files. `initialSub` lets /tags deep-link open
   // the Tags sub-tab (the tag pills link there).
@@ -94,7 +95,7 @@
     file: string;
     date: string;
     year: number; // statement year (0 = unknown → show the bare M/D)
-    amount: number;
+    amount: number | null; // null = withheld until the Touch-ID gate is passed
     direction: string;
     desc: string;
     tags: string[];
@@ -180,20 +181,30 @@
     if (sub === "records") loadTxns(); // Records is the default sub-tab
   });
 
-  // Lazily fetch the extracted transactions the first time Records is opened.
-  async function loadTxns() {
-    if (txLoaded) return;
+  // Amounts are WITHHELD by the server until the Touch-ID gate is passed (privacy
+  // screen). Until then every `amount` is null → the UI shows ••••; on unlock we
+  // re-fetch with ?amounts=1 to bring the real figures in.
+  let unlocked = $state(false);
+  let unlocking = $state(false);
+  let unlockErr = $state("");
+
+  // Fetch the extracted transactions — with amounts only once unlocked. `force`
+  // re-fetches even if already loaded (used right after unlocking).
+  async function loadTxns(force = false) {
+    if (txLoaded && !force) return;
     txLoaded = true;
     txLoading = true;
     txError = null;
     const base = apiBase();
     if (base === null) {
       txns = MOCK_TXNS;
+      unlocked = true; // sample data has nothing to protect
       txLoading = false;
       return;
     }
     try {
-      const res = await fetch(`${base}/api/transactions`, { headers: { accept: "application/json" } });
+      const q = unlocked ? "?amounts=1" : "";
+      const res = await fetch(`${base}/api/transactions${q}`, { headers: { accept: "application/json" } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       txns = ((await res.json()).transactions ?? []) as Txn[];
     } catch (e) {
@@ -201,6 +212,30 @@
     } finally {
       txLoading = false;
     }
+  }
+
+  const canTouchId = touchIdAvailable();
+  async function unlockAmounts() {
+    if (unlocking) return;
+    unlocking = true;
+    unlockErr = "";
+    try {
+      const ok = canTouchId ? await unlockWithTouchId() : false;
+      if (!ok) {
+        unlockErr = canTouchId
+          ? "Touch ID cancelled or unavailable."
+          : "Touch ID isn't available in this browser.";
+        return;
+      }
+      unlocked = true;
+      await loadTxns(true); // re-fetch, now with amounts
+    } finally {
+      unlocking = false;
+    }
+  }
+  function lockAmounts() {
+    unlocked = false;
+    loadTxns(true); // re-fetch without amounts (drop the figures from memory)
   }
   function showRecords() {
     sub = "records";
@@ -215,6 +250,20 @@
     if (!q) return all;
     return all.filter((t) => t.desc.toLowerCase().includes(q));
   });
+  // Totals over the CURRENTLY-SHOWN (filtered) records — only meaningful once
+  // unlocked (amounts present). Recomputed as you filter, so "spent on X" falls out.
+  const totals = $derived.by(() => {
+    let out = 0, inc = 0;
+    for (const t of filteredTxns) {
+      if (typeof t.amount === "number") {
+        if (t.direction === "debit") out += t.amount;
+        else inc += t.amount;
+      }
+    }
+    return { out, inc, net: inc - out };
+  });
+  const money = (n: number) =>
+    "$" + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Re-pull records + tags after a tag is created (retag changes the .tags column).
   async function reloadAfterTag() {
     txLoaded = false;
@@ -498,7 +547,25 @@
         {:else if txns && txns.length > 0}
           <div class="recbar">
             <input class="filter" type="text" placeholder="Filter records…" bind:value={recFilter} />
+            {#if !mock}
+              {#if unlocked}
+                <button type="button" class="lockbtn" onclick={lockAmounts} title="Hide amounts again">🔓 Hide amounts</button>
+              {:else}
+                <button type="button" class="lockbtn primary" onclick={unlockAmounts} disabled={unlocking}>
+                  {unlocking ? "Waiting for Touch ID…" : "🔒 Show amounts"}
+                </button>
+              {/if}
+            {/if}
           </div>
+          {#if unlockErr}<p class="banner warn">{unlockErr}</p>{/if}
+          {#if unlocked}
+            <div class="totals" role="status">
+              <span class="tl"><span class="k">Spent</span><span class="v out">{money(totals.out)}</span></span>
+              <span class="tl"><span class="k">Received</span><span class="v inc">{money(totals.inc)}</span></span>
+              <span class="tl"><span class="k">Net</span><span class="v" class:out={totals.net < 0}>{totals.net < 0 ? "-" : ""}{money(totals.net)}</span></span>
+              <span class="tnote">{filteredTxns.length} record{filteredTxns.length === 1 ? "" : "s"}{recFilter.trim() ? " (filtered)" : ""}</span>
+            </div>
+          {/if}
           <table class="records">
             <thead>
               <tr>
@@ -515,7 +582,9 @@
                 <tr>
                   <td class="date">{fmtDate(t)}</td>
                   <td class="desc">{t.desc}</td>
-                  <td class="num amt" class:out={t.direction === "debit"}>{fmtMoney(t.amount, t.direction)}</td>
+                  <td class="num amt" class:out={t.direction === "debit"}>
+                    {#if t.amount === null}<span class="masked" title="Locked — Show amounts">••••</span>{:else}{fmtMoney(t.amount, t.direction)}{/if}
+                  </td>
                   <td class="tags">
                     {#if t.tags.length > 0}
                       <span class="rchips">
@@ -581,6 +650,74 @@
   .recbar .filter:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  .lockbtn {
+    flex: none;
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .lockbtn:hover {
+    border-color: var(--accent);
+  }
+  .lockbtn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06101f;
+    font-weight: 600;
+  }
+  .lockbtn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .masked {
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    user-select: none;
+  }
+  .totals {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .totals .tl {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+  }
+  .totals .k {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+  }
+  .totals .v {
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .totals .v.inc {
+    color: var(--ok);
+  }
+  .totals .v.out {
+    color: var(--err);
+  }
+  .totals .tnote {
+    margin-left: auto;
+    font-size: 11.5px;
+    color: var(--text-dim);
   }
   .records .act {
     width: 58px;

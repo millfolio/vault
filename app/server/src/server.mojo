@@ -448,8 +448,8 @@ struct Api(Copyable, Handler, Movable):
         # the editable registry file. All in-process via vault.derive.store.
         if path == "/api/tags":
             return self.handle_tags()
-        if path == "/api/transactions":
-            return self.handle_transactions()
+        if path == "/api/transactions" or path.find("/api/transactions?") == 0:
+            return self.handle_transactions(req)
         if path == "/api/categories/preview":
             return self.handle_categories_preview(req)
         if path == "/api/categories":
@@ -600,11 +600,14 @@ struct Api(Copyable, Handler, Movable):
         prints. No engine spawn."""
         return _cors(ok_json(tags_report_json()))
 
-    def handle_transactions(self) raises -> Response:
-        """GET /api/transactions → {"transactions":[{file,date,amount,direction,
-        desc,tags}]} — the exact reconciled rows the app sums, each with its derived
-        category tags. In-process via vault.derive.store; no engine spawn."""
-        return _cors(ok_json(transactions_json()))
+    def handle_transactions(self, req: Request) raises -> Response:
+        """GET /api/transactions → {"transactions":[{file,date,year,amount,direction,
+        desc,tags}]} — the exact reconciled rows, each with its derived category tags.
+        The amounts are WITHHELD (`amount:null`) unless `?amounts=1` — the client only
+        passes that after the Touch-ID gate, so the figures never reach the browser
+        until unlocked. In-process via vault.derive.store; no engine spawn."""
+        var inc = req.query_param("amounts") == "1"
+        return _cors(ok_json(transactions_json(inc)))
 
     def handle_categories_get(self) raises -> Response:
         """GET /api/categories → {"text": <raw categories.txt>} for the editor
