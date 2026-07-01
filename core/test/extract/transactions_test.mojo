@@ -11,6 +11,7 @@ from vault.extract.transactions import (
     extract_transactions,
     statement_year,
     csv_transactions,
+    dedupe_txns,
     _money_tokens,
     _leading_date,
     Extraction,
@@ -488,6 +489,49 @@ def main() raises:
         len(csv_transactions(junk)) == 0, "csv: no date/amount cols → 0 records"
     )
     ok = (len(csv_transactions(junk)) == 0) and ok
+
+    # ── dedupe_txns: cross-file duplicate guard (overlapping imports) ────────────
+    def _tr(fa: String, d: String, amt: Float64, dir: String) -> TxnRow:
+        return TxnRow(
+            fa, d, amt, dir, d + dir + String(amt), List[String](), 0, 2026
+        )
+
+    # file_a (Jan–Feb) and file_b (Feb–Mar) OVERLAP on the 2/10 charge → dedup to one.
+    var dd = List[TxnRow]()
+    dd.append(_tr("file_a", "1/05", 10.0, "debit"))
+    dd.append(_tr("file_a", "2/10", 25.0, "debit"))  # the overlap
+    dd.append(
+        _tr("file_b", "2/10", 25.0, "debit")
+    )  # dup of the above (other file)
+    dd.append(_tr("file_b", "3/01", 99.0, "credit"))
+    var ded = dedupe_txns(dd)
+    _say(len(ded) == 3, "dedupe: overlapping 2/10 charge kept once (4→3)")
+    ok = (len(ded) == 3) and ok
+
+    # TWO identical charges within ONE statement are BOTH kept (not a dup).
+    var same = List[TxnRow]()
+    same.append(_tr("file_a", "4/02", 5.0, "debit"))
+    same.append(_tr("file_a", "4/02", 5.0, "debit"))  # a real second coffee
+    _say(
+        len(dedupe_txns(same)) == 2,
+        "dedupe: two identical charges in the SAME file are preserved",
+    )
+    ok = (len(dedupe_txns(same)) == 2) and ok
+
+    # max-per-file: file_b has MORE copies of the fingerprint → keep file_b's (2), not 1.
+    var mx = List[TxnRow]()
+    mx.append(_tr("file_a", "5/01", 7.0, "debit"))  # 1 copy in file_a
+    mx.append(
+        _tr("file_b", "5/01", 7.0, "debit")
+    )  # 2 copies in file_b (the fuller export)
+    mx.append(_tr("file_b", "5/01", 7.0, "debit"))
+    var mxd = dedupe_txns(mx)
+    _say(
+        len(mxd) == 2,
+        "dedupe: keeps the file with the MOST copies (2, not 1 or 3)",
+    )
+    ok = (len(mxd) == 2) and ok
+
     # tags column round-trips: empty / single / multi (and order preserved).
     var st = (
         len(back[0].tags) == 0

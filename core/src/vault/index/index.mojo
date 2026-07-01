@@ -48,6 +48,7 @@ from vault.extract.transactions import (
     csv_transactions,
     TxnRow,
     drop_aliases,
+    dedupe_txns,
     select_txns,
     texts_for_alias,
 )
@@ -854,6 +855,18 @@ def build_index(
     if len(trows) > txns_before:
         next_gen = cur_gen + 1
     _write_sidetable(st)
+    # Guard against double-counting: drop CROSS-FILE duplicate transactions (the same
+    # record in more than one file — overlapping CSV date ranges, a re-exported
+    # statement saved under a new name). Content-identical FILES are already skipped by
+    # the hash diff above; this catches the same records arriving via DIFFERENT files.
+    var pre_dedup = len(trows)
+    trows = dedupe_txns(trows)
+    if pre_dedup > len(trows):
+        print(
+            "  deduped "
+            + String(pre_dedup - len(trows))
+            + " duplicate transaction(s) across overlapping files"
+        )
     # Tag EVERY transaction (newly-extracted AND unchanged-file rows carried over)
     # from the current registry — one pure pass, the single source of tags.
     _ = retag(trows, reg)

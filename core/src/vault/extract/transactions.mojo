@@ -1298,6 +1298,63 @@ def drop_aliases(rows: List[TxnRow], drop: List[String]) raises -> List[TxnRow]:
     return out^
 
 
+def _txn_fingerprint(r: TxnRow) raises -> String:
+    """The cross-file identity of a transaction: date + year + description + amount
+    + direction. Two rows with the same fingerprint are the SAME transaction (as far
+    as we can tell without an issuer transaction id) — used to spot duplicates that
+    arrive in different files (e.g. overlapping Apple Card CSV exports)."""
+    # \x1f (unit separator) can't occur in these fields, so it's a safe joiner.
+    return (
+        r.date
+        + "\x1f"
+        + String(r.year)
+        + "\x1f"
+        + r.desc
+        + "\x1f"
+        + String(r.amount)
+        + "\x1f"
+        + r.direction
+    )
+
+
+def dedupe_txns(rows: List[TxnRow]) raises -> List[TxnRow]:
+    """Drop CROSS-FILE duplicate transactions — the same fingerprint appearing in
+    more than one indexed FILE (overlapping CSV date ranges, a re-exported statement
+    saved under a new name, etc.). A fingerprint is kept from only ONE file: the file
+    that carries the MOST copies of it (ties → the first such file in index order).
+
+    This is deliberately FILE-AWARE, not a global unique(): two legitimately-identical
+    charges within a SINGLE statement (same day, merchant, amount) are preserved,
+    while an overlapping re-import of that statement never double-counts — the kept
+    count for a fingerprint is `max` over files, not the sum. In-order, stable, pure.
+    """
+    # Pass 1: how many times each (fingerprint, file) pair occurs.
+    var fa_count = Dict[String, Int]()
+    for i in range(len(rows)):
+        var k = _txn_fingerprint(rows[i]) + "\x00" + rows[i].falias
+        if k in fa_count:
+            fa_count[k] = fa_count[k] + 1
+        else:
+            fa_count[k] = 1
+    # Pass 2: for each fingerprint, the winning file = the one with the most copies
+    # (first-seen wins a tie, since we only replace on a STRICTLY greater count).
+    var best_fa = Dict[String, String]()
+    var best_ct = Dict[String, Int]()
+    for i in range(len(rows)):
+        var fp = _txn_fingerprint(rows[i])
+        var c = fa_count[fp + "\x00" + rows[i].falias]
+        var cur = best_ct[fp] if fp in best_ct else 0
+        if c > cur:
+            best_ct[fp] = c
+            best_fa[fp] = rows[i].falias
+    # Pass 3: keep only rows from the winning file for their fingerprint.
+    var out = List[TxnRow]()
+    for i in range(len(rows)):
+        if best_fa[_txn_fingerprint(rows[i])] == rows[i].falias:
+            out.append(rows[i].copy())
+    return out^
+
+
 def select_txns(rows: List[TxnRow], file_alias: String) raises -> List[Txn]:
     """The Txns for one file (in stored order)."""
     var out = List[Txn]()
