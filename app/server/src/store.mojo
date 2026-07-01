@@ -59,6 +59,26 @@ def history_records_array(raw: String) -> String:
     return "[" + recs + "]"
 
 
+def delete_ask_records(raw: String, q: String) raises -> String:
+    """Return the JSONL history with every record for question `q` removed — backs
+    POST /api/history/delete (the recent-questions panel dedups by question, so a
+    delete removes all of that question's asks). Matches the exact `"q":<escaped>`
+    field; json_escape includes the closing quote, so a different question that
+    merely starts with the same text is never touched. Preserves line order + the
+    trailing newline."""
+    var needle = String('"q":') + json_escape(q)
+    var out = String("")
+    var lines = raw.split("\n")
+    for i in range(len(lines)):
+        var ln = String(lines[i])
+        if String(ln.strip()).byte_length() == 0:
+            continue
+        if ln.find(needle) != -1:
+            continue  # a record for this question — drop it
+        out += ln + "\n"
+    return out^
+
+
 def system_json(
     home: String,
     version: String,

@@ -140,8 +140,27 @@
   // Pick a past question → drop it into the box to edit/resend (non-destructive).
   function pickRecent(q: string) {
     draft = q;
-    showHistory = false;
+    // Focus FIRST — focusing fires the input's onfocus (which would re-open the
+    // panel), so close it AFTER so "Ask again" actually dismisses the list.
     inputEl?.focus();
+    showHistory = false;
+  }
+  // Remove a question from history — from the local list + cache AND (best-effort)
+  // the durable backend store, so it doesn't reappear on the next load.
+  async function deleteRecent(q: string) {
+    recent = recent.filter((r) => r.q !== q);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent.map((r) => r.q)));
+    } catch {}
+    if (recent.length === 0) showHistory = false;
+    if (demo) return;
+    try {
+      await fetch(`${apiBase()}/api/history/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q }),
+      });
+    } catch {} // best-effort — the local list is already updated
   }
 
   // Auto-approve countdown: an unresolved approval gets a 15s countdown then
@@ -317,8 +336,8 @@
         <button class="hist-close" type="button" aria-label="Close" onclick={() => (showHistory = false)}>×</button>
       </div>
       <ul>
-        {#each recent as r}
-          <li>
+        {#each recent as r (r.q)}
+          <li class="hist-li">
             {#if r.answer || r.code}
               <!-- backend record: expandable to its stored answer + generated program -->
               <details class="hist-rec">
@@ -336,6 +355,13 @@
             {:else}
               <button type="button" class="hist-item" title={r.q} onclick={() => pickRecent(r.q)}>{r.q}</button>
             {/if}
+            <button
+              type="button"
+              class="hist-del"
+              title="Remove from history"
+              aria-label="Remove this question from history"
+              onclick={(e) => { e.stopPropagation(); deleteRecent(r.q); }}
+            >×</button>
           </li>
         {/each}
       </ul>
@@ -556,6 +582,36 @@
     text-overflow: ellipsis;
   }
   .hist-item:hover { background: var(--surface); }
+  .hist-li {
+    position: relative;
+  }
+  /* delete affordance — revealed on row hover, top-right */
+  .hist-del {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 0.1s ease, color 0.1s ease;
+  }
+  .hist-li:hover .hist-del,
+  .hist-del:focus-visible {
+    opacity: 1;
+  }
+  .hist-del:hover {
+    color: var(--err, #f85149);
+  }
   /* backend record — expandable to its stored answer + generated program */
   .hist-rec {
     border-radius: var(--radius);

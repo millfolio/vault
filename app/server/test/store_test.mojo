@@ -6,7 +6,12 @@ comes back newest-first and skips blank lines; and that the /api/system blob car
 the expected data + log paths. Pure functions → fully deterministic, no fixtures.
 """
 
-from store import ask_record_line, history_records_array, system_json
+from store import (
+    ask_record_line,
+    history_records_array,
+    delete_ask_records,
+    system_json,
+)
 from json import loads
 
 
@@ -61,6 +66,26 @@ def main() raises:
     expect(p3 < p2 and p2 < p1, "newest-first ordering (3,2,1)")
     expect_eq(history_records_array(""), "[]", "empty file → []")
     expect_eq(history_records_array("\n  \n\n"), "[]", "blank-only → []")
+
+    # ── delete_ask_records: drop a question's records, exact match (no prefix bleak) ─
+    var hraw = (
+        '{"ts":1,"q":"gym"}\n'
+        + '{"ts":2,"q":"gym membership"}\n'  # must SURVIVE (not a prefix false-match)
+        + '{"ts":3,"q":"phone"}\n'
+        + '{"ts":4,"q":"gym"}\n'  # a second "gym" ask — also removed
+    )
+    var dres = delete_ask_records(hraw, "gym")
+    expect(dres.find('"q":"gym"') == -1, "both exact 'gym' records removed")
+    expect(
+        dres.find('"q":"gym membership"') != -1,
+        "'gym membership' survives (exact match, no prefix bleed)",
+    )
+    expect(dres.find('"q":"phone"') != -1, "unrelated 'phone' record kept")
+    expect_eq(
+        delete_ask_records('{"ts":1,"q":"a"}\n', "zzz"),
+        '{"ts":1,"q":"a"}\n',
+        "deleting a missing question is a no-op",
+    )
 
     # ── system_json: keys + $HOME-derived log paths + passed-in data paths ───────
     var sj = system_json(

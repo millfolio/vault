@@ -75,7 +75,12 @@ from events import (
     error_event,
     json_escape,
 )
-from store import ask_record_line, history_records_array, system_json
+from store import (
+    ask_record_line,
+    history_records_array,
+    delete_ask_records,
+    system_json,
+)
 from json import loads
 
 comptime DEFAULT_PORT = 10000
@@ -421,6 +426,8 @@ struct Api(Copyable, Handler, Movable):
         # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
         if path == "/api/stats":
             return self.handle_stats()
+        if path == "/api/history/delete":
+            return self.handle_history_delete(req)
         if path == "/api/history":
             return self.handle_history()
         if path == "/api/system":
@@ -514,6 +521,33 @@ struct Api(Copyable, Handler, Movable):
         except:
             pass  # missing file → empty history
         return _cors(ok_json('{"records":' + history_records_array(raw) + "}"))
+
+    def handle_history_delete(self, req: Request) raises -> Response:
+        """POST /api/history/delete {"q": …} → remove that question's records from
+        the durable `asks.jsonl` (the recent-questions panel dedups by question, so
+        this deletes the entry for good). Missing file / empty q is a no-op success.
+        Returns {"ok":true}."""
+        var q: String
+        try:
+            var j = loads(req.text())
+            q = j["q"].string_value()
+        except:
+            return _cors(bad_request('{"error":"expected {q}"}'))
+        if q == "":
+            return _cors(ok_json('{"ok":true}'))
+        var raw: String
+        try:
+            with open(_asks_path(), "r") as f:
+                raw = f.read()
+        except:
+            return _cors(ok_json('{"ok":true}'))  # nothing to delete
+        var filtered = delete_ask_records(raw, q)
+        try:
+            with open(_asks_path(), "w") as f:
+                f.write(filtered)
+        except:
+            return _cors(bad_request('{"error":"could not update history"}'))
+        return _cors(ok_json('{"ok":true}'))
 
     def handle_system(self) raises -> Response:
         """System info for the System tab: WHERE the data + logs live, so a user can
