@@ -1,8 +1,10 @@
 """Store — the on-device derived-attribute store + registry I/O.
 
-The `~/.config/millfolio/` files that back categorization: `categories.txt` (the
-tag registry — SOURCE OF TRUTH, seeded with the built-in defaults, see
-`vault.derive.categorize`) and the `.tags` column of `transactions.tsv`.
+The on-device DATA-dir files that back categorization (see `config_dir` —
+`~/Library/Application Support/Millfolio/data`, overridable via
+`MILLFOLIO_DATA_DIR`): `categories.txt` (the tag registry — SOURCE OF TRUTH,
+seeded with the built-in defaults, see `vault.derive.categorize`) and the `.tags`
+column of `transactions.tsv`.
 
 This module is deliberately **LanceDB-free** (it touches only those two files +
 pure helpers), so BOTH the `millfolio` CLI and the app server import it and call
@@ -10,7 +12,7 @@ the SAME functions in-process — no spawning a separate engine binary for tags 
 retag / category edits. The heavy index/embedding work stays in `vault.index`.
 """
 
-from std.os import getenv, mkdir, rmdir, remove
+from std.os import getenv, mkdir, rmdir, remove, makedirs
 from std.os.path import exists
 from std.ffi import external_call
 from std.time import perf_counter_ns
@@ -47,7 +49,24 @@ from vault.derive.ledger import (
 
 
 def config_dir() raises -> String:
-    return getenv("HOME", ".") + "/.config/millfolio"
+    """The on-device DATA dir — the index, extracted transactions, category rules,
+    materialization ledger, and usage/history stores. macOS-native home (matches the
+    install tree + keeps financial data out of a dotfiles-synced `~/.config`);
+    `MILLFOLIO_DATA_DIR` overrides it (the demo / tests pin their own)."""
+    var d = String(getenv("MILLFOLIO_DATA_DIR", "").strip())
+    if d != "":
+        return d
+    return getenv("HOME", ".") + "/Library/Application Support/Millfolio/data"
+
+
+def ensure_data_dir() raises:
+    """Create the data dir if it doesn't exist yet (a fresh location simply starts
+    empty — there is no migration from the old `~/.config/millfolio`). Best-effort so
+    it never crashes a write path."""
+    try:
+        makedirs(config_dir(), exist_ok=True)
+    except:
+        pass
 
 
 def txns_path() raises -> String:
@@ -83,6 +102,7 @@ def load_txn_rows() raises -> List[TxnRow]:
 
 
 def write_txn_rows(rows: List[TxnRow]) raises:
+    ensure_data_dir()
     with open(txns_path(), "w") as f:
         f.write(txn_rows_to_tsv(rows))
 
@@ -112,6 +132,7 @@ def _extract_checksum(text: String) raises -> String:
 def _write_categories(path: String, text: String):
     """Best-effort write of the categories file — never fail over it."""
     try:
+        ensure_data_dir()
         with open(path, "w") as f:
             f.write(text)
     except:
@@ -346,6 +367,7 @@ def load_ledger() raises -> List[RuleMarker]:
 
 
 def save_ledger(markers: List[RuleMarker]) raises:
+    ensure_data_dir()
     with open(ledger_path(), "w") as f:
         f.write(serialize_ledger(markers))
 
@@ -401,6 +423,7 @@ def _read_paused_until() raises -> Int64:
 
 
 def _write_controller(paused_until: Int64) raises:
+    ensure_data_dir()
     var status = String("paused") if paused_until > _epoch_s() else String(
         "idle"
     )

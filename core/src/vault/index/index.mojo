@@ -16,7 +16,8 @@ side-table (chunks.tsv), and the per-file manifest (real name, kind, size, hash,
 id range) lives in manifest.tsv. Both are LOCAL-ONLY: real names/text/hashes
 never reach the frontier model — search results expose only aliases.
 
-Layout (under ~/.config/millfolio):
+Layout (under the data dir — see store.config_dir, default
+~/Library/Application Support/Millfolio/data):
   index.db/      — the LanceDB database (table "chunks", dim 1024)
   chunks.tsv     — chunk_id <TAB> file_alias <TAB> escaped_text   (ids are SPARSE)
   manifest.tsv   — #meta <next_id> <next_alias> <source_dir> <next_gen>, one row per
