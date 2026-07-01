@@ -24,6 +24,7 @@ from vault.derive.store import (
     ml_materialize,
     tags_report,
     tags_report_json,
+    transactions_json,
     TagInfo,
 )
 from vault.index.manifest import build_manifest, FileInfo, _csv_columns

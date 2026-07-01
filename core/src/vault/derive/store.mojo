@@ -410,3 +410,30 @@ def tags_report_json() raises -> String:
         out += '"count":' + String(ti.count) + "}"
     out += "]}"
     return out^
+
+
+def transactions_json() raises -> String:
+    """`{"transactions":[{"file","date","amount":N,"direction","desc","tags":[…]}]}`
+    over the stored transactions in as-stored order — the payload the app server's
+    GET /api/transactions returns so the Vault → Records view can surface the exact
+    reconciled rows the app sums, each with its derived category tags. `amount` is a
+    bare JSON number (non-negative magnitude); the sign is in `direction`
+    (`"debit"` = money out, `"credit"` = money in)."""
+    var rows = load_txn_rows()
+    var out = String('{"transactions":[')
+    for i in range(len(rows)):
+        if i > 0:
+            out += ","
+        ref r = rows[i]
+        out += '{"file":' + _json_str(r.falias)
+        out += ',"date":' + _json_str(r.date)
+        out += ',"amount":' + String(r.amount)
+        out += ',"direction":' + _json_str(r.direction)
+        out += ',"desc":' + _json_str(r.desc) + ',"tags":['
+        for k in range(len(r.tags)):
+            if k > 0:
+                out += ","
+            out += _json_str(r.tags[k])
+        out += "]}"
+    out += "]}"
+    return out^
