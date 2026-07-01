@@ -196,10 +196,13 @@
     txLoaded = true;
     txLoading = true;
     txError = null;
+    // Sample data (dev) and the public demo have nothing to protect — the demo
+    // server serves amounts unconditionally, so treat it as already unlocked.
+    if (demo) unlocked = true;
     const base = apiBase();
     if (base === null) {
       txns = MOCK_TXNS;
-      unlocked = true; // sample data has nothing to protect
+      unlocked = true;
       txLoading = false;
       return;
     }
@@ -552,7 +555,7 @@
         {:else if txns && txns.length > 0}
           <div class="recbar">
             <input class="filter" type="text" placeholder="Filter records…" bind:value={recFilter} />
-            {#if !mock}
+            {#if !mock && !demo}
               {#if unlocked}
                 <button type="button" class="lockbtn" onclick={lockAmounts} title="Hide amounts again">🔓 Hide amounts</button>
               {:else}

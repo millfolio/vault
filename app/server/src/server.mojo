@@ -223,6 +223,16 @@ def _config_dir() -> String:
 # challenge is single-use (deleted on verify); the token carries a ~5-min expiry.
 
 
+def _is_demo() raises -> Bool:
+    """The public replay demo (port 10010, or MILLFOLIO_DEMO set). Its transactions
+    are SYNTHETIC + public-safe, and visitors have no Touch ID, so the amount gate is
+    bypassed there (amounts always shown). Never true for the real product (:10000).
+    """
+    if String(getenv("MILLFOLIO_DEMO", "").strip()) != "":
+        return True
+    return _port() == 10010
+
+
 def _wa_challenge_path() -> String:
     return _config_dir() + "/webauthn_challenge.txt"
 
@@ -814,8 +824,8 @@ struct Api(Copyable, Handler, Movable):
         carries a valid Touch-ID reveal token — so the figures never reach the browser
         until the gate is passed. In-process via vault.derive.store; no engine spawn.
         """
-        var inc = req.query_param("amounts") == "1" and self._reveal_authorized(
-            req
+        var inc = _is_demo() or (
+            req.query_param("amounts") == "1" and self._reveal_authorized(req)
         )
         return _cors(ok_json(transactions_json(inc)))
 
