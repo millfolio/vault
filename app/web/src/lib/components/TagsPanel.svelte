@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import MaterializationPanel from "./MaterializationPanel.svelte";
 
   // The Tags tab: the category tags stamped on your transactions at index time (so
   // "how much on phone" is a fast, exact filter). Edited INLINE here — one row per
@@ -166,6 +167,8 @@
   {:else if failed}
     <p class="muted">Tags unavailable — start millfolio with <code>mill start</code>.</p>
   {:else if !editing}
+    <!-- AI-tag materialization progress + controls (hidden when no AI rules). -->
+    <MaterializationPanel {demo} />
     <!-- ── read-only list ── -->
     <div class="list">
       {#each tags as t}

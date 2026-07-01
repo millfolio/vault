@@ -61,6 +61,9 @@ from vault.derive.store import (
     preview_categories,
     effective_tags,
     effective_tag_descriptions,
+    materialize_status_json,
+    ml_materialize_slice,
+    set_pause,
 )
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
@@ -445,6 +448,14 @@ struct Api(Copyable, Handler, Movable):
             if req.method == Method.POST:
                 return self.handle_categories_save(req)
             return self.handle_categories_get()
+        if path == "/api/materialize/status":
+            return self.handle_materialize_status()
+        if path == "/api/materialize/run":
+            return self.handle_materialize_run()
+        if path == "/api/materialize/pause":
+            return self.handle_materialize_pause(req)
+        if path == "/api/materialize/resume":
+            return self.handle_materialize_resume()
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -613,6 +624,56 @@ struct Api(Copyable, Handler, Movable):
         except:
             return _cors(bad_request('{"error":"expected {text}"}'))
         return _cors(ok_json(preview_categories(text)))
+
+    def handle_materialize_status(self) raises -> Response:
+        """GET /api/materialize/status → per-AI-tag materialization progress
+        (`{status,paused_until,perTag:[…],pendingTotal}`) for the Tags-tab
+        Materialization panel. Lock-free read; no engine call."""
+        return _cors(ok_json(materialize_status_json()))
+
+    def handle_materialize_run(self) raises -> Response:
+        """POST /api/materialize/run → run ONE bounded materialization slice (a
+        generation-batch) via the on-device engine, then return the fresh status.
+        The UI loops this until `pendingTotal` hits 0, so each call stays short and
+        shows progress. Non-blocking try-lock inside → returns changed:0 when
+        another writer holds it or materialization is paused."""
+        var changed = 0
+        try:
+            changed = ml_materialize_slice(_engine_url())
+        except e:
+            # Engine down / chat model not serving → best-effort, report 0 + status.
+            print("  materialize slice skipped: ", String(e), sep="")
+        return _cors(
+            ok_json(
+                '{"ok":true,"changed":'
+                + String(changed)
+                + ',"status":'
+                + materialize_status_json()
+                + "}"
+            )
+        )
+
+    def handle_materialize_pause(self, req: Request) raises -> Response:
+        """POST /api/materialize/pause {"seconds":N} → pause the between-questions
+        worker for N seconds (auto-resumes when it elapses). Returns the status.
+        """
+        var seconds: Int
+        try:
+            var j = loads(req.text())
+            seconds = Int(j["seconds"].int_value())
+        except:
+            return _cors(bad_request('{"error":"expected {seconds}"}'))
+        set_pause(seconds)
+        return _cors(
+            ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
+        )
+
+    def handle_materialize_resume(self) raises -> Response:
+        """POST /api/materialize/resume → clear any pause (resume now)."""
+        set_pause(0)
+        return _cors(
+            ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
+        )
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
@@ -885,6 +946,13 @@ def _epoch_s() -> Int64:
         unsafe_from_address=Int(0)
     )
     return external_call["time", Int64](null)
+
+
+def _engine_url() -> String:
+    """The on-device inference server's OpenAI-style root — where ML-tag
+    classification (`ml_materialize_slice`) POSTs its yes/no batches. Same env the
+    `millfolio` CLI reads, so the app and the CLI hit the one engine."""
+    return String(getenv("MILLFOLIO_LOCAL_URL", "http://127.0.0.1:8000/v1"))
 
 
 def _model_label() -> String:
@@ -1518,6 +1586,20 @@ def on_connect(mut conn: WsConnection) raises:
         )
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")
+        # Between-questions worker: with the run slot already released, opportunistically
+        # advance ML-tag materialization by ONE bounded generation-batch. Try-locked +
+        # pause-aware + best-effort (a down engine just no-ops), so it can never delay
+        # a question or fail the turn. Usually a fast no-op (nothing pending); it only
+        # does real work when there's a backlog (a newly-added AI rule, or first run
+        # after upgrade).
+        try:
+            var mchanged = ml_materialize_slice(_engine_url())
+            if mchanged > 0:
+                log(
+                    "[materialize] slice tagged " + String(mchanged) + " txn(s)"
+                )
+        except e:
+            log("[materialize] slice skipped: " + String(e))
     except e:
         conn.send_text(error_event(String(e)))
         if ticket >= 0:
