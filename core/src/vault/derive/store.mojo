@@ -10,8 +10,9 @@ the SAME functions in-process — no spawning a separate engine binary for tags 
 retag / category edits. The heavy index/embedding work stays in `vault.index`.
 """
 
-from std.os import getenv
+from std.os import getenv, mkdir, rmdir, remove
 from std.os.path import exists
+from std.ffi import external_call
 
 from vault.extract.transactions import TxnRow, tsv_to_txn_rows, txn_rows_to_tsv
 from vault.index.sha256 import sha256_hex
@@ -25,6 +26,20 @@ from vault.derive.categorize import (
     registry_to_text,
 )
 from vault.derive.classify import classify_batch
+from vault.derive.ledger import (
+    RuleMarker,
+    qhash,
+    is_pending,
+    is_ready,
+    count_pending,
+    parse_ledger,
+    serialize_ledger,
+    find_marker,
+    marker_done_gen,
+    upsert_marker,
+    drop_marker,
+    GEN_ABSENT,
+)
 
 
 # ── paths ─────────────────────────────────────────────────────────────────────
@@ -40,6 +55,18 @@ def txns_path() raises -> String:
 
 def categories_path() raises -> String:
     return config_dir() + "/categories.txt"
+
+
+def ledger_path() raises -> String:
+    return config_dir() + "/ml_ledger.tsv"
+
+
+def _ledger_lock_dir() raises -> String:
+    return config_dir() + "/ml_ledger.lock"
+
+
+def controller_path() raises -> String:
+    return config_dir() + "/materializer.json"
 
 
 # ── transactions side-table I/O ───────────────────────────────────────────────
@@ -147,12 +174,38 @@ def read_categories() raises -> String:
     return text^
 
 
+def _reconcile_ledger() raises:
+    """Drop ledger markers for any rule that is no longer an ACTIVE ML rule — so
+    removing or de-ML'ing a category (via the editor) purges its materialization
+    marker automatically (the cancel path). Its `.tags` are stripped by the retag
+    pass, since `retag` only carries over tags of rules still in the registry.
+    """
+    var reg = load_registry()
+    var markers = load_ledger()
+    if len(markers) == 0:
+        return
+    var kept = List[RuleMarker]()
+    for i in range(len(markers)):
+        var keep = False
+        for j in range(len(reg.rules)):
+            if reg.rules[j].is_ml() and reg.rules[j].tag == markers[i].rule:
+                keep = True
+                break
+        if keep:
+            kept.append(markers[i].copy())
+    if len(kept) != len(markers):
+        save_ledger(kept)
+
+
 def save_categories(text: String) raises -> Int:
     """Overwrite `categories.txt` with the editor's content (this makes the file
-    'touched' → authoritative) and re-tag the stored transactions. Returns the
-    number of transactions whose tags changed."""
+    'touched' → authoritative) and re-tag the stored transactions. Also reconciles
+    the materialization ledger (a removed/renamed ML rule loses its stale marker).
+    Returns the number of transactions whose tags changed."""
     _write_categories(categories_path(), text)
-    return effective_retag()
+    var changed = effective_retag()
+    _reconcile_ledger()
+    return changed
 
 
 # ── tags: names, materialization, report ──────────────────────────────────────
@@ -273,19 +326,366 @@ def ml_materialize_rows(
     return changed
 
 
-def ml_materialize(base_url: String) raises -> Int:
-    """Materialize ALL ML-rule tags over the stored transactions and persist —
-    backs `millfolio materialize` (a lazy on-demand pass, since ML is slow and
-    needs the engine up). Applies the deterministic tags first (preserving any
-    existing ML tags), then the ML rules via the engine. Returns rows changed.
+# ── ML materialization ledger: durable state, lock, controller ────────────────
+# The ledger (`ml_ledger.tsv`) is a per-rule completion marker keyed on the
+# insertion generation (`TxnRow.added_gen`); see `vault.derive.ledger` +
+# `QUERY_FLOW.md`. It is a CACHE — loss/corruption only costs re-work, never
+# correctness — so writes are plain overwrites (a torn write self-heals via
+# skip-malformed parsing) and the single-writer discipline is a best-effort
+# mkdir-based advisory lock.
+
+
+def load_ledger() raises -> List[RuleMarker]:
+    if not exists(ledger_path()):
+        return List[RuleMarker]()
+    var text: String
+    with open(ledger_path(), "r") as f:
+        text = f.read()
+    return parse_ledger(text)
+
+
+def save_ledger(markers: List[RuleMarker]) raises:
+    with open(ledger_path(), "w") as f:
+        f.write(serialize_ledger(markers))
+
+
+def try_lock() -> Bool:
+    """Acquire the materialization lock (atomic POSIX `mkdir`). Returns False if
+    another writer holds it — the app-server worker skips its tick, so a question
+    is never delayed. Best-effort: a lock leaked by a crashed process must be
+    cleared by hand (`rmdir ~/.config/millfolio/ml_ledger.lock`)."""
+    try:
+        mkdir(_ledger_lock_dir())
+        return True
+    except:
+        return False
+
+
+def unlock():
+    try:
+        rmdir(_ledger_lock_dir())
+    except:
+        pass
+
+
+def _epoch_s() -> Int64:
+    """Unix epoch seconds (time(2) with a NULL arg) — for the pause deadline."""
+    var null = UnsafePointer[NoneType, MutUntrackedOrigin](
+        unsafe_from_address=Int(0)
+    )
+    return external_call["time", Int64](null)
+
+
+def _read_paused_until() raises -> Int64:
+    """The `paused_until` epoch from the controller file (0 = not paused). The
+    file is tiny JSON; we scan for the numeric field rather than parse fully."""
+    if not exists(controller_path()):
+        return Int64(0)
+    var text: String
+    with open(controller_path(), "r") as f:
+        text = f.read()
+    var key = String('"paused_until":')
+    var at = text.find(key)
+    if at < 0:
+        return Int64(0)
+    var i = at + key.byte_length()
+    var b = text.as_bytes()
+    while i < len(b) and (Int(b[i]) == 32 or Int(b[i]) == 9):
+        i += 1
+    var v = Int64(0)
+    while i < len(b) and Int(b[i]) >= 48 and Int(b[i]) <= 57:
+        v = v * 10 + Int64(Int(b[i]) - 48)
+        i += 1
+    return v
+
+
+def _write_controller(paused_until: Int64) raises:
+    var status = String("paused") if paused_until > _epoch_s() else String(
+        "idle"
+    )
+    var out = String('{"status":"') + status + '","paused_until":'
+    out += String(paused_until) + "}\n"
+    with open(controller_path(), "w") as f:
+        f.write(out)
+
+
+def set_pause(seconds: Int) raises:
+    """Pause materialization for `seconds` from now; the workers no-op until it
+    elapses, then auto-resume. `seconds <= 0` resumes immediately."""
+    if seconds <= 0:
+        _write_controller(Int64(0))
+    else:
+        _write_controller(_epoch_s() + Int64(seconds))
+
+
+def is_paused() raises -> Bool:
+    return _read_paused_until() > _epoch_s()
+
+
+# ── ML materialization: the ledger-based, incremental, resumable drain ────────
+
+
+def _contains_int(xs: List[Int], v: Int) -> Bool:
+    for i in range(len(xs)):
+        if xs[i] == v:
+            return True
+    return False
+
+
+def _max_added_gen(rows: List[TxnRow]) -> Int:
+    var m = GEN_ABSENT
+    for i in range(len(rows)):
+        if rows[i].added_gen > m:
+            m = rows[i].added_gen
+    return m
+
+
+def _pending_gens(rows: List[TxnRow], mdg: Int) -> List[Int]:
+    """The distinct insertion generations still to classify for a rule at marker
+    watermark `mdg` (rows with `added_gen > mdg`), ascending — so the drain
+    advances the watermark one whole generation at a time (a watermark can't
+    express a partially-done generation)."""
+    var gens = List[Int]()
+    for t in range(len(rows)):
+        var g = rows[t].added_gen
+        if g > mdg and not _contains_int(gens, g):
+            gens.append(g)
+    # Selection sort ascending — the number of distinct generations (≈ index runs)
+    # is tiny.
+    for a in range(len(gens)):
+        var mi = a
+        for b in range(a + 1, len(gens)):
+            if gens[b] < gens[mi]:
+                mi = b
+        if mi != a:
+            var tmp = gens[a]
+            gens[a] = gens[mi]
+            gens[mi] = tmp
+    return gens^
+
+
+def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
+    """The core drain (caller holds the lock). Applies the deterministic tags
+    first (preserving cached ML tags), then for each ML rule classifies the
+    PENDING generations (`added_gen > done_gen`) in ascending order, adds the tag
+    where the model says yes, and advances the rule's marker one generation at a
+    time. `max_gen_groups > 0` bounds how many generation-batches run this call
+    (the between-questions worker passes 1); 0 drains everything (the CLI). Rows
+    that already carry the tag are skipped (their positives are cached), so a
+    re-pass only re-does what a generation genuinely needs. Returns rows changed.
     """
     var reg = load_registry()
     var rows = load_txn_rows()
-    var changed = retag(rows, reg)
-    changed += ml_materialize_rows(rows, reg, base_url, List[String]())
+    var markers = load_ledger()
+    var changed = retag(
+        rows, reg
+    )  # deterministic tags stay fresh; ML preserved
+    var max_gen = _max_added_gen(rows)
+    var groups_used = 0
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        if not r.is_ml():
+            continue
+        var cur = qhash(r.ml_prompt)
+        var mdg = marker_done_gen(markers, r.tag, cur)
+        var gens = _pending_gens(rows, mdg)
+        if len(gens) == 0:
+            # Nothing pending. Record the marker if it's stale/absent (e.g. an
+            # edited question over an already-empty pending set, or a fresh rule
+            # on an empty vault) so the readiness gate reflects reality.
+            if mdg == GEN_ABSENT:
+                upsert_marker(markers, r.tag, cur, max_gen)
+            continue
+        for gi in range(len(gens)):
+            if max_gen_groups > 0 and groups_used >= max_gen_groups:
+                break
+            var g = gens[gi]
+            var idxs = List[Int]()
+            var descs = List[String]()
+            for t in range(len(rows)):
+                if rows[t].added_gen == g and not _contains(
+                    rows[t].tags, r.tag
+                ):
+                    idxs.append(t)
+                    descs.append(rows[t].desc.copy())
+            if len(descs) > 0:
+                # The slow part — no lock is meant to span it (the CLI holds the
+                # lock for the whole drain; the worker's slice is bounded).
+                var verdicts = classify_batch(base_url, r.ml_prompt, descs)
+                for k in range(len(idxs)):
+                    if k < len(verdicts) and verdicts[k]:
+                        var row = rows[idxs[k]].copy()
+                        row.tags.append(r.tag.copy())
+                        rows[idxs[k]] = row^
+                        changed += 1
+                groups_used += 1
+            # Everything with added_gen <= g is now materialized for this rule.
+            upsert_marker(markers, r.tag, cur, g)
     if changed > 0:
         write_txn_rows(rows)
+    save_ledger(markers)
     return changed
+
+
+def ml_materialize(base_url: String) raises -> Int:
+    """Drain the WHOLE ML-materialization queue and persist — backs `millfolio
+    materialize`. Ledger-based: each true negative is classified once (the marker
+    remembers it), so re-runs after adding a statement or a new rule only do the
+    genuinely-new work. No-op (returns 0) if another writer holds the lock.
+    """
+    if not try_lock():
+        return 0
+    try:
+        var changed = _ml_drain_locked(base_url, 0)
+        unlock()
+        return changed
+    except e:
+        unlock()
+        raise e^
+
+
+def ml_materialize_slice(base_url: String) raises -> Int:
+    """One bounded generation-batch of materialization — the app-server's
+    between-questions worker. Non-blocking try-lock (skip if the CLI holds it) and
+    honors the pause deadline, so it can never delay a question. Returns rows
+    changed (0 when paused, locked, or nothing pending)."""
+    if is_paused():
+        return 0
+    if not try_lock():
+        return 0
+    try:
+        var changed = _ml_drain_locked(base_url, 1)
+        unlock()
+        return changed
+    except e:
+        unlock()
+        raise e^
+
+
+def ledger_note_materialized(
+    reg: Registry, rows: List[TxnRow], cur_gen: Int
+) raises:
+    """Called at index time AFTER the inline ML pass has classified the freshly
+    inserted generation (`cur_gen`) for every active ML rule. Advances each rule's
+    marker to `cur_gen` — but ONLY when the rule has no OLDER pending generation
+    (nothing below `cur_gen` left uncovered); otherwise the backlog (a newly-added
+    rule, or the first post-upgrade pass) is left for the drain. This is what keeps
+    a routine `mill index` from re-classifying the same negatives the drain would
+    otherwise redo every pass. Best-effort — skip silently if the ledger can't be
+    written."""
+    try:
+        var markers = load_ledger()
+        for i in range(len(reg.rules)):
+            ref r = reg.rules[i]
+            if not r.is_ml():
+                continue
+            var cur = qhash(r.ml_prompt)
+            var mdg = marker_done_gen(markers, r.tag, cur)
+            var older_pending = False
+            for t in range(len(rows)):
+                var g = rows[t].added_gen
+                if g > mdg and g < cur_gen:
+                    older_pending = True
+                    break
+            if not older_pending:
+                upsert_marker(markers, r.tag, cur, cur_gen)
+        save_ledger(markers)
+    except:
+        pass
+
+
+# ── readiness gate + materialization status (for codegen + the UI panel) ──────
+
+
+def ml_ready_tags() raises -> List[String]:
+    """The ML-rule tag names that are fully materialized at their current question
+    hash — safe for codegen to advertise as an exact `.tags` filter. A pending /
+    stale rule is withheld (see `codegen_tags_describe`) so a `"gym" in t.tags`
+    filter can never return a false empty over un-classified rows."""
+    var reg = load_registry()
+    var rows = load_txn_rows()
+    var markers = load_ledger()
+    var max_gen = _max_added_gen(rows)
+    var out = List[String]()
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        if not r.is_ml():
+            continue
+        var cur = qhash(r.ml_prompt)
+        var mdg = marker_done_gen(markers, r.tag, cur)
+        if is_ready(cur, mdg, cur, max_gen):
+            out.append(r.tag.copy())
+    return out^
+
+
+def codegen_tags_describe() raises -> String:
+    """`name <TAB> description` per line for the CODEGEN prompt (the readiness
+    gate): every deterministic tag, plus only the ML tags that are fully
+    materialized. Withholding a pending ML tag makes codegen classify inline (or
+    skip it) rather than filter an empty `.tags` and report a false "no X". Backs
+    `millfolio tags --describe`."""
+    var reg = load_registry()
+    var ready = ml_ready_tags()
+    var out = String("")
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        if r.is_ml() and not _contains(ready, r.tag):
+            continue  # pending / stale ML rule → withhold from the fast filter
+        out += r.tag + "\t" + r.description + "\n"
+    return out^
+
+
+def materialize_status_json() raises -> String:
+    """`{status, paused_until, perTag:[{tag,question,total,evaluated,pending,yes,
+    ready}], pendingTotal}` — the lock-free read backing GET /api/materialize/status
+    and the Tags-tab Materialization panel. `evaluated`/`pending` are derived from
+    the ledger watermark vs each row's `added_gen`; `yes` is the live `.tags`
+    count."""
+    var reg = load_registry()
+    var rows = load_txn_rows()
+    var markers = load_ledger()
+    var max_gen = _max_added_gen(rows)
+    var total = len(rows)
+    var paused_until = _read_paused_until()
+    var status = String("paused") if paused_until > _epoch_s() else String(
+        "idle"
+    )
+
+    # Per-rule insertion gens, once, for the pending counts.
+    var gens = List[Int]()
+    for t in range(len(rows)):
+        gens.append(rows[t].added_gen)
+
+    var pending_total = 0
+    var out = String('{"status":"') + status + '","paused_until":'
+    out += String(paused_until) + ',"perTag":['
+    var first = True
+    for i in range(len(reg.rules)):
+        ref r = reg.rules[i]
+        if not r.is_ml():
+            continue
+        var cur = qhash(r.ml_prompt)
+        var mdg = marker_done_gen(markers, r.tag, cur)
+        var pending = count_pending(gens, cur, mdg, cur)
+        var evaluated = total - pending
+        var ready = is_ready(cur, mdg, cur, max_gen)
+        var yes = 0
+        for t in range(len(rows)):
+            if _contains(rows[t].tags, r.tag):
+                yes += 1
+        pending_total += pending
+        if not first:
+            out += ","
+        first = False
+        out += '{"tag":' + _json_str(r.tag)
+        out += ',"question":' + _json_str(r.ml_prompt)
+        out += ',"total":' + String(total)
+        out += ',"evaluated":' + String(evaluated)
+        out += ',"pending":' + String(pending)
+        out += ',"yes":' + String(yes)
+        out += ',"ready":' + ("true" if ready else "false") + "}"
+    out += '],"pendingTotal":' + String(pending_total) + "}"
+    return out^
 
 
 @fieldwise_init

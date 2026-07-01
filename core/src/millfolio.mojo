@@ -20,9 +20,10 @@ from vault.index import (
     Chunk,
     vault_files,
     effective_tags,
-    effective_tag_descriptions,
     effective_retag,
     ml_materialize,
+    codegen_tags_describe,
+    materialize_status_json,
     tags_report_json,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
@@ -192,16 +193,10 @@ def main() raises:
         elif len(args) >= 3 and String(args[2]) == "--describe":
             # One tag per line, `name <TAB> description` (description may be
             # empty) — the codegen orchestrator formats this into the prompt so
-            # the model picks a tag by its scope, not just its name.
-            var names = effective_tags()
-            var descs = effective_tag_descriptions()
-            var out = String("")
-            for i in range(len(names)):
-                out += names[i] + "\t"
-                if i < len(descs):
-                    out += descs[i]
-                out += "\n"
-            print(out)
+            # the model picks a tag by its scope, not just its name. Applies the
+            # READINESS GATE: an ML tag not yet fully materialized is withheld so
+            # codegen never filters `.tags` on it and reports a false "no X".
+            print(codegen_tags_describe())
         else:
             var names = effective_tags()
             var out = String("")
@@ -223,14 +218,18 @@ def main() raises:
     elif cmd == "materialize":
         # Run the ML category rules (`<tag> : <question>`) over the stored
         # transactions via the on-device model — the fuzzy tail no keyword rule
-        # captures. Slow + needs the chat engine up, so it's a lazy on-demand pass
-        # (the deterministic tags are applied first).
-        var changed = ml_materialize(_local_url())
-        print(
-            "materialized — "
-            + String(changed)
-            + " transaction(s) updated from the category rules"
-        )
+        # captures. Ledger-based + incremental: each true negative is classified
+        # once (the marker remembers it), so a re-run only does genuinely-new work.
+        # `--status` prints the per-tag progress JSON without touching the engine.
+        if len(args) >= 3 and String(args[2]) == "--status":
+            print(materialize_status_json())
+        else:
+            var changed = ml_materialize(_local_url())
+            print(
+                "materialized — "
+                + String(changed)
+                + " transaction(s) updated from the category rules"
+            )
     else:
         print(
             "usage: millfolio"

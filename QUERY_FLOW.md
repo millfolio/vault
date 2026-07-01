@@ -186,27 +186,56 @@ ledger.
 6. **Idempotent re-classify.** Re-classifying a row that already carries the tag
    yields the same verdict → no drift. So delete-and-rebuild is always safe.
 
-### The ledger — one row per (transaction × ML rule)
+### The ledger — a per-rule completion marker keyed on insertion generation
 
-LanceDB-free side-table `~/.config/millfolio/ml_ledger.tsv`, header
-`# ml_ledger v1` (format versioning → discard + rebuild on mismatch):
+The naive "one row per (transaction × rule)" ledger is quadratic and, worse,
+stores a row per TRUE NEGATIVE — the common case ("I don't have a gym" → every
+txn a `no` row). Collapse it to **one marker per rule** by keying coverage on a
+monotonic **insertion generation**, not the transaction's date.
+
+**`added_gen` — a monotonic insertion counter.** Every transaction gets an
+`added_gen` assigned at index time from a persisted counter (next to the
+manifest's `next_id`/`next_alias`), incremented as rows are appended. It records
+INSERTION ORDER, decoupled from the transaction's `date`. This is the crux: a
+back-dated statement indexed today gets a HIGH `added_gen` (it was inserted late)
+→ correctly seen as pending, even though its date is old. A date high-water-mark
+would silently skip it — wrong.
+
+**The marker — `~/.config/millfolio/ml_ledger.tsv`**, header `# ml_ledger v1`
+(format versioning → discard + rebuild on mismatch). One line per ML rule:
 
 ```
-txn_hash   rule   qhash   verdict   ts
-a1b2…      gym    9f3a    yes       1782…
-c4d5…      gym    9f3a    no        1782…
+rule   qhash   done_gen
+gym    9f3a    412
+café   1b7e    412
 ```
 
-- **`txn_hash`** — the stable transaction id (the same hash the `.tags` side-table
-  keys on).
-- **`qhash`** — hash of the rule's question. Editing `is this a gym?` changes
-  `qhash`, so old rows stop counting as evaluated → that rule (only) re-queues.
-- **A row at the current `qhash` = evaluated;** no row = pending.
+- **`qhash`** — short hash of the rule's question. Editing `is this a gym?`
+  changes `qhash` → the marker no longer matches → that rule (only) fully
+  re-materializes from `done_gen = 0`.
+- **`done_gen`** — rule R is materialized for every row with
+  `added_gen <= done_gen` at this `qhash`. **Pending = rows with
+  `added_gen > done_gen`** (or a stale/absent `qhash`). After a pass completes,
+  `done_gen = max(added_gen)`.
 
-**The queue is DERIVED, not stored:**
-`pending = (active ML rules × transactions) − (ledger rows at current qhash)`.
-Nothing to keep in sync; self-heals after a crash mid-batch. Validation on load
-drops rows whose `txn_hash`/`rule`/`qhash` no longer exist (stale self-evicts).
+**Negatives are IMPLICIT** — the marker covers the whole `added_gen <= done_gen`
+range; positives live in `.tags`, everything else in-range is a materialized
+negative. So the mostly-negative case costs **O(1) per rule**, no per-negative
+rows. The durable footprint is a handful of marker lines, regardless of vault
+size.
+
+**The queue is DERIVED, not stored:** for each active ML rule, the pending set is
+`{ rows : added_gen > done_gen(rule, cur_qhash) }`. Nothing to keep in sync;
+self-heals after a crash mid-batch (a partial pass just leaves `done_gen` behind
+the true max → the tail re-queues). Mid-pass resume needs only a cursor, not
+per-txn rows: advance `done_gen` in-marker as batches commit.
+
+**Migration.** Pre-existing rows (written before `added_gen`) default to
+`added_gen = 0`; markers start absent (treated as `done_gen = -1`) → on first run
+EVERYTHING is pending and materializes exactly once, after which the marker
+tracks only the delta. Ledger loss re-materializes (negatives are derived facts —
+unavoidable), but that's a bounded one-time cost; the invariant holds:
+**ledger-is-a-cache.**
 
 ### The controller — runtime state
 
@@ -223,8 +252,9 @@ stored):
 
 - After each answered question (or on an idle tick): if `now >= paused_until` and
   `pending > 0`, take the batch of the next pending rule (~16 txns, `ML_BATCH`),
-  classify UNLOCKED via `classify_batch`, then under the flock append verdicts +
-  set `.tags` for the yeses. Bounded → always yields to the next real question.
+  classify UNLOCKED via `classify_batch`, then under the flock set `.tags` for the
+  yeses + advance the rule's `done_gen` past the batch. Bounded → always yields to
+  the next real question.
 - The app-server slice uses a **non-blocking try-lock** (skip this tick if the CLI
   holds it) so it can never delay a question.
 - `millfolio materialize` (CLI) drains the whole queue in one go; honors
@@ -237,7 +267,8 @@ stored):
 An ML tag advertised to codegen but NOT yet materialized is a hazard: codegen
 filters `"gym" in t.tags` → empty `.tags` → false "no gym spending." So:
 
-- A rule is **ready** iff `evaluated == total` at the current `qhash`.
+- A rule is **ready** iff `done_gen >= max(added_gen)` at the current `qhash`
+  (its marker covers every inserted row).
 - **Ready** → advertise it in the codegen tag list normally (fast filter).
 - **Pending** → advertise as `gym (pending)` (or withhold it) so codegen classifies
   INLINE meanwhile, exactly like the first time it was asked.
@@ -247,14 +278,15 @@ exact filter," and the gate falls out of the ledger for free.
 
 ### Operations
 
-- **Work-left estimate** — per tag: `evaluated = count(rule, qhash)`,
-  `total = #transactions`, plus the yes/no split → a progress bar + "N left".
-  ETA = `pending_pairs / ML_BATCH × throughput_ms_per_batch` (the controller keeps
+- **Work-left estimate** — per tag: `evaluated = #{rows : added_gen <= done_gen}`
+  at the current `qhash`, `total = #transactions`, `pending = total − evaluated`,
+  plus the `.tags` yes count → a progress bar + "N left".
+  ETA = `pending / ML_BATCH × throughput_ms_per_batch` (the controller keeps
   a rolling throughput, so the ETA tracks real engine speed).
 - **Cancel a tag + its remaining work** — because the queue is derived from ACTIVE
-  rules, removing the rule from `categories.txt` drops its pending pairs from the
-  queue instantly (no in-flight cancellation bookkeeping). Then purge its ledger
-  rows (`rule == gym`, atomic rewrite) and strip `gym` from `.tags`. The
+  rules, removing the rule from `categories.txt` drops its pending set from the
+  queue instantly (no in-flight cancellation bookkeeping). Then drop its marker
+  line (`rule == gym`, atomic rewrite) and strip `gym` from `.tags`. The
   keep-partial variant is a per-rule `enabled:false` flag — excluded from the
   active/pending set, existing decisions + tags retained.
 - **Pause for a time** — set `paused_until = now + duration`. Every worker checks it
@@ -269,21 +301,27 @@ now**; per AI tag a progress bar (`38/152 · 25%`), ready/pending badge, yes/no
 counts, and a **Cancel** (×) button; footer with total pending + ETA. Backed by:
 
 - `GET  /api/materialize/status` — `{status, paused_until, perTag:[{tag,question,
-  total,evaluated,yes,no,ready}], pendingTotal, etaMs}` (lock-free read).
+  total,evaluated,pending,yes,ready}], pendingTotal}` (lock-free read; backs
+  `millfolio materialize --status`).
 - `POST /api/materialize/pause {seconds}` / `.../resume`
-- `POST /api/materialize/run` — kick a slice / drain.
-- tag cancel — extends the existing category delete with a ledger purge + `.tags`
-  strip.
+- `POST /api/materialize/run` — kick a bounded slice / drain.
+- tag cancel — the existing category delete (editor save) reconciles the ledger:
+  `save_categories` drops the marker of any rule no longer an active ML rule, and
+  the retag pass strips its `.tags`.
 
-### Build order (each shippable on its own)
+### Build order (each shippable on its own) — STATUS
 
-1. **Readiness gate** (small, high value): withhold / mark `(pending)` an
-   unmaterialized ML tag so codegen never gets a false empty.
-2. **Decision ledger** + rewrite `ml_materialize` to derive the queue from it
-   (incremental, resumable, no re-work) — under the single flock, engine call
-   outside the lock.
-3. **Status / pause / cancel** endpoints + the Materialization UI panel; the
-   between-questions worker slice.
+1. ✅ **Readiness gate** — `store.codegen_tags_describe()` withholds an
+   un-materialized ML tag from `millfolio tags --describe`, so codegen never
+   filters `.tags` on it and returns a false empty.
+2. ✅ **Decision ledger** (`derive/ledger.mojo`, pure + unit-tested) + rewrite
+   `ml_materialize` to drain the queue from `added_gen > done_gen` incrementally
+   (each true negative classified once), under the advisory lock, classify outside
+   nothing that spans a held lock across writers. `ledger_note_materialized`
+   advances markers after the index-time inline pass so routine re-indexes don't
+   redo a generation.
+3. ✅ **Status / pause** endpoints + the Materialization UI panel + the
+   between-questions worker slice (`ml_materialize_slice`, try-lock, pause-aware).
 
 ## Storage
 
@@ -295,13 +333,21 @@ counts, and a **Cancel** (×) button; footer with total pending + ETA. Backed by
 - `index.db/` — LanceDB vector store (table `chunks`, dim 1024) for semantic
   search.
 - `chunks.tsv` — `chunk_id ⇥ file_alias ⇥ escaped_text` (backs `file_chunks()`).
-- `manifest.tsv` — per-file metadata.
+- `manifest.tsv` — per-file metadata; the `#meta` line carries `next_id`,
+  `next_alias`, `source_dir`, and **`next_gen`** (the monotonic insertion-generation
+  counter the ML ledger keys on).
 - **`transactions.tsv`** — one row per **reconciled** transaction:
-  `TxnRow(falias, date, amount, direction, desc)` (TSV = tab-separated; tabs
-  chosen because descriptions contain commas, and any literal tab/newline is
-  escaped). Extracted **once at index time**, only kept when it reconciles
-  against the statement's own arithmetic. Incremental: load → drop changed
-  aliases → re-extract changed → rewrite.
+  `TxnRow(falias, date, amount, direction, desc, tags, added_gen)` (TSV =
+  tab-separated; tabs chosen because descriptions contain commas, and any literal
+  tab/newline is escaped). Trailing columns are append-only for back-compat: legacy
+  5-col rows parse with no tags, 6-col rows as `added_gen = 0`. Extracted **once at
+  index time**, only kept when it reconciles against the statement's own arithmetic.
+  Incremental: load → drop changed aliases → re-extract changed → rewrite.
+- **`ml_ledger.tsv`** — the ML-materialization completion markers
+  (`# ml_ledger v1`, one `rule ⇥ qhash ⇥ done_gen` line per ML rule). A CACHE, not
+  truth (see the ML-materialization section). Guarded by a `mkdir`-based advisory
+  lock (`ml_ledger.lock`).
+- `materializer.json` — the controller/pause state (`{status, paused_until}`).
 
 Read path: `transactions(alias)` → `index.file_transactions(alias)` →
 in-memory filter. No model call; already exact.

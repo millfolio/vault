@@ -19,7 +19,7 @@ never reach the frontier model — search results expose only aliases.
 Layout (under ~/.config/millfolio):
   index.db/      — the LanceDB database (table "chunks", dim 1024)
   chunks.tsv     — chunk_id <TAB> file_alias <TAB> escaped_text   (ids are SPARSE)
-  manifest.tsv   — #meta <next_id> <next_alias> <source_dir>, then one row per
+  manifest.tsv   — #meta <next_id> <next_alias> <source_dir> <next_gen>, one row per
                    file: alias <TAB> name <TAB> kind <TAB> size <TAB> sha256
                    <TAB> id_start <TAB> chunk_count
 """
@@ -55,6 +55,7 @@ from vault.derive.store import (
     write_txn_rows,
     retag,
     ml_materialize_rows,
+    ledger_note_materialized,
 )
 
 
@@ -97,6 +98,11 @@ struct Manifest(Copyable, Movable):
     var next_id: Int  # next free chunk id (monotonic; ids are never reused)
     var next_alias: Int  # next free alias number (monotonic)
     var source_dir: String
+    # Next free INSERTION generation for transaction rows (monotonic). Each index
+    # run that adds transactions stamps them with the current value, then bumps it,
+    # so the ML-materialization ledger can tell late-inserted (back-dated) rows
+    # apart from ones a rule has already covered. See `TxnRow.added_gen`.
+    var next_gen: Int
 
 
 @fieldwise_init
@@ -371,13 +377,17 @@ def _drop_ranges(
 def _load_manifest() raises -> Manifest:
     var entries = List[FileEntry]()
     if not exists(_manifest_path()):
-        return Manifest(entries^, 0, 0, String(""))
+        return Manifest(entries^, 0, 0, String(""), 1)
     var text: String
     with open(_manifest_path(), "r") as f:
         text = f.read()
     var next_id = 0
     var next_alias = 0
     var source_dir = String("")
+    # Legacy manifests (no `next_gen` column) start the generation at 1, so their
+    # already-persisted rows (gen 0 from `tsv_to_txn_rows`) stay strictly below any
+    # generation assigned after the upgrade.
+    var next_gen = 1
     var lines = text.split("\n")
     for i in range(len(lines)):
         var line = String(lines[i])
@@ -389,6 +399,8 @@ def _load_manifest() raises -> Manifest:
                 next_id = _atoi(String(cols[1]))
                 next_alias = _atoi(String(cols[2]))
                 source_dir = _tsv_unescape(String(cols[3]))
+            if len(cols) >= 5:
+                next_gen = _atoi(String(cols[4]))
             continue
         if len(cols) < 7:
             continue
@@ -403,7 +415,7 @@ def _load_manifest() raises -> Manifest:
                 _atoi(String(cols[6])),
             )
         )
-    return Manifest(entries^, next_id, next_alias, source_dir^)
+    return Manifest(entries^, next_id, next_alias, source_dir^, next_gen)
 
 
 def index_manifest() raises -> List[FileInfo]:
@@ -457,6 +469,8 @@ def _write_manifest(m: Manifest) raises:
         + String(m.next_alias)
         + "\t"
         + _tsv_escape(m.source_dir)
+        + "\t"
+        + String(m.next_gen)
         + "\n"
     )
     for i in range(len(m.entries)):
@@ -579,6 +593,7 @@ def build_index(
     var old = man.entries.copy()
     var next_id = man.next_id
     var next_alias = man.next_alias
+    var next_gen = man.next_gen
 
     # Start clean when forced, or there's no manifest (clean machine / upgrade from
     # the pre-manifest format), or the vault dir changed — so ids/aliases can't
@@ -597,6 +612,7 @@ def build_index(
         old = List[FileEntry]()
         next_id = 0
         next_alias = 0
+        next_gen = 1
 
     # Current files (sorted, csv/pdf/md only) + their content hashes.
     var infos = manifest_for_files(allpaths)
@@ -726,6 +742,12 @@ def build_index(
         )
     )
 
+    # All transactions extracted in THIS index run share one insertion generation
+    # (`cur_gen`); it advances only if the run actually adds rows, so the ledger
+    # sees each re-index of new statements as a distinct, higher generation.
+    var cur_gen = next_gen
+    var txns_before = len(trows)
+
     # Embed only new + changed files; append to LanceDB + the side-table.
     for t in range(len(emb_idx)):
         var i = emb_idx[t]
@@ -760,6 +782,7 @@ def build_index(
                             tx.direction.copy(),
                             tx.desc.copy(),
                             List[String](),
+                            cur_gen,
                         )
                     )
 
@@ -803,6 +826,10 @@ def build_index(
     if len(del_starts) > 0:
         store.optimize()
 
+    # Advance the generation only if this run added transactions, so `next_gen`
+    # reflects the number of insertion epochs, not the number of index runs.
+    if len(trows) > txns_before:
+        next_gen = cur_gen + 1
     _write_sidetable(st)
     # Tag EVERY transaction (newly-extracted AND unchanged-file rows carried over)
     # from the current registry — one pure pass, the single source of tags.
@@ -824,9 +851,14 @@ def build_index(
                     + String(ml_changed)
                     + " transaction(s)"
                 )
+            # The freshly-inserted generation is now classified inline for every
+            # active ML rule → advance the ledger markers so the between-questions
+            # worker / `millfolio materialize` don't redo this generation's
+            # negatives (only advances rules with no older backlog).
+            ledger_note_materialized(reg, trows, cur_gen)
         except e:
             print("  (ML tag pass skipped: " + String(e) + ")")
-    _write_manifest(Manifest(new_entries^, next_id, next_alias, base))
+    _write_manifest(Manifest(new_entries^, next_id, next_alias, base, next_gen))
     print(
         "index updated — "
         + String(len(emb_idx))

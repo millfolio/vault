@@ -922,6 +922,12 @@ struct TxnRow(Copyable, Movable):
     var direction: String
     var desc: String
     var tags: List[String]
+    # Monotonic INSERTION generation, assigned at index time (see the manifest's
+    # `next_gen`) — the key the ML-materialization ledger uses to tell which rows a
+    # rule still needs classified, DECOUPLED from `date` so a back-dated statement
+    # indexed late is correctly seen as pending. Rows written before this column
+    # existed parse as gen 0 (see `tsv_to_txn_rows`).
+    var added_gen: Int
 
 
 def _tags_to_field(tags: List[String]) -> String:
@@ -950,8 +956,9 @@ def _field_to_tags(s: String) raises -> List[String]:
 
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
     """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc <TAB>
-    comma-joined-tags, one per line. The tags column may be empty; rows written
-    before tags existed parse with no tags (see `tsv_to_txn_rows`)."""
+    comma-joined-tags <TAB> added_gen, one per line. Trailing columns are
+    append-only for backward compatibility: rows written before `tags`/`added_gen`
+    existed parse with empty tags / gen 0 (see `tsv_to_txn_rows`)."""
     var out = String("")
     for i in range(len(rows)):
         ref r = rows[i]
@@ -967,6 +974,8 @@ def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
             + _esc(r.desc)
             + "\t"
             + _tags_to_field(r.tags)
+            + "\t"
+            + String(r.added_gen)
             + "\n"
         )
     return out^
@@ -983,10 +992,13 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
         if len(cols) < 5:
             continue
         # Backward-compatible: rows written before the tags column (5 fields)
-        # parse with no tags.
+        # parse with no tags; rows before added_gen (6 fields) parse as gen 0.
         var tags = List[String]()
         if len(cols) >= 6:
             tags = _field_to_tags(String(cols[5]))
+        var added_gen = 0
+        if len(cols) >= 7:
+            added_gen = atol(String(cols[6].strip()))
         rows.append(
             TxnRow(
                 _unesc(String(cols[0])),
@@ -995,6 +1007,7 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
                 String(cols[3]),
                 _unesc(String(cols[4])),
                 tags^,
+                added_gen,
             )
         )
     return rows^

@@ -284,6 +284,7 @@ def main() raises:
             String("credit"),
             String("Pay\tDay"),
             List[String](),  # no tags
+            0,  # added_gen
         )
     )
     rows.append(
@@ -294,6 +295,7 @@ def main() raises:
             String("debit"),
             String("Rent"),
             [String("phone")],  # single tag
+            3,  # added_gen
         )
     )
     rows.append(
@@ -304,6 +306,7 @@ def main() raises:
             String("debit"),
             String("Coffee"),
             [String("travel"), String("restaurant")],  # multi-valued
+            3,  # added_gen
         )
     )
     var back = tsv_to_txn_rows(txn_rows_to_tsv(rows))
@@ -311,9 +314,25 @@ def main() raises:
         len(back) == 3
         and back[0].desc == "Pay\tDay"
         and _close(back[1].amount, 800.0)
+        and back[0].added_gen == 0
+        and back[1].added_gen == 3
     )
-    _say(sr, "transactions: TSV round-trips (incl. an escaped tab in desc)")
+    _say(
+        sr, "transactions: TSV round-trips (incl. an escaped tab in desc + gen)"
+    )
     ok = sr and ok
+
+    # Backward-compat: a legacy 6-column row (no added_gen) parses as gen 0.
+    var legacy = tsv_to_txn_rows(
+        String("file_0\t4/02\t500.0\tcredit\tPay\tphone\n")
+    )
+    _say(
+        len(legacy) == 1
+        and legacy[0].added_gen == 0
+        and legacy[0].tags[0] == "phone",
+        "transactions: legacy 6-col row parses as gen 0",
+    )
+    ok = (len(legacy) == 1 and legacy[0].added_gen == 0) and ok
     # tags column round-trips: empty / single / multi (and order preserved).
     var st = (
         len(back[0].tags) == 0
