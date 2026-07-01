@@ -6,7 +6,7 @@
   import SubTabs from "./SubTabs.svelte";
   import TagsPanel from "./TagsPanel.svelte";
   import DefineTagModal from "./DefineTagModal.svelte";
-  import { touchIdAvailable, unlockWithTouchId } from "$lib/touchid";
+  import { touchIdAvailable, unlockAmounts as webauthnUnlock } from "$lib/touchid";
 
   // Vault sub-tabs: Records | Tags | Files. `initialSub` lets /tags deep-link open
   // the Tags sub-tab (the tag pills link there).
@@ -187,6 +187,7 @@
   let unlocked = $state(false);
   let unlocking = $state(false);
   let unlockErr = $state("");
+  let revealToken = ""; // the server-issued bearer token that authorizes ?amounts=1
 
   // Fetch the extracted transactions — with amounts only once unlocked. `force`
   // re-fetches even if already loaded (used right after unlocking).
@@ -204,7 +205,9 @@
     }
     try {
       const q = unlocked ? "?amounts=1" : "";
-      const res = await fetch(`${base}/api/transactions${q}`, { headers: { accept: "application/json" } });
+      const headers: Record<string, string> = { accept: "application/json" };
+      if (unlocked && revealToken) headers.Authorization = `Bearer ${revealToken}`;
+      const res = await fetch(`${base}/api/transactions${q}`, { headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       txns = ((await res.json()).transactions ?? []) as Txn[];
     } catch (e) {
@@ -220,21 +223,23 @@
     unlocking = true;
     unlockErr = "";
     try {
-      const ok = canTouchId ? await unlockWithTouchId() : false;
-      if (!ok) {
+      const token = canTouchId ? await webauthnUnlock() : null;
+      if (!token) {
         unlockErr = canTouchId
-          ? "Touch ID cancelled or unavailable."
+          ? "Touch ID cancelled, or verification failed."
           : "Touch ID isn't available in this browser.";
         return;
       }
+      revealToken = token;
       unlocked = true;
-      await loadTxns(true); // re-fetch, now with amounts
+      await loadTxns(true); // re-fetch, now with the reveal token → amounts
     } finally {
       unlocking = false;
     }
   }
   function lockAmounts() {
     unlocked = false;
+    revealToken = "";
     loadTxns(true); // re-fetch without amounts (drop the figures from memory)
   }
   function showRecords() {
