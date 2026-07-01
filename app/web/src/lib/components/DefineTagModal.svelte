@@ -34,7 +34,14 @@
   let msg = $state("");
   let creating = $state(false);
   let previewing = $state(false);
-  type Preview = { matched: number; evaluated: number; total: number; exact: boolean };
+  type Preview = {
+    matched: number;
+    evaluated: number;
+    total: number;
+    exact: boolean;
+    matchedExamples: string[];
+    unmatchedExamples: string[];
+  };
   let preview = $state<Preview | null>(null);
 
   // Re-seed each time the modal opens (prefill from a record, or blank).
@@ -71,7 +78,14 @@
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error ?? "preview failed");
-        preview = { matched: d.matched, evaluated: d.evaluated, total: d.total, exact: d.evaluated >= d.total };
+        preview = {
+          matched: d.matched,
+          evaluated: d.evaluated,
+          total: d.total,
+          exact: d.evaluated >= d.total,
+          matchedExamples: d.matchedExamples ?? [],
+          unmatchedExamples: d.unmatchedExamples ?? [],
+        };
       } else {
         // Keyword rule: exact, instant dry-run over the stored transactions.
         const text = `${cleanName(name) || "tag"} = ${v}\n`;
@@ -82,8 +96,14 @@
         });
         const d = await r.json();
         const t = (d.tags ?? [])[0];
-        const c = t ? t.count : 0;
-        preview = { matched: c, evaluated: 0, total: 0, exact: true };
+        preview = {
+          matched: t ? t.count : 0,
+          evaluated: 0,
+          total: 0,
+          exact: true,
+          matchedExamples: t?.examples ?? [],
+          unmatchedExamples: t?.nonExamples ?? [],
+        };
       }
     } catch (e) {
       msg = e instanceof Error ? e.message : "Preview failed.";
@@ -169,6 +189,23 @@
           </span>
         {/if}
       </div>
+
+      {#if preview && (preview.matchedExamples.length || preview.unmatchedExamples.length)}
+        <div class="examples">
+          {#if preview.matchedExamples.length}
+            <div class="exgroup">
+              <span class="exlabel ok">would tag</span>
+              {#each preview.matchedExamples as e}<div class="exrow">{e}</div>{/each}
+            </div>
+          {/if}
+          {#if preview.unmatchedExamples.length}
+            <div class="exgroup">
+              <span class="exlabel no">wouldn’t</span>
+              {#each preview.unmatchedExamples as e}<div class="exrow">{e}</div>{/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       {#if msg}<p class="msg">{msg}</p>{/if}
 
@@ -268,6 +305,43 @@
   }
   .pv .dim {
     color: var(--text-dim);
+  }
+  .examples {
+    display: flex;
+    gap: 14px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .exgroup {
+    flex: 1;
+    min-width: 140px;
+  }
+  .exlabel {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+    color: var(--text-dim);
+  }
+  .exlabel.ok {
+    color: var(--ok);
+  }
+  .exlabel.no {
+    color: var(--text-dim);
+  }
+  .exrow {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    padding: 2px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .exgroup .exrow {
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+    margin-bottom: 2px;
   }
   .msg {
     margin: 6px 0 0;
