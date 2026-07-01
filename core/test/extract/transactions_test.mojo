@@ -9,6 +9,7 @@ format-agnostic token scanners (money `.dd` filter, date-token rejection)."""
 
 from vault.extract.transactions import (
     extract_transactions,
+    statement_year,
     _money_tokens,
     _leading_date,
     Extraction,
@@ -285,6 +286,7 @@ def main() raises:
             String("Pay\tDay"),
             List[String](),  # no tags
             0,  # added_gen
+            0,  # year (unknown)
         )
     )
     rows.append(
@@ -296,6 +298,7 @@ def main() raises:
             String("Rent"),
             [String("phone")],  # single tag
             3,  # added_gen
+            2026,  # year
         )
     )
     rows.append(
@@ -307,6 +310,7 @@ def main() raises:
             String("Coffee"),
             [String("travel"), String("restaurant")],  # multi-valued
             3,  # added_gen
+            2025,  # year
         )
     )
     var back = tsv_to_txn_rows(txn_rows_to_tsv(rows))
@@ -316,6 +320,9 @@ def main() raises:
         and _close(back[1].amount, 800.0)
         and back[0].added_gen == 0
         and back[1].added_gen == 3
+        and back[0].year == 0
+        and back[1].year == 2026
+        and back[2].year == 2025
     )
     _say(
         sr, "transactions: TSV round-trips (incl. an escaped tab in desc + gen)"
@@ -333,6 +340,51 @@ def main() raises:
         "transactions: legacy 6-col row parses as gen 0",
     )
     ok = (len(legacy) == 1 and legacy[0].added_gen == 0) and ok
+    # And a legacy 7-column row (added_gen, no year) parses as year 0.
+    var legacy7 = tsv_to_txn_rows(
+        String("file_0\t4/02\t500.0\tcredit\tPay\tphone\t5\n")
+    )
+    _say(
+        len(legacy7) == 1
+        and legacy7[0].added_gen == 5
+        and legacy7[0].year == 0,
+        "transactions: legacy 7-col row parses as year 0",
+    )
+    ok = (len(legacy7) == 1 and legacy7[0].year == 0) and ok
+
+    # ── statement_year: pull the year from the header/period, not the M/D rows ──
+    var yr_period = statement_year(
+        String(
+            "Wells Fargo Checking\nStatement period 04/01/2026 - 04/30/2026\n"
+            "4/02  Deposit  500.00\n4/10  Rent  800.00\n"
+        )
+    )
+    _say(
+        yr_period == 2026, "statement_year: reads 2026 from an M/D/YYYY period"
+    )
+    ok = (yr_period == 2026) and ok
+
+    var yr_iso = statement_year(
+        String("Closing date 2025-03-31\n3/15 Coffee\n")
+    )
+    _say(yr_iso == 2025, "statement_year: reads 2025 from a YYYY-MM-DD date")
+    ok = (yr_iso == 2025) and ok
+
+    var yr_mode = statement_year(
+        String(
+            "Account 2019384756\nApril 30, 2026\nperiod ending 2026\n"
+            "4/05 Store 12.00\n"
+        )
+    )
+    # The date-context 2026 (after ", " and standalone) wins over the account run.
+    _say(yr_mode == 2026, "statement_year: mode ignores an account digit-run")
+    ok = (yr_mode == 2026) and ok
+
+    var yr_none = statement_year(
+        String("4/02 Deposit 500.00\n4/10 Rent 800.00\n")
+    )
+    _say(yr_none == 0, "statement_year: no year present → 0 (row keeps M/D)")
+    ok = (yr_none == 0) and ok
     # tags column round-trips: empty / single / multi (and order preserved).
     var st = (
         len(back[0].tags) == 0

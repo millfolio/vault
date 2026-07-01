@@ -743,6 +743,81 @@ def _ending_balance(text_lower: String) raises -> Float64:
     return -1.0
 
 
+def _bump(mut vals: List[Int], mut counts: List[Int], v: Int):
+    for i in range(len(vals)):
+        if vals[i] == v:
+            counts[i] += 1
+            return
+    vals.append(v)
+    counts.append(1)
+
+
+def _mode(vals: List[Int], counts: List[Int]) -> Int:
+    """The most-frequent value (ties broken by first-seen), or 0 if empty."""
+    var best = 0
+    var best_n = 0
+    for i in range(len(vals)):
+        if counts[i] > best_n:
+            best_n = counts[i]
+            best = vals[i]
+    return best
+
+
+def statement_year(text: String) -> Int:
+    """Best-effort statement YEAR from a document's text (0 = none found). The year
+    lives in the header / period / footer, not on the `M/D` transaction rows, so we
+    scan for standalone 4-digit years (2000–2099) and prefer those sitting in a DATE
+    context — next to a `/`, `-`, or `, ` (covering `M/D/YYYY`, `YYYY-MM-DD`, and
+    `Month D, YYYY`). The most frequent such year wins: a statement repeats its year
+    in the header, period line, and footer, so the mode is robust against a stray
+    account-number digit-run. Falls back to the mode of ALL standalone 20xx tokens,
+    else 0 (→ the row keeps its bare `M/D`)."""
+    var b = text.as_bytes()
+    var n = len(b)
+    var ctx_v = List[Int]()
+    var ctx_c = List[Int]()
+    var any_v = List[Int]()
+    var any_c = List[Int]()
+    var i = 0
+    while i < n:
+        var c = Int(b[i])
+        if c < 48 or c > 57:
+            i += 1
+            continue
+        # A maximal digit run [i, j).
+        var j = i
+        while j < n and Int(b[j]) >= 48 and Int(b[j]) <= 57:
+            j += 1
+        if j - i == 4:
+            var v = (
+                (Int(b[i]) - 48) * 1000
+                + (Int(b[i + 1]) - 48) * 100
+                + (Int(b[i + 2]) - 48) * 10
+                + (Int(b[i + 3]) - 48)
+            )
+            if v >= 2000 and v <= 2099:
+                _bump(any_v, any_c, v)
+                var prev = Int(b[i - 1]) if i > 0 else -1
+                var prev2 = Int(b[i - 2]) if i >= 2 else -1
+                var nxt = Int(b[j]) if j < n else -1
+                # 47 '/'  45 '-'  44 ','  32 ' '
+                var is_ctx = (
+                    prev == 47
+                    or prev == 45
+                    or prev == 44
+                    or nxt == 47
+                    or nxt == 45
+                    or (prev == 32 and prev2 == 44)
+                )
+                if is_ctx:
+                    _bump(ctx_v, ctx_c, v)
+        i = j
+    var y = _mode(ctx_v, ctx_c)
+    if y > 0:
+        return y
+    return _mode(any_v, any_c)
+
+
 def extract_transactions(text: String) raises -> Extraction:
     """Extract + reconcile the transactions in one statement's text.
 
@@ -928,6 +1003,11 @@ struct TxnRow(Copyable, Movable):
     # indexed late is correctly seen as pending. Rows written before this column
     # existed parse as gen 0 (see `tsv_to_txn_rows`).
     var added_gen: Int
+    # The statement YEAR (e.g. 2026), detected once per document at index time —
+    # `date` itself is only the raw `M/D` token the statement prints, so the year
+    # is stored alongside it for display. 0 = unknown (older rows, or a statement
+    # with no detectable year). See `statement_year`.
+    var year: Int
 
 
 def _tags_to_field(tags: List[String]) -> String:
@@ -956,9 +1036,10 @@ def _field_to_tags(s: String) raises -> List[String]:
 
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
     """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc <TAB>
-    comma-joined-tags <TAB> added_gen, one per line. Trailing columns are
-    append-only for backward compatibility: rows written before `tags`/`added_gen`
-    existed parse with empty tags / gen 0 (see `tsv_to_txn_rows`)."""
+    comma-joined-tags <TAB> added_gen <TAB> year, one per line. Trailing columns
+    are append-only for backward compatibility: rows written before
+    `tags`/`added_gen`/`year` existed parse with empty tags / gen 0 / year 0 (see
+    `tsv_to_txn_rows`)."""
     var out = String("")
     for i in range(len(rows)):
         ref r = rows[i]
@@ -976,6 +1057,8 @@ def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
             + _tags_to_field(r.tags)
             + "\t"
             + String(r.added_gen)
+            + "\t"
+            + String(r.year)
             + "\n"
         )
     return out^
@@ -992,13 +1075,17 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
         if len(cols) < 5:
             continue
         # Backward-compatible: rows written before the tags column (5 fields)
-        # parse with no tags; rows before added_gen (6 fields) parse as gen 0.
+        # parse with no tags; rows before added_gen (6 fields) parse as gen 0;
+        # rows before year (7 fields) parse as year 0.
         var tags = List[String]()
         if len(cols) >= 6:
             tags = _field_to_tags(String(cols[5]))
         var added_gen = 0
         if len(cols) >= 7:
             added_gen = atol(String(cols[6].strip()))
+        var year = 0
+        if len(cols) >= 8:
+            year = atol(String(cols[7].strip()))
         rows.append(
             TxnRow(
                 _unesc(String(cols[0])),
@@ -1008,6 +1095,7 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
                 _unesc(String(cols[4])),
                 tags^,
                 added_gen,
+                year,
             )
         )
     return rows^

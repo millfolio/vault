@@ -13,6 +13,7 @@ retag / category edits. The heavy index/embedding work stays in `vault.index`.
 from std.os import getenv, mkdir, rmdir, remove
 from std.os.path import exists
 from std.ffi import external_call
+from std.time import perf_counter_ns
 
 from vault.extract.transactions import TxnRow, tsv_to_txn_rows, txn_rows_to_tsv
 from vault.index.sha256 import sha256_hex
@@ -25,7 +26,7 @@ from vault.derive.categorize import (
     rules_canon,
     registry_to_text,
 )
-from vault.derive.classify import classify_batch
+from vault.derive.classify import classify_batch, ML_BATCH
 from vault.derive.ledger import (
     RuleMarker,
     qhash,
@@ -688,6 +689,97 @@ def materialize_status_json() raises -> String:
     return out^
 
 
+# ── search / define: AI-rule preview + add a category (the unified search bar) ─
+
+
+def preview_ml_json(base_url: String, prompt: String) raises -> String:
+    """Time-boxed (~5s) preview of an AI rule (`tag : prompt`) WITHOUT persisting
+    anything — no `.tags`, no ledger, no materialization. Classifies stored
+    transactions with `prompt` (in insertion order) until the budget elapses, then
+    reports how many of the SAMPLE matched. The caller projects a total from
+    `matched / evaluated`. This is the "evaluate for 5 seconds, show the count"
+    step before the user commits to creating the tag. Returns
+    `{"matched":M,"evaluated":E,"total":T}`."""
+    var rows = load_txn_rows()
+    var total = len(rows)
+    comptime BUDGET_NS = 5_000_000_000  # ~5 seconds
+    var start = perf_counter_ns()
+    var evaluated = 0
+    var matched = 0
+    var i = 0
+    while i < total:
+        if perf_counter_ns() - start >= BUDGET_NS:
+            break
+        var end = i + ML_BATCH
+        if end > total:
+            end = total
+        var descs = List[String]()
+        for k in range(i, end):
+            descs.append(rows[k].desc.copy())
+        var verdicts = classify_batch(base_url, prompt, descs)
+        for k in range(len(verdicts)):
+            evaluated += 1
+            if verdicts[k]:
+                matched += 1
+        i = end
+    return (
+        '{"matched":'
+        + String(matched)
+        + ',"evaluated":'
+        + String(evaluated)
+        + ',"total":'
+        + String(total)
+        + "}"
+    )
+
+
+def _sanitize_tag(s: String) -> String:
+    """A tag name can't hold the registry separators (`,` `=` `:` parens) or a
+    tab/newline; strip them and trim (mirrors the editor's own cleaning)."""
+    var out = String("")
+    var p = s.unsafe_ptr()
+    for i in range(s.byte_length()):
+        var c = Int(p[i])
+        # , = : ( ) tab newline cr
+        if (
+            c == 44
+            or c == 61
+            or c == 58
+            or c == 40
+            or c == 41
+            or c == 9
+            or c == 10
+            or c == 13
+        ):
+            continue
+        out += chr(c)
+    return String(out.strip())
+
+
+def add_category(name: String, keywords: String, prompt: String) raises -> Int:
+    """Append a new category rule to `categories.txt` and re-tag — the "Create tag"
+    action of the search/define bar. A non-empty `prompt` makes an AI rule
+    (`name : prompt`); otherwise a keyword rule (`name = keywords`). Returns the
+    number of transactions re-tagged (0 if the name is empty or nothing matched;
+    an AI rule matches 0 here — it materializes via the worker / `materialize`).
+    Reuses `save_categories`, so the ledger is reconciled too."""
+    var clean = _sanitize_tag(name)
+    if clean.byte_length() == 0:
+        return 0
+    var text = read_categories()
+    if text.byte_length() > 0 and not text.endswith("\n"):
+        text += "\n"
+    var q = String(prompt.strip())
+    if q.byte_length() > 0:
+        text += clean + " : " + q + "\n"
+    else:
+        var kw = String(keywords.strip())
+        if kw.byte_length() == 0:
+            return 0
+        text += clean + " = " + kw + "\n"
+    return save_categories(text)
+
+
 @fieldwise_init
 struct TagInfo(Copyable, Movable):
     """One tag for the UI Tags panel: its name, the keywords that assign it (or
@@ -827,6 +919,7 @@ def transactions_json() raises -> String:
         ref r = rows[i]
         out += '{"file":' + _json_str(r.falias)
         out += ',"date":' + _json_str(r.date)
+        out += ',"year":' + String(r.year)
         out += ',"amount":' + String(r.amount)
         out += ',"direction":' + _json_str(r.direction)
         out += ',"desc":' + _json_str(r.desc) + ',"tags":['

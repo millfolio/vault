@@ -337,12 +337,14 @@ counts, and a **Cancel** (×) button; footer with total pending + ETA. Backed by
   `next_alias`, `source_dir`, and **`next_gen`** (the monotonic insertion-generation
   counter the ML ledger keys on).
 - **`transactions.tsv`** — one row per **reconciled** transaction:
-  `TxnRow(falias, date, amount, direction, desc, tags, added_gen)` (TSV =
+  `TxnRow(falias, date, amount, direction, desc, tags, added_gen, year)` (TSV =
   tab-separated; tabs chosen because descriptions contain commas, and any literal
   tab/newline is escaped). Trailing columns are append-only for back-compat: legacy
-  5-col rows parse with no tags, 6-col rows as `added_gen = 0`. Extracted **once at
-  index time**, only kept when it reconciles against the statement's own arithmetic.
-  Incremental: load → drop changed aliases → re-extract changed → rewrite.
+  5-col rows parse with no tags, 6-col rows as `added_gen = 0`, 7-col rows as
+  `year = 0`. `date` is the raw `M/D` the statement prints; `year` is the statement
+  year detected once per document (`statement_year`, 0 = unknown). Extracted **once
+  at index time**, only kept when it reconciles against the statement's own
+  arithmetic. Incremental: load → drop changed aliases → re-extract changed → rewrite.
 - **`ml_ledger.tsv`** — the ML-materialization completion markers
   (`# ml_ledger v1`, one `rule ⇥ qhash ⇥ done_gen` line per ML rule). A CACHE, not
   truth (see the ML-materialization section). Guarded by a `mkdir`-based advisory

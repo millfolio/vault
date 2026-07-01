@@ -43,6 +43,7 @@ from vault.index.sha256 import sha256_file_hex
 from vault.extract.transactions import (
     Txn,
     extract_transactions,
+    statement_year,
     TxnRow,
     drop_aliases,
     select_txns,
@@ -770,6 +771,9 @@ def build_index(
             )
             var ext = extract_transactions(txn_src)
             if ext.reconciled:
+                # The year lives in the statement header/period, not on the M/D
+                # rows — detect it once per document and stamp every row from it.
+                var syear = statement_year(txn_src)
                 for x in range(len(ext.txns)):
                     ref tx = ext.txns[x]
                     # Tags are filled by the single _retag pass before write (the
@@ -783,6 +787,7 @@ def build_index(
                             tx.desc.copy(),
                             List[String](),
                             cur_gen,
+                            syear,
                         )
                     )
 
