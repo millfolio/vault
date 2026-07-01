@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import SearchDefineBar from "./SearchDefineBar.svelte";
 
   // The Tags tab: the category tags stamped on your transactions at index time (so
   // "how much on phone" is a fast, exact filter). Edited INLINE here — one row per
@@ -147,6 +148,16 @@
     saving = false;
   }
 
+  // The search/define bar filters the tag list by name (String mode) and defines
+  // new tags (String → keyword rule, AI → AI rule) — the same bar as Vault/Records.
+  let tagFilter = $state("");
+  let tagMode = $state<"string" | "ai">("string");
+  const filteredTags = $derived.by(() => {
+    const q = tagFilter.trim().toLowerCase();
+    if (tagMode !== "string" || !q) return tags;
+    return tags.filter((t) => t.name.toLowerCase().includes(q));
+  });
+
   onMount(loadTags);
 </script>
 
@@ -173,6 +184,11 @@
         <span class="edithint">add your own, tweak the built-ins, or write a scope note — then it re-tags</span>
         {#if saveMsg}<span class="savemsg">{saveMsg}</span>{/if}
       </div>
+      <SearchDefineBar
+        stringPlaceholder="Filter tags…"
+        onfilter={(q, m) => { tagFilter = q; tagMode = m; }}
+        ontagcreated={loadTags}
+      />
     {/if}
 
     <!-- ── read-only list, styled like the Records table ── -->
@@ -188,7 +204,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each tags as t}
+          {#each filteredTags as t}
             <tr>
               <td class="tname">
                 <span class="name">{t.name}</span>

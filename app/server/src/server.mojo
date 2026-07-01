@@ -64,6 +64,8 @@ from vault.derive.store import (
     materialize_status_json,
     ml_materialize_slice,
     set_pause,
+    preview_ml_json,
+    add_category,
 )
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
@@ -456,6 +458,10 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_materialize_pause(req)
         if path == "/api/materialize/resume":
             return self.handle_materialize_resume()
+        if path == "/api/tags/preview-ai":
+            return self.handle_tags_preview_ai(req)
+        if path == "/api/tags/add":
+            return self.handle_tags_add(req)
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -674,6 +680,58 @@ struct Api(Copyable, Handler, Movable):
         return _cors(
             ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
         )
+
+    def handle_tags_preview_ai(self, req: Request) raises -> Response:
+        """POST /api/tags/preview-ai {"prompt":…} → time-boxed (~5s) preview of an
+        AI rule over the stored transactions, WITHOUT persisting anything. Returns
+        {matched, evaluated, total} so the UI can show "≈N records would match"
+        before the user creates the tag."""
+        var prompt: String
+        try:
+            var j = loads(req.text())
+            prompt = j["prompt"].string_value()
+        except:
+            return _cors(bad_request('{"error":"expected {prompt}"}'))
+        if String(prompt.strip()) == "":
+            return _cors(bad_request('{"error":"empty prompt"}'))
+        try:
+            return _cors(ok_json(preview_ml_json(_engine_url(), prompt)))
+        except e:
+            return _cors(
+                bad_request(
+                    '{"error":"preview failed — is the engine up? '
+                    + _json_escape(String(e))
+                    + '"}'
+                )
+            )
+
+    def handle_tags_add(self, req: Request) raises -> Response:
+        """POST /api/tags/add {"name":…, "prompt"?:…, "keywords"?:…} → append a new
+        category rule (AI rule when `prompt` is set, else a keyword rule) to
+        categories.txt and re-tag. Returns {"ok":true,"retagged":N}. An AI rule
+        materializes afterwards via the worker / Materialize now."""
+        var name: String
+        var prompt: String
+        var keywords: String
+        try:
+            var j = loads(req.text())
+            name = j["name"].string_value()
+            try:
+                prompt = j["prompt"].string_value()
+            except:
+                prompt = String("")
+            try:
+                keywords = j["keywords"].string_value()
+            except:
+                keywords = String("")
+        except:
+            return _cors(
+                bad_request('{"error":"expected {name, prompt|keywords}"}')
+            )
+        if String(name.strip()) == "":
+            return _cors(bad_request('{"error":"empty name"}'))
+        var changed = add_category(name, keywords, prompt)
+        return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's

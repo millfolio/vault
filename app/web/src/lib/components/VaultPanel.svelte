@@ -3,6 +3,7 @@
   // from the local server's GET /api/vault. Read-only; refreshable.
   import { onMount } from "svelte";
   import SubTabs from "./SubTabs.svelte";
+  import SearchDefineBar from "./SearchDefineBar.svelte";
 
   interface VaultFile {
     alias: string;
@@ -83,17 +84,23 @@
   interface Txn {
     file: string;
     date: string;
+    year: number; // statement year (0 = unknown → show the bare M/D)
     amount: number;
     direction: string;
     desc: string;
     tags: string[];
   }
   const MOCK_TXNS: Txn[] = [
-    { file: "file_2", date: "4/03", amount: 85.0, direction: "debit", desc: "VERIZON WIRELESS", tags: ["phone"] },
-    { file: "file_2", date: "4/11", amount: 52.1, direction: "credit", desc: "PAYROLL DEPOSIT", tags: [] },
-    { file: "file_2", date: "4/18", amount: 128.44, direction: "debit", desc: "WHOLE FOODS MARKET", tags: ["groceries"] },
-    { file: "file_0", date: "4/22", amount: 410.0, direction: "debit", desc: "DELTA AIR LINES", tags: ["travel"] },
+    { file: "file_2", date: "4/03", year: 2026, amount: 85.0, direction: "debit", desc: "VERIZON WIRELESS", tags: ["phone"] },
+    { file: "file_2", date: "4/11", year: 2026, amount: 52.1, direction: "credit", desc: "PAYROLL DEPOSIT", tags: [] },
+    { file: "file_2", date: "4/18", year: 2026, amount: 128.44, direction: "debit", desc: "WHOLE FOODS MARKET", tags: ["groceries"] },
+    { file: "file_0", date: "4/22", year: 2026, amount: 410.0, direction: "debit", desc: "DELTA AIR LINES", tags: ["travel"] },
   ];
+
+  // The date with its statement year appended when known (4/03 → 4/03/2026).
+  function fmtDate(t: Txn): string {
+    return t.year > 0 ? `${t.date}/${t.year}` : t.date;
+  }
 
   // Files | Records sub-view switch inside the Vault tab.
   let sub = $state<"files" | "records">("files");
@@ -184,6 +191,22 @@
   function showRecords() {
     sub = "records";
     loadTxns();
+  }
+
+  // Live text-filter over the loaded records (the search/define bar, String mode).
+  let recFilter = $state("");
+  let recMode = $state<"string" | "ai">("string");
+  const filteredTxns = $derived.by(() => {
+    const all = txns ?? [];
+    const q = recFilter.trim().toLowerCase();
+    if (recMode !== "string" || !q) return all;
+    return all.filter((t) => t.desc.toLowerCase().includes(q));
+  });
+  // Re-pull records + tags after a tag is created (retag changes the .tags column).
+  async function reloadAfterTag() {
+    txLoaded = false;
+    await loadTxns();
+    await load();
   }
 
   // A signed, formatted amount: debit = money OUT (−), credit = money IN (+).
@@ -447,6 +470,13 @@
         {:else if txError}
           <p class="banner warn">Couldn't load transactions: {txError}</p>
         {:else if txns && txns.length > 0}
+          {#if !mock}
+            <SearchDefineBar
+              stringPlaceholder="Filter records…"
+              onfilter={(q, m) => { recFilter = q; recMode = m; }}
+              ontagcreated={reloadAfterTag}
+            />
+          {/if}
           <table class="records">
             <thead>
               <tr>
@@ -458,9 +488,9 @@
               </tr>
             </thead>
             <tbody>
-              {#each txns as t, i (i)}
+              {#each filteredTxns as t, i (i)}
                 <tr>
-                  <td class="date">{t.date}</td>
+                  <td class="date">{fmtDate(t)}</td>
                   <td class="desc">{t.desc}</td>
                   <td class="num amt" class:out={t.direction === "debit"}>{fmtMoney(t.amount, t.direction)}</td>
                   <td class="tags">
@@ -487,6 +517,9 @@
               {/each}
             </tbody>
           </table>
+          {#if filteredTxns.length === 0}
+            <p class="muted hint">No records match “{recFilter}”.</p>
+          {/if}
         {:else}
           <p class="muted empty">No transactions extracted yet — index statement files.</p>
         {/if}
