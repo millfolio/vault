@@ -87,8 +87,10 @@
       const desc = cleanDesc(r.description);
       const head = desc ? `${name} (${desc})` : name;
       if (r.isMl) {
+        // An AI rule's question IS its scope — never attach a separate description
+        // (it'd be redundant/confusing when displayed).
         const q = r.ml.trim();
-        if (q) out += `${head} : ${q}\n`;
+        if (q) out += `${name} : ${q}\n`;
       } else {
         const kw = r.kw
           .split(",")
@@ -173,7 +175,7 @@
             {#if t.ml}<span class="mltag">AI rule</span>{/if}
             <span class="count">{t.count} txn{t.count === 1 ? "" : "s"}</span>
           </div>
-          {#if t.description}<p class="desc">{t.description}</p>{/if}
+          {#if t.description && !t.ml}<p class="desc">{t.description}</p>{/if}
           {#if t.ml}
             <p class="mlq">“{t.ml}”</p>
           {:else}
@@ -212,12 +214,14 @@
             </label>
             <button type="button" class="del" title="Delete tag" aria-label="Delete tag" onclick={() => removeRow(i)}>×</button>
           </div>
-          <input
-            class="edesc"
-            placeholder="scope note (shown to the model) — e.g. pharmacies, doctors; NOT gyms"
-            bind:value={r.description}
-            spellcheck="false"
-          />
+          {#if !r.isMl}
+            <input
+              class="edesc"
+              placeholder="scope note (shown to the model) — e.g. pharmacies, doctors; NOT gyms"
+              bind:value={r.description}
+              spellcheck="false"
+            />
+          {/if}
           {#if r.isMl}
             <input
               class="ekw"
