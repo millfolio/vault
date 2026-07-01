@@ -147,7 +147,7 @@ def default_registry() -> Registry:
                 "xfinity mobile",
                 "metro by t-mobile",
             ],
-            "mobile phone carriers — your monthly cell-phone bill",
+            "mobile phone carriers - your monthly cell-phone bill",
         )
     )
     rules.append(
@@ -173,7 +173,7 @@ def default_registry() -> Registry:
                 "amtrak",
                 "hotel",
             ],
-            "flights, hotels, car rental, trains — trips away from home",
+            "flights, hotels, car rental, trains - trips away from home",
         )
     )
     rules.append(
@@ -196,7 +196,7 @@ def default_registry() -> Registry:
                 "sushi",
                 "diner",
             ],
-            "restaurants, cafés, coffee, and food delivery — dining out",
+            "restaurants, cafes, coffee, and food delivery - dining out",
         )
     )
     rules.append(
@@ -216,7 +216,7 @@ def default_registry() -> Registry:
                 "wegmans",
                 "sprouts",
             ],
-            "supermarkets & grocery stores — food shopping, not dining out",
+            "supermarkets & grocery stores - food shopping, not dining out",
         )
     )
     rules.append(
@@ -235,7 +235,7 @@ def default_registry() -> Registry:
                 "optometr",
             ],
             (
-                "pharmacies, doctors, hospitals, dental — medical care; NOT"
+                "pharmacies, doctors, hospitals, dental - medical care; NOT"
                 " gyms or fitness"
             ),
         )
