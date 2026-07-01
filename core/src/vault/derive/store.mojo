@@ -927,13 +927,17 @@ def tags_report_json() raises -> String:
     return out^
 
 
-def transactions_json() raises -> String:
-    """`{"transactions":[{"file","date","amount":N,"direction","desc","tags":[…]}]}`
-    over the stored transactions in as-stored order — the payload the app server's
-    GET /api/transactions returns so the Vault → Records view can surface the exact
-    reconciled rows the app sums, each with its derived category tags. `amount` is a
-    bare JSON number (non-negative magnitude); the sign is in `direction`
-    (`"debit"` = money out, `"credit"` = money in)."""
+def transactions_json(include_amounts: Bool = True) raises -> String:
+    """`{"transactions":[{"file","date","year","amount":N|null,"direction","desc",
+    "tags":[…]}]}` over the stored transactions in as-stored order — the payload the
+    app server's GET /api/transactions returns for the Vault → Records view. `amount`
+    is a bare JSON number (non-negative magnitude); the sign is in `direction`
+    (`"debit"` = money out, `"credit"` = money in).
+
+    When `include_amounts` is False (the DEFAULT the server uses until the user
+    passes the Touch-ID gate), `amount` is emitted as `null` — so the actual figures
+    never reach the browser until unlocked (the privacy screen). `direction` is kept
+    so the UI can still show a +/- mask."""
     var rows = load_txn_rows()
     var out = String('{"transactions":[')
     for i in range(len(rows)):
@@ -943,7 +947,10 @@ def transactions_json() raises -> String:
         out += '{"file":' + _json_str(r.falias)
         out += ',"date":' + _json_str(r.date)
         out += ',"year":' + String(r.year)
-        out += ',"amount":' + String(r.amount)
+        if include_amounts:
+            out += ',"amount":' + String(r.amount)
+        else:
+            out += ',"amount":null'
         out += ',"direction":' + _json_str(r.direction)
         out += ',"desc":' + _json_str(r.desc) + ',"tags":['
         for k in range(len(r.tags)):
