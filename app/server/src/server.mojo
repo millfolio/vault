@@ -55,6 +55,7 @@ from runqueue import runq_take, runq_peek, runq_done, runq_reset
 # CLI uses, so the Tags panel + category editor run in-process (no engine spawn).
 from vault.derive.store import (
     tags_report_json,
+    transactions_json,
     read_categories,
     save_categories,
     preview_categories,
@@ -436,6 +437,8 @@ struct Api(Copyable, Handler, Movable):
         # the editable registry file. All in-process via vault.derive.store.
         if path == "/api/tags":
             return self.handle_tags()
+        if path == "/api/transactions":
+            return self.handle_transactions()
         if path == "/api/categories/preview":
             return self.handle_categories_preview(req)
         if path == "/api/categories":
@@ -573,6 +576,12 @@ struct Api(Copyable, Handler, Movable):
         in-process (vault.derive.store), the SAME payload `millfolio tags --json`
         prints. No engine spawn."""
         return _cors(ok_json(tags_report_json()))
+
+    def handle_transactions(self) raises -> Response:
+        """GET /api/transactions → {"transactions":[{file,date,amount,direction,
+        desc,tags}]} — the exact reconciled rows the app sums, each with its derived
+        category tags. In-process via vault.derive.store; no engine spawn."""
+        return _cors(ok_json(transactions_json()))
 
     def handle_categories_get(self) raises -> Response:
         """GET /api/categories → {"text": <raw categories.txt>} for the editor

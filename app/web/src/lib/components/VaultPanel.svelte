@@ -76,6 +76,31 @@
   ];
   let tags = $state<Tag[]>([]);
 
+  // One extracted, reconciled transaction (GET /api/transactions) — the exact rows
+  // the app sums, each with its derived category tags. `amount` is a non-negative
+  // magnitude; the sign is in `direction` ("debit" = money out, "credit" = in).
+  interface Txn {
+    file: string;
+    date: string;
+    amount: number;
+    direction: string;
+    desc: string;
+    tags: string[];
+  }
+  const MOCK_TXNS: Txn[] = [
+    { file: "file_2", date: "4/03", amount: 85.0, direction: "debit", desc: "VERIZON WIRELESS", tags: ["phone"] },
+    { file: "file_2", date: "4/11", amount: 52.1, direction: "credit", desc: "PAYROLL DEPOSIT", tags: [] },
+    { file: "file_2", date: "4/18", amount: 128.44, direction: "debit", desc: "WHOLE FOODS MARKET", tags: ["groceries"] },
+    { file: "file_0", date: "4/22", amount: 410.0, direction: "debit", desc: "DELTA AIR LINES", tags: ["travel"] },
+  ];
+
+  // Files | Records sub-view switch inside the Vault tab.
+  let sub = $state<"files" | "records">("files");
+  let txns = $state<Txn[] | null>(null);
+  let txLoading = $state(false);
+  let txError = $state<string | null>(null);
+  let txLoaded = false; // fetched lazily on the first switch to Records
+
   let info = $state<VaultInfo | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -132,6 +157,43 @@
   }
 
   onMount(load);
+
+  // Lazily fetch the extracted transactions the first time Records is opened.
+  async function loadTxns() {
+    if (txLoaded) return;
+    txLoaded = true;
+    txLoading = true;
+    txError = null;
+    const base = apiBase();
+    if (base === null) {
+      txns = MOCK_TXNS;
+      txLoading = false;
+      return;
+    }
+    try {
+      const res = await fetch(`${base}/api/transactions`, { headers: { accept: "application/json" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      txns = ((await res.json()).transactions ?? []) as Txn[];
+    } catch (e) {
+      txError = e instanceof Error ? e.message : String(e);
+    } finally {
+      txLoading = false;
+    }
+  }
+  function showRecords() {
+    sub = "records";
+    loadTxns();
+  }
+
+  // A signed, formatted amount: debit = money OUT (−), credit = money IN (+).
+  function fmtMoney(amount: number, direction: string): string {
+    const sign = direction === "debit" ? "-" : "+";
+    const abs = Math.abs(amount).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return `${sign}$${abs}`;
+  }
 
   // Map a hit's frontier-safe alias back to its real filename (from the manifest).
   function nameFor(alias: string): string {
@@ -225,6 +287,15 @@
       {#if mock}
         <p class="banner">Sample data — open this from <code>mill start</code> (:10000) to see your real vault.</p>
       {/if}
+      <div class="subtabs" role="tablist">
+        <button role="tab" aria-selected={sub === "files"} class:active={sub === "files"} onclick={() => (sub = "files")}>
+          Files
+        </button>
+        <button role="tab" aria-selected={sub === "records"} class:active={sub === "records"} onclick={showRecords}>
+          Records
+        </button>
+      </div>
+      {#if sub === "files"}
       <form class="search" onsubmit={runSearch}>
         <input
           type="text"
@@ -363,6 +434,47 @@
           <p class="muted hint">Chunk counts appear after <code>mill index &lt;dir&gt;</code>.</p>
         {/if}
       {/if}
+      {/if}
+      {:else}
+        <!-- Records: the extracted, reconciled transactions the app sums. -->
+        {#if txLoading && txns === null}
+          <p class="muted">Loading…</p>
+        {:else if txError}
+          <p class="banner warn">Couldn't load transactions: {txError}</p>
+        {:else if txns && txns.length > 0}
+          <table class="records">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th class="num">Amount</th>
+                <th>Tags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each txns as t, i (i)}
+                <tr>
+                  <td class="date">{t.date}</td>
+                  <td class="desc">{t.desc}</td>
+                  <td class="num amt" class:out={t.direction === "debit"}>{fmtMoney(t.amount, t.direction)}</td>
+                  <td class="tags">
+                    {#if t.tags.length > 0}
+                      <span class="rchips">
+                        {#each t.tags as tag}
+                          <span class="tagchip rchip">{tag}</span>
+                        {/each}
+                      </span>
+                    {:else}
+                      <span class="muted">—</span>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <p class="muted empty">No transactions extracted yet — index statement files.</p>
+        {/if}
       {/if}
     {/if}
   </div>
@@ -720,5 +832,59 @@
   }
   .kind.md {
     color: var(--ok);
+  }
+
+  /* Files | Records sub-tab switch */
+  .subtabs {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    margin-bottom: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+  }
+  .subtabs button {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 5px 14px;
+    border-radius: calc(var(--radius) - 2px);
+    cursor: pointer;
+  }
+  .subtabs button.active {
+    background: var(--accent);
+    color: #06101f;
+  }
+
+  /* Records table */
+  .records td.date {
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .records td.desc {
+    overflow-wrap: anywhere;
+  }
+  .records td.amt {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .records td.amt.out {
+    color: var(--err);
+  }
+  .rchips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .rchip {
+    font-size: 11px;
+    padding: 1px 9px;
+    color: var(--accent);
   }
 </style>
