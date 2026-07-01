@@ -2,8 +2,17 @@
   // Vault view — the indexable files in your vault dir + LanceDB index stats,
   // from the local server's GET /api/vault. Read-only; refreshable.
   import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import SubTabs from "./SubTabs.svelte";
-  import SearchDefineBar from "./SearchDefineBar.svelte";
+  import TagsPanel from "./TagsPanel.svelte";
+  import DefineTagModal from "./DefineTagModal.svelte";
+
+  // Vault sub-tabs: Records | Tags | Files. `initialSub` lets /tags deep-link open
+  // the Tags sub-tab (the tag pills link there).
+  let {
+    demo = false,
+    initialSub = "records",
+  }: { demo?: boolean; initialSub?: string } = $props();
 
   interface VaultFile {
     alias: string;
@@ -103,7 +112,9 @@
   }
 
   // Files | Records sub-view switch inside the Vault tab.
-  let sub = $state<"files" | "records">("files");
+  let sub = $state<"files" | "records" | "tags">(
+    untrack(() => (initialSub === "tags" || initialSub === "files" ? initialSub : "records")),
+  );
   let txns = $state<Txn[] | null>(null);
   let txLoading = $state(false);
   let txError = $state<string | null>(null);
@@ -164,7 +175,10 @@
     }
   }
 
-  onMount(load);
+  onMount(() => {
+    load();
+    if (sub === "records") loadTxns(); // Records is the default sub-tab
+  });
 
   // Lazily fetch the extracted transactions the first time Records is opened.
   async function loadTxns() {
@@ -193,13 +207,12 @@
     loadTxns();
   }
 
-  // Live text-filter over the loaded records (the search/define bar, String mode).
+  // Plain text-filter over the loaded records (by description).
   let recFilter = $state("");
-  let recMode = $state<"string" | "ai">("string");
   const filteredTxns = $derived.by(() => {
     const all = txns ?? [];
     const q = recFilter.trim().toLowerCase();
-    if (recMode !== "string" || !q) return all;
+    if (!q) return all;
     return all.filter((t) => t.desc.toLowerCase().includes(q));
   });
   // Re-pull records + tags after a tag is created (retag changes the .tags column).
@@ -207,6 +220,16 @@
     txLoaded = false;
     await loadTxns();
     await load();
+  }
+
+  // "Define a tag from this record" — opens the modal pre-filled from the merchant.
+  let modalOpen = $state(false);
+  let modalName = $state("");
+  let modalValue = $state("");
+  function defineFromRecord(desc: string) {
+    modalValue = desc;
+    modalName = (desc.trim().toLowerCase().match(/[a-z0-9]+/)?.[0] ?? "");
+    modalOpen = true;
   }
 
   // A signed, formatted amount: debit = money OUT (−), credit = money IN (+).
@@ -313,13 +336,16 @@
       {/if}
       <SubTabs
         tabs={[
-          { id: "files", label: "Files" },
           { id: "records", label: "Records" },
+          { id: "tags", label: "Tags" },
+          { id: "files", label: "Files" },
         ]}
         active={sub}
-        onselect={(id) => (id === "records" ? showRecords() : (sub = "files"))}
+        onselect={(id) => (id === "records" ? showRecords() : (sub = id as "files" | "tags"))}
       />
-      {#if sub === "files"}
+      {#if sub === "tags"}
+        <TagsPanel {demo} embedded />
+      {:else if sub === "files"}
       <form class="search" onsubmit={runSearch}>
         <input
           type="text"
@@ -470,13 +496,9 @@
         {:else if txError}
           <p class="banner warn">Couldn't load transactions: {txError}</p>
         {:else if txns && txns.length > 0}
-          {#if !mock}
-            <SearchDefineBar
-              stringPlaceholder="Filter records…"
-              onfilter={(q, m) => { recFilter = q; recMode = m; }}
-              ontagcreated={reloadAfterTag}
-            />
-          {/if}
+          <div class="recbar">
+            <input class="filter" type="text" placeholder="Filter records…" bind:value={recFilter} />
+          </div>
           <table class="records">
             <thead>
               <tr>
@@ -485,6 +507,7 @@
                 <th class="num">Amount</th>
                 <th>Tags</th>
                 <th>File</th>
+                <th class="act"></th>
               </tr>
             </thead>
             <tbody>
@@ -513,6 +536,11 @@
                       <span class="muted" title={t.file}>{nameFor(t.file)}</span>
                     {/if}
                   </td>
+                  <td class="act">
+                    {#if !mock}
+                      <button type="button" class="mini" title="Define a tag from this merchant" aria-label="Define a tag from this record" onclick={() => defineFromRecord(t.desc)}>+ tag</button>
+                    {/if}
+                  </td>
                 </tr>
               {/each}
             </tbody>
@@ -528,7 +556,56 @@
   </div>
 </section>
 
+<DefineTagModal
+  open={modalOpen}
+  initialMode="keyword"
+  initialName={modalName}
+  initialValue={modalValue}
+  oncreated={reloadAfterTag}
+  onclose={() => (modalOpen = false)}
+/>
+
 <style>
+  .recbar {
+    display: flex;
+    margin-bottom: 14px;
+  }
+  .recbar .filter {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .recbar .filter:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .records .act {
+    width: 58px;
+    text-align: right;
+  }
+  .records .act .mini {
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: var(--radius);
+    white-space: nowrap;
+  }
+  .records tr:hover .act .mini {
+    opacity: 1;
+  }
+  .records .act .mini:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
   .vault {
     display: flex;
     flex-direction: column;

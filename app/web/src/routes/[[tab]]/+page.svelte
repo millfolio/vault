@@ -5,7 +5,6 @@
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import StatsPanel from "$lib/components/StatsPanel.svelte";
   import SystemPanel from "$lib/components/SystemPanel.svelte";
-  import TagsPanel from "$lib/components/TagsPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
   import type { ServerEvent, Session, MillfolioClient, StepState } from "$lib/protocol";
@@ -273,8 +272,7 @@
     <a class="brand" href={`https://${brandName}.app`} title={`Go to ${brandName}.app`}>{brandName}</a>
     <nav class="tabs">
       <a class:active={view === "chat"} href="/">Chat</a>
-      <a class:active={view === "vault"} href="/vault">Vault</a>
-      <a class:active={view === "tags"} href="/tags">Tags</a>
+      <a class:active={view === "vault" || view === "tags"} href="/vault">Vault</a>
       {#if isDemo}
         <!-- The public demo has no System tab, so Stats stays top-level. -->
         <a class:active={view === "stats"} href="/stats">Stats</a>
@@ -298,9 +296,10 @@
     {#if view === "chat"}
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
     {:else if view === "vault"}
-      <VaultPanel />
+      <VaultPanel demo={isDemo} initialSub="records" />
     {:else if view === "tags"}
-      <TagsPanel demo={isDemo} />
+      <!-- /tags deep-links (tag pills) open the Vault → Tags sub-tab. -->
+      <VaultPanel demo={isDemo} initialSub="tags" />
     {:else if view === "system"}
       <SystemPanel demo={isDemo} initialSub="materialization" />
     {:else if view === "stats"}
