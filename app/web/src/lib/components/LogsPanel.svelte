@@ -220,6 +220,12 @@
   .copy.copied {
     opacity: 1;
   }
+  /* Touch devices can't hover — always show the copy button so it's tappable. */
+  @media (hover: none) {
+    .copy {
+      opacity: 1;
+    }
+  }
   .copy:hover {
     color: var(--text);
     border-color: var(--accent);

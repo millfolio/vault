@@ -360,6 +360,12 @@
   tr:hover .act .mini {
     opacity: 1;
   }
+  /* Touch devices can't hover — always show the row actions so they're tappable. */
+  @media (hover: none) {
+    .act .mini {
+      opacity: 1;
+    }
+  }
   .act .mini:hover {
     border-color: var(--accent);
     color: var(--text);

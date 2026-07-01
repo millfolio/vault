@@ -747,6 +747,12 @@
   .records tr:hover .act .mini {
     opacity: 1;
   }
+  /* Touch devices can't hover — always show the per-record action so it's tappable. */
+  @media (hover: none) {
+    .records .act .mini {
+      opacity: 1;
+    }
+  }
   .records .act .mini:hover {
     border-color: var(--accent);
     color: var(--accent);

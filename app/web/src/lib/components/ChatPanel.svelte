@@ -609,6 +609,12 @@
   .hist-del:focus-visible {
     opacity: 1;
   }
+  /* Touch devices can't hover — always show the delete button so it's tappable. */
+  @media (hover: none) {
+    .hist-del {
+      opacity: 1;
+    }
+  }
   .hist-del:hover {
     color: var(--err, #f85149);
   }
