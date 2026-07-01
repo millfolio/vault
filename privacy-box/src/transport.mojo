@@ -23,6 +23,14 @@ from egress import EgressGuard
 from vaultcfg import resource_path
 
 
+# Read timeout for the remote (frontier) model call. A dropped connection (e.g. you
+# walk out of the café mid-request) leaves a half-open socket that never delivers a
+# byte or a FIN; without a read timeout the codegen read blocks forever (the "Writing
+# the program 32:45" hang). 5 minutes tolerates a genuinely slow response while
+# aborting a truly dead link. Applies to both the streaming + non-streaming paths.
+comptime REMOTE_READ_TIMEOUT_MS = 300000
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -365,6 +373,11 @@ struct RemoteClient(Movable):
         req.headers.set("anthropic-version", "2023-06-01")
         req.headers.set("content-type", "application/json")
         var client = HttpClient()
+        # Bound the body read: if the response stalls (a dropped connection — the
+        # network vanished mid-generation), fail after REMOTE_READ_TIMEOUT_MS instead
+        # of hanging forever. A real slow codegen still lands (data arrives well
+        # inside the window); only silence this long means the link is gone.
+        client.set_recv_timeout(REMOTE_READ_TIMEOUT_MS)
         var resp = client.send(req)
         var v = resp.json()
         var code = _strip_fences(v["content"][0]["text"].string_value())
@@ -436,6 +449,10 @@ struct RemoteClient(Movable):
         var stream = TlsStream.connect_timeout(
             host, UInt16(443), TlsConfig(), 120000
         )
+        # Bound each streamed read: a dropped connection (no more SSE bytes) fails
+        # after REMOTE_READ_TIMEOUT_MS of silence instead of hanging forever. Normal
+        # streaming delivers tokens continuously, well inside the window.
+        stream.set_recv_timeout(REMOTE_READ_TIMEOUT_MS)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
 
