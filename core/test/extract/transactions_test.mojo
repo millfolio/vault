@@ -10,6 +10,7 @@ format-agnostic token scanners (money `.dd` filter, date-token rejection)."""
 from vault.extract.transactions import (
     extract_transactions,
     statement_year,
+    csv_transactions,
     _money_tokens,
     _leading_date,
     Extraction,
@@ -385,6 +386,108 @@ def main() raises:
     )
     _say(yr_none == 0, "statement_year: no year present → 0 (row keeps M/D)")
     ok = (yr_none == 0) and ok
+
+    # ── csv_transactions: column-mapped extraction (Apple-Card-style + debit/credit)
+    var ac = List[List[String]]()
+    # The REAL Apple Card export header (8 columns) — Merchant/Category/Purchased By
+    # sit between Description and Type/Amount, so this pins that column-by-NAME lookup
+    # ignores them (Category must not be read as Type; Purchased By not as a date).
+    ac.append(
+        [
+            String("Transaction Date"),
+            String("Clearing Date"),
+            String("Description"),
+            String("Merchant"),
+            String("Category"),
+            String("Type"),
+            String("Amount (USD)"),
+            String("Purchased By"),
+        ]
+    )
+    ac.append(
+        [
+            String("01/15/2025"),
+            String("01/16/2025"),
+            String("APPLE STORE"),
+            String("Apple"),
+            String("Shopping"),
+            String("Purchase"),
+            String("12.34"),
+            String("Marius"),
+        ]
+    )
+    ac.append(
+        [
+            String("02/03/2026"),
+            String("02/03/2026"),
+            String("ACME PAYMENT"),
+            String("Acme"),
+            String("Payment"),
+            String("Payment"),
+            String("-100.00"),
+            String("Marius"),
+        ]
+    )
+    var act = csv_transactions(ac)
+    var acok = (
+        len(act) == 2
+        and act[0].date == "1/15"
+        and act[0].year == 2025
+        and act[0].direction == "debit"
+        and _close(act[0].amount, 12.34)
+        and act[1].date == "2/3"
+        and act[1].year == 2026
+        and act[1].direction == "credit"
+        and _close(act[1].amount, 100.00)
+    )
+    _say(acok, "csv: Apple-Card cols → 2 records, per-row year, type→direction")
+    ok = acok and ok
+
+    var bk = List[List[String]]()
+    bk.append(
+        [
+            String("Date"),
+            String("Description"),
+            String("Debit"),
+            String("Credit"),
+        ]
+    )
+    bk.append(
+        [
+            String("2025-03-10"),
+            String("Grocery Store"),
+            String("54.20"),
+            String(""),
+        ]
+    )
+    bk.append(
+        [
+            String("2025-03-11"),
+            String("Paycheck"),
+            String(""),
+            String("2,000.00"),
+        ]
+    )
+    var bkt = csv_transactions(bk)
+    var bkok = (
+        len(bkt) == 2
+        and bkt[0].direction == "debit"
+        and _close(bkt[0].amount, 54.20)
+        and bkt[0].year == 2025
+        and bkt[0].date == "3/10"
+        and bkt[1].direction == "credit"
+        and _close(bkt[1].amount, 2000.00)
+    )
+    _say(bkok, "csv: debit/credit columns + ISO dates → correct directions")
+    ok = bkok and ok
+
+    var junk = List[List[String]]()
+    junk.append([String("name"), String("email")])
+    junk.append([String("Ada"), String("ada@x.com")])
+    _say(
+        len(csv_transactions(junk)) == 0, "csv: no date/amount cols → 0 records"
+    )
+    ok = (len(csv_transactions(junk)) == 0) and ok
     # tags column round-trips: empty / single / multi (and order preserved).
     var st = (
         len(back[0].tags) == 0

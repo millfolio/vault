@@ -44,6 +44,7 @@ from vault.extract.transactions import (
     Txn,
     extract_transactions,
     statement_year,
+    csv_transactions,
     TxnRow,
     drop_aliases,
     select_txns,
@@ -755,16 +756,34 @@ def build_index(
         var falias = emb_alias[t].copy()
         var body = _file_text(cur_paths[i], cur_kinds[i])
 
-        # Extract structured transactions ONCE here, with whole-document context, and
-        # persist only those that RECONCILE against the statement's own arithmetic
-        # (running balance or printed totals). Unreconciled/none → nothing written, so
-        # `transactions()` stays empty and callers fall back to chunks. Cheap + pure
-        # (no model call) — runs for every text doc; non-statements simply won't
-        # reconcile. CSVs are already structured (csv_rows), so skip them.
-        if cur_kinds[i] != "csv":
-            # Transaction extraction needs COLUMN-ALIGNED text (date│desc│amount│
-            # balance on one line); `body` is stream-order (good for chunks/search,
-            # but it scatters a row's cells). For PDFs, re-extract layout-preserved.
+        # Extract structured transactions ONCE here, with whole-document context.
+        # Tags are filled by the single _retag pass before write (the one source of
+        # tags), so extraction here stays tag-agnostic.
+        if cur_kinds[i] == "csv":
+            # A CSV export is ALREADY structured → map its columns to records
+            # directly (no reconciliation; every data row is a transaction). Each
+            # row usually carries its own full date, so the year is per-row.
+            var ctxns = csv_transactions(csv_rows(cur_paths[i]))
+            for x in range(len(ctxns)):
+                ref ct = ctxns[x]
+                trows.append(
+                    TxnRow(
+                        falias.copy(),
+                        ct.date.copy(),
+                        ct.amount,
+                        ct.direction.copy(),
+                        ct.desc.copy(),
+                        List[String](),
+                        cur_gen,
+                        ct.year,
+                    )
+                )
+        else:
+            # PDF/text statements are UNSTRUCTURED — persist only those that
+            # RECONCILE against the statement's own arithmetic (running balance or
+            # printed totals). Unreconciled/none → nothing written, callers fall
+            # back to chunks. Needs COLUMN-ALIGNED text; for PDFs, re-extract
+            # layout-preserved (`body` is stream-order, good for chunks/search).
             var txn_src = (
                 readers.pdf_text_layout(cur_paths[i]) if cur_kinds[i]
                 == "pdf" else body
@@ -776,8 +795,6 @@ def build_index(
                 var syear = statement_year(txn_src)
                 for x in range(len(ext.txns)):
                     ref tx = ext.txns[x]
-                    # Tags are filled by the single _retag pass before write (the
-                    # one source of tags), so extraction here stays tag-agnostic.
                     trows.append(
                         TxnRow(
                             falias.copy(),

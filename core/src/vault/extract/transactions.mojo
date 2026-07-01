@@ -818,6 +818,188 @@ def statement_year(text: String) -> Int:
     return _mode(any_v, any_c)
 
 
+@fieldwise_init
+struct CsvTxn(Copyable, Movable):
+    """One transaction parsed from a CSV export — already structured, so no
+    reconciliation. `date` is `M/D`; `year` is pulled from the row's own full date
+    (CSV exports usually carry it), 0 if absent. `amount` is a non-negative
+    magnitude; `direction` is `"debit"`/`"credit"`/`""`."""
+
+    var date: String
+    var year: Int
+    var desc: String
+    var amount: Float64
+    var direction: String
+
+
+def _csv_find_col(header: List[String], needles: List[String]) raises -> Int:
+    """First column whose (lowercased) header contains any of `needles`, in needle
+    priority order; -1 if none. Priority-by-needle so `transaction date` beats a
+    bare `date` / `clearing date`."""
+    for n in range(len(needles)):
+        for c in range(len(header)):
+            if needles[n] in _lower(header[c]):
+                return c
+    return -1
+
+
+def _parse_csv_date(cell: String) raises -> Tuple[String, Int]:
+    """Parse a CSV date cell into `(M/D, year)`. Handles `M/D/YYYY`, `M/D/YY`,
+    `YYYY-MM-DD`, and bare `M/D` (year 0). Unrecognized → `(cell, 0)`."""
+    var t = String(cell.strip())
+    if "-" in t and "/" not in t:
+        var p = t.split("-")
+        if (
+            len(p) == 3 and String(p[0].strip()).byte_length() == 4
+        ):  # YYYY-MM-DD
+            var y = atol(String(p[0].strip()))
+            var mo = atol(String(p[1].strip()))
+            var da = atol(String(p[2].strip()))
+            return (String(mo) + "/" + String(da), y)
+    if "/" in t:
+        var p = t.split("/")
+        if len(p) == 3:
+            var a = String(p[0].strip())
+            if a.byte_length() == 4:  # YYYY/MM/DD
+                return (
+                    String(atol(String(p[1].strip())))
+                    + "/"
+                    + String(atol(String(p[2].strip()))),
+                    atol(a),
+                )
+            # M/D/Y (US)
+            var y = atol(String(p[2].strip()))
+            if y < 100:
+                y += 2000
+            return (
+                String(atol(a)) + "/" + String(atol(String(p[1].strip()))),
+                y,
+            )
+        if len(p) == 2:  # M/D, no year
+            return (t, 0)
+    return (t, 0)
+
+
+def _csv_dir_from_type(type_cell: String) raises -> String:
+    """Direction from a CSV `Type` cell: payment/credit/refund/return/deposit →
+    credit; purchase/sale/debit/withdrawal/charge → debit; else `""` (fall back to
+    the amount sign)."""
+    var t = _lower(type_cell)
+    if (
+        "payment" in t
+        or "credit" in t
+        or "refund" in t
+        or "return" in t
+        or "deposit" in t
+    ):
+        return String("credit")
+    if (
+        "purchase" in t
+        or "sale" in t
+        or "debit" in t
+        or "withdrawal" in t
+        or "charge" in t
+    ):
+        return String("debit")
+    return String("")
+
+
+def csv_transactions(rows: List[List[String]]) raises -> List[CsvTxn]:
+    """Map a parsed CSV (row 0 = header) to transactions by matching column names —
+    no reconciliation (a CSV is already structured, so every data row is a record).
+    Resolves a date, a description, and either a single signed `amount` column (with
+    an optional `type` column for direction) OR a separate debit/credit pair. A
+    card export's positive amount is a purchase (debit); `type`/`credit`-column
+    signals override. Returns empty if the header has no usable date+amount."""
+    var out = List[CsvTxn]()
+    if len(rows) < 2:
+        return out^
+    ref header = rows[0]
+
+    var date_col = _csv_find_col(
+        header,
+        [
+            String("transaction date"),
+            String("trans date"),
+            String("purchase date"),
+            String("post date"),
+            String("posted date"),
+            String("date"),
+        ],
+    )
+    var desc_col = _csv_find_col(
+        header,
+        [
+            String("description"),
+            String("merchant"),
+            String("payee"),
+            String("name"),
+            String("memo"),
+            String("details"),
+        ],
+    )
+    var type_col = _csv_find_col(
+        header, [String("transaction type"), String("type")]
+    )
+    var amount_col = _csv_find_col(header, [String("amount"), String("value")])
+    var debit_col = _csv_find_col(
+        header, [String("debit"), String("withdrawal")]
+    )
+    var credit_col = _csv_find_col(
+        header, [String("credit"), String("deposit")]
+    )
+
+    if date_col < 0 or (amount_col < 0 and debit_col < 0 and credit_col < 0):
+        return out^
+
+    for r in range(1, len(rows)):
+        ref row = rows[r]
+        if len(row) <= date_col:
+            continue
+        var dy = _parse_csv_date(row[date_col])
+        var desc = String("")
+        if desc_col >= 0 and desc_col < len(row):
+            desc = String(row[desc_col].strip())
+        if desc == "":
+            continue  # a blank row / footer
+
+        var mag: Float64
+        var direction = String("")
+        if debit_col >= 0 or credit_col >= 0:
+            var d = (
+                abs(parse_amount(row[debit_col])) if debit_col >= 0
+                and debit_col < len(row) else 0.0
+            )
+            var c = (
+                abs(parse_amount(row[credit_col])) if credit_col >= 0
+                and credit_col < len(row) else 0.0
+            )
+            if d > 0:
+                mag = d
+                direction = String("debit")
+            elif c > 0:
+                mag = c
+                direction = String("credit")
+            else:
+                continue
+        elif amount_col >= 0 and amount_col < len(row):
+            var a = parse_amount(row[amount_col])
+            mag = abs(a)
+            if mag == 0:
+                continue
+            if type_col >= 0 and type_col < len(row):
+                direction = _csv_dir_from_type(row[type_col])
+            if direction == "":
+                # No type signal: a card export lists purchases positive (debit),
+                # payments/refunds negative (credit).
+                direction = String("credit") if a < 0 else String("debit")
+        else:
+            continue
+
+        out.append(CsvTxn(dy[0], dy[1], desc, mag, direction^))
+    return out^
+
+
 def extract_transactions(text: String) raises -> Extraction:
     """Extract + reconcile the transactions in one statement's text.
 
