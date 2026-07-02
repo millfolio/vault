@@ -110,12 +110,20 @@ question.** Match on the NOTE, NEVER on a loose name resemblance — a tag that 
 merely *semantically adjacent* is the WRONG tag. Concretely: a "gym membership"
 question is NOT `health` (its note is pharmacies/doctors/hospitals — explicitly NOT
 gyms/fitness); "dining out" is NOT `groceries`; a streaming bill is NOT `phone`.
-**If NO tag's note fits, do NOT force the nearest one.** Instead (a) emit
-`# SUGGEST_TAG: <name> = <keyword>, <keyword>` as the program's FIRST line (so the
-user can save it as a real tag — see below), and (b) for THIS answer classify the
-short `.desc` strings inline with `ask_local_batch` (e.g. "is this merchant a gym or
-fitness studio?"), then `sum(.amount)`. Do NOT `search` and do NOT sum `ask_local`
-over search chunks for these — `transactions` is exact and verified.**
+**If NO tag's note fits, do NOT force the nearest one, and do NOT classify every
+transaction inline** — an inline `ask_local_batch` over a whole vault is one model
+call per transaction and TIMES OUT on a real vault (thousands of rows). Instead, for a
+durable SEMANTIC category (coffee, dining, rideshare, …):
+  (a) emit `# SUGGEST_TAG: <name> : <yes/no question>` as the program's FIRST line —
+      the **AI-tag** form (reuse the exact question you would classify with, e.g.
+      `# SUGGEST_TAG: coffee : Is this purchase at a coffee shop or café?`); and
+  (b) `print_answer` a SHORT message and **emit NO number**, e.g. `"I don't have a
+      \"coffee\" tag yet — create it (button below) and I'll give you an exact total
+      once it's materialized."`
+An AI tag classifies each transaction ONCE on-device and caches it, so the NEXT such
+question is a fast, exact `.tags` filter. Only use the keyword form
+`# SUGGEST_TAG: <name> = <kw>, <kw>` when a short merchant list truly covers the
+category. Never `search` / sum `ask_local` over chunks for a spending total.
 
 **NEVER sum amounts read out of `search`/`file_chunks` text for a spending total.**
 A statement chunk also contains running **BALANCES** and printed **SUBTOTALS/
@@ -217,57 +225,33 @@ If the category is NOT one of the known tags (e.g. a specific merchant like
 strings, classify them in ONE batched call ("Reply 'yes' if the merchant is
 <X>… Use ONLY the text; do not guess."), then sum the `.amount` of the matches.
 
-**Also propose a reusable tag when the category is durable and keyword-able.** If
-the category is a recurring noun you can define by NAMING its merchants (phone
-carriers, airlines, gyms, streaming services — NOT a one-off slice like "names
-containing yoga"), add ONE comment as the program's FIRST line:
+**Propose the tag as the program's FIRST-line comment.** For a durable category,
+prefer the **AI form** — a yes/no question the on-device model answers per
+transaction (best for semantic categories whose merchants you can't fully enumerate:
+coffee, dining, rideshare):
 
-    # SUGGEST_TAG: <name> = <keyword>, <keyword>, <keyword>
+    # SUGGEST_TAG: <name> : <yes/no question>
 
-with a lowercase tag `<name>` and merchant keywords from world knowledge (e.g.
-`# SUGGEST_TAG: gym = planet fitness, equinox, la fitness, gold's gym`). Still
-answer THIS question with the inline `ask_local_batch` classify above — the comment
-is ONLY a suggestion the app surfaces, which the user can save to their category
-rules so the NEXT such question is a fast, exact `.tags` filter with no model call.
-Emit it ONLY for a category that isn't already a known tag, never for a one-off
-slice, and pick keywords specific enough to avoid collisions (`"at&t"`, not a bare
-`"att"`). The comment never executes.
+Use the **keyword form** `# SUGGEST_TAG: <name> = <kw>, <kw>` only when a short,
+specific merchant list truly covers it (phone carriers, a few gym chains); pick
+keywords specific enough to avoid collisions (`"at&t"`, not a bare `"att"`). Emit it
+ONLY for a category that isn't already a known tag, never for a one-off slice. The
+comment never executes — the app surfaces it as a one-click "Create & materialize".
 
-**"How much did I spend on gym membership?"** (NO tag fits → DON'T force `health`; classify inline + propose the tag)
-No tag's note covers "gym" — `health` is pharmacies/doctors, explicitly NOT
-fitness — so do NOT write `"health" in t.tags`. Suggest a `gym` tag (first line) and
-classify the debit merchants inline for this answer:
+**"How much did I spend on gym membership?"** (NO tag fits → DON'T force `health`; suggest the tag, don't inline-classify the whole vault)
+No tag's note covers "gym" — `health` is pharmacies/doctors, explicitly NOT fitness —
+so do NOT write `"health" in t.tags`, and do NOT `ask_local_batch` over every debit
+(that times out on a real vault). Suggest a `gym` AI tag and tell the user to create
+it; give NO number until it's materialized:
 ```mojo
 from vault import *
 def main() raises:
-    # SUGGEST_TAG: gym = planet fitness, equinox, la fitness, gold's gym, crunch fitness
-    var files = manifest()
-    var descs = List[String]()       # debit merchant strings, with their amounts
-    var amts = List[Float64]()
-    for i in range(len(files)):
-        var txns = transactions(files[i].alias)
-        for t in range(len(txns)):
-            ref x = txns[t]
-            if x.direction != "debit":
-                continue
-            descs.append(x.desc)
-            amts.append(x.amount)
-    # One batched call — "yes" if the merchant is a gym/fitness studio.
-    var ans = ask_local_batch(
-        "Reply with ONLY 'yes' or 'no': is this merchant a gym or fitness"
-        " studio? Use ONLY the text; if unsure, reply 'no'.", descs)
-    var total = 0.0
-    var n = 0
-    for a in range(len(ans)):
-        var verdict = String(String(ans[a]).strip())
-        if verdict == "yes" or verdict == "Yes" or verdict == "YES":
-            total += amts[a]
-            n += 1
-    if n > 0:
-        print_answer("You spent about " + money(total) + " on gym/fitness across "
-            + String(n) + " payments.")
-    else:
-        print_answer("I couldn't find any gym or fitness payments in your vault.")
+    # SUGGEST_TAG: gym : Is this a gym, fitness studio, or health-club membership?
+    print_answer(
+        "I don't have a \"gym\" tag yet, so I can't give an exact total. Create it"
+        " (button below) and I'll total your gym/fitness spending once it's"
+        " materialized — after that the answer is instant."
+    )
 ```
 
 **"How much did I spend on travel last year?"** (FALLBACK shape — only when `transactions()` is empty, e.g. receipts/notes; statement spending uses the `transactions()`+`.desc` shape above)

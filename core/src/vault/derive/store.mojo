@@ -454,6 +454,45 @@ def is_paused() raises -> Bool:
     return _read_paused_until() > _epoch_s()
 
 
+def priority_path() raises -> String:
+    return config_dir() + "/materializer_priority"
+
+
+def get_priority() raises -> String:
+    """The materialization THROTTLE — "high" | "medium" | "low" (default "medium").
+    Governs how long the background worker naps BETWEEN classify slices: low leaves
+    the GPU mostly free (long idle gaps → laptop stays usable), high runs nearly
+    back-to-back (fastest, GPU-heavy)."""
+    var p = priority_path()
+    if exists(p):
+        var t: String
+        with open(p, "r") as f:
+            t = f.read()
+        var v = String(t.strip())
+        if v == "high" or v == "low" or v == "medium":
+            return v^
+    return String("medium")
+
+
+def set_priority(p: String) raises:
+    var v = String(p.strip())
+    if v != "high" and v != "low":
+        v = String("medium")
+    ensure_data_dir()
+    with open(priority_path(), "w") as f:
+        f.write(v)
+
+
+def nap_ms_for_priority(p: String) -> Int:
+    """Nap (ms) between active classify slices for a priority — the GPU throttle.
+    """
+    if p == "high":
+        return 100
+    if p == "low":
+        return 5000
+    return 1200  # medium
+
+
 # ── ML materialization: the ledger-based, incremental, resumable drain ────────
 
 
@@ -690,7 +729,8 @@ def materialize_status_json() raises -> String:
 
     var pending_total = 0
     var out = String('{"status":"') + status + '","paused_until":'
-    out += String(paused_until) + ',"perTag":['
+    out += String(paused_until)
+    out += ',"priority":"' + get_priority() + '","perTag":['
     var first = True
     for i in range(len(reg.rules)):
         ref r = reg.rules[i]
