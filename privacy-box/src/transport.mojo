@@ -380,7 +380,38 @@ struct RemoteClient(Movable):
         client.set_recv_timeout(REMOTE_READ_TIMEOUT_MS)
         var resp = client.send(req)
         var v = resp.json()
-        var code = _strip_fences(v["content"][0]["text"].string_value())
+        # Scan the content blocks for the TEXT block(s) — newer models (e.g.
+        # claude-sonnet-5) can put a `thinking` / `tool_use` block first, so we can't
+        # assume content[0] is the text (that raised a cryptic "Key not found: text").
+        # If there's no text at all, surface the API error message (bad model id, no
+        # access, rate limit) instead of a key error.
+        var raw = String("")
+        var nblocks = 0
+        try:
+            nblocks = v["content"].array_count()
+        except:
+            nblocks = 0
+        for bi in range(nblocks):
+            try:
+                var block = v["content"][bi]
+                if block["type"].string_value() == "text":
+                    raw += block["text"].string_value()
+            except:
+                continue
+        if raw.byte_length() == 0:
+            var apierr = String("")
+            try:
+                apierr = v["error"]["message"].string_value()
+            except:
+                apierr = String("")
+            if apierr != "":
+                raise Error("remote model API error: " + apierr)
+            raise Error(
+                "remote model returned no text content — check remote_model"
+                " (the model id) and that your API key has access (see the"
+                " server log for the raw response)."
+            )
+        var code = _strip_fences(raw)
         # If the model hit the token cap the program is incomplete (cut mid-line),
         # which never compiles — and every fix attempt would re-truncate. Fail with a
         # clear message instead of silently looping the compile/fix on a partial file.
