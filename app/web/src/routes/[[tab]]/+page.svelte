@@ -159,6 +159,11 @@
   // caveats that don't apply to a real local install). Remembered per browser session
   // so a reload within the same tab doesn't nag, but every new visitor sees it once.
   const INTRO_KEY = "millfolio-demo-intro-dismissed";
+  // The demo-access token is persisted per tab-session so a reload reuses it (it
+  // outlives the in-memory value but the server still enforces a 30-min TTL). Kept
+  // SEPARATE from INTRO_KEY: the info-intro is dismissed once, but the Turnstile
+  // widget must reappear whenever we lack a valid token (e.g. after a reload/expiry).
+  const DEMO_TOKEN_KEY = "millfolio-demo-token";
   let showIntro = $state(false);
   // Cloudflare Turnstile (demo bot gate). The server exposes a non-empty sitekey ONLY
   // when the gate is active; the intro modal then renders the widget, and "Got it" is
@@ -179,6 +184,7 @@
   onMount(() => {
     if (isDemo) {
       try {
+        demoToken = sessionStorage.getItem(DEMO_TOKEN_KEY) || "";
         showIntro = sessionStorage.getItem(INTRO_KEY) !== "1";
       } catch {
         showIntro = true; // sessionStorage unavailable (private mode etc.) — still show it
@@ -203,6 +209,10 @@
         if (d && typeof d.turnstile_sitekey === "string" && d.turnstile_sitekey) {
           turnstileSitekey = d.turnstile_sitekey;
           loadTurnstileScript();
+          // Turnstile is REQUIRED: force the widget whenever we don't hold a token,
+          // even if the info-intro was dismissed earlier (a reload clears the in-memory
+          // token; an expired one is rejected server-side → re-prompt below).
+          if (!demoToken) showIntro = true;
         }
       })
       .catch(() => {});
@@ -265,6 +275,7 @@
       if (!r.ok) throw new Error();
       const d = await r.json();
       demoToken = d.token ?? "";
+      try { sessionStorage.setItem(DEMO_TOKEN_KEY, demoToken); } catch {}
       dismissIntro();
     } catch {
       turnstileError = "Verification failed — please retry.";
@@ -350,6 +361,17 @@
         queueMsg = null;
         break;
       case "error":
+        // The demo bot gate rejected this ask (no/expired token) → drop the stale
+        // token and re-show the Turnstile widget so the user can re-verify.
+        if (turnstileSitekey && e.message && e.message.toLowerCase().includes("human check")) {
+          demoToken = "";
+          turnstileToken = "";
+          try { sessionStorage.removeItem(DEMO_TOKEN_KEY); } catch {}
+          const ts = (window as any).turnstile;
+          if (ts && turnstileWidgetId !== undefined) { try { ts.reset(turnstileWidgetId); } catch {} }
+          turnstileWidgetId = undefined; // re-render into the modal on reopen
+          showIntro = true;
+        }
         items.push({ kind: "assistant", id: uid(), text: `Error: ${e.message}` });
         busy = false;
         queueMsg = null;
