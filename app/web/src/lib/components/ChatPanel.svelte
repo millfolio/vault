@@ -12,6 +12,8 @@
     tags?: string;         // tags: comma-joined category tags the program filtered on
     name?: string;         // tag-proposal: suggested tag name
     keywords?: string;     // tag-proposal: suggested keywords (comma-joined)
+    ml?: boolean;          // tag-proposal: true = AI rule (prompt), false = keyword
+    prompt?: string;       // tag-proposal (AI): the yes/no question to classify with
     stepId?: string;
     label?: string;
     state?: StepState;
@@ -209,7 +211,7 @@
     if (!proposalEdits[it.id]) {
       proposalEdits = {
         ...proposalEdits,
-        [it.id]: { kw: it.keywords ?? "", isMl: false, ml: `is this a ${it.name}?` },
+        [it.id]: { kw: it.keywords ?? "", isMl: !!it.ml, ml: it.prompt || `is this a ${it.name}?` },
       };
     }
     customizing = { ...customizing, [it.id]: true };
@@ -223,8 +225,9 @@
     const name = cleanName(it.name ?? "");
     const e = proposalEdits[id];
     let rule = "";
-    if (e?.isMl) {
-      const q = (e.ml ?? "").trim();
+    const isMl = e ? e.isMl : !!it.ml; // AI-form proposals default to an ML rule
+    if (isMl) {
+      const q = (e?.ml ?? it.prompt ?? "").trim();
       if (!name || !q) return;
       rule = `${name} : ${q}`;
     } else {
@@ -431,12 +434,12 @@
       {:else if it.kind === "tag-proposal"}
         <div class="proposal" title="Save this as a category tag so the next such question is a fast, exact filter — no model call">
           <div class="ptext">
-            <span class="plabel">💡 Make <strong>{it.name}</strong> a reusable tag?</span>
-            {#if !customizing[it.id]}<span class="pkw">{it.keywords}</span>{/if}
+            <span class="plabel">💡 Make <strong>{it.name}</strong> a reusable {it.ml ? "AI " : ""}tag?</span>
+            {#if !customizing[it.id]}<span class="pkw">{it.ml ? `“${it.prompt}”` : it.keywords}</span>{/if}
           </div>
           {#if !demo}
             {#if proposalState[it.id] === "added"}
-              <span class="padded">✓ Saved to your tags</span>
+              <span class="padded">{it.ml ? "✓ Created — materializing in the background" : "✓ Saved to your tags"}</span>
             {:else if customizing[it.id]}
               <div class="pcustom">
                 <label class="pmltoggle" title="The model decides per transaction — no keyword list needed (slower, evaluated at index time)">
@@ -458,7 +461,7 @@
             {:else}
               <div class="pactions">
                 <button class="padd" disabled={proposalState[it.id] === "saving"} onclick={() => acceptProposal(it)}>
-                  {proposalState[it.id] === "saving" ? "Adding…" : "Add as suggested"}
+                  {proposalState[it.id] === "saving" ? "Adding…" : it.ml ? "Create & materialize" : "Add as suggested"}
                 </button>
                 <button class="pbtn" onclick={() => startCustomize(it)}>Customize…</button>
                 {#if proposalState[it.id] === "error"}<span class="perr">Couldn't save</span>{/if}

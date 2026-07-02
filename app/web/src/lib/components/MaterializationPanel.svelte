@@ -25,6 +25,7 @@
   type Status = {
     status: string;
     paused_until: number;
+    priority?: string;
     perTag: PerTag[];
     pendingTotal: number;
   };
@@ -41,16 +42,48 @@
     return "";
   }
 
+  // A live ETA: measure how fast `pendingTotal` drops between samples (so it reflects
+  // the CURRENT priority's throttle) → pending / rate. Recomputes as priority changes.
+  let etaSeconds = $state<number | null>(null);
+  let lastSample: { pending: number; t: number } | null = null;
+  function noteProgress(pending: number) {
+    const t = Date.now();
+    if (lastSample && pending < lastSample.pending) {
+      const dt = (t - lastSample.t) / 1000;
+      if (dt > 0.5) {
+        const rate = (lastSample.pending - pending) / dt; // rows/sec
+        if (rate > 0) etaSeconds = Math.round(pending / rate);
+      }
+    }
+    if (!lastSample || pending !== lastSample.pending) lastSample = { pending, t };
+    if (pending <= 0) etaSeconds = 0;
+  }
+
   async function loadStatus() {
     try {
       const r = await fetch(`${apiBase()}/api/materialize/status`);
       if (!r.ok) throw new Error();
       st = await r.json();
+      if (st) noteProgress(st.pendingTotal);
       loaded = true;
     } catch {
       loaded = true; // stay quiet — the section just hides when there are no AI tags
     }
   }
+
+  // Set the throttle. Reset the ETA sample so it re-measures at the new rate.
+  async function setPriority(p: string) {
+    lastSample = null;
+    etaSeconds = null;
+    const r = await fetch(`${apiBase()}/api/materialize/priority`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ priority: p }),
+    });
+    if (r.ok) st = (await r.json()).status as Status;
+  }
+  const fmtEta = (s: number) =>
+    s >= 90 ? `${Math.round(s / 60)} min` : `${Math.max(1, Math.round(s))}s`;
 
   // "Materialize now" drains the whole queue by looping bounded slices, so each
   // request stays short and the bars advance live. Stops when nothing is pending,
@@ -67,6 +100,7 @@
         if (!r.ok) break;
         const body = await r.json();
         st = body.status as Status;
+        if (st) noteProgress(st.pendingTotal);
         if (!st || st.pendingTotal <= 0) break;
         if ((body.changed ?? 0) === 0 && st.status !== "paused") break; // no progress → stop
         if (st.status === "paused") break;
@@ -126,11 +160,29 @@
       <span class="sub">
         {#if st.pendingTotal > 0}
           {st.pendingTotal} transaction-verdict{st.pendingTotal === 1 ? "" : "s"} to compute
+          {#if etaSeconds && etaSeconds > 0} · ~{fmtEta(etaSeconds)} left{/if}
         {:else}
           all AI tags materialized
         {/if}
       </span>
     </div>
+
+    {#if !demo}
+      <div class="prio">
+        <span class="plabel">Priority</span>
+        {#each ["high", "medium", "low"] as p}
+          <button
+            type="button"
+            class="pbtn"
+            class:active={(st.priority ?? "medium") === p}
+            onclick={() => setPriority(p)}
+          >{p}</button>
+        {/each}
+        <span class="phint">
+          Low leaves the GPU mostly free (slower); high is fastest but uses most of it.
+        </span>
+      </div>
+    {/if}
 
     <div class="bars">
       {#each st.perTag as t}
@@ -277,6 +329,45 @@
     gap: 10px;
     margin-top: 12px;
     flex-wrap: wrap;
+  }
+  .prio {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .plabel {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-right: 2px;
+  }
+  .pbtn {
+    padding: 3px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    text-transform: capitalize;
+  }
+  .pbtn:hover {
+    border-color: var(--accent);
+  }
+  .pbtn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06101f;
+    font-weight: 600;
+  }
+  .phint {
+    flex-basis: 100%;
+    font-size: 11px;
+    color: var(--text-dim);
   }
   .paused {
     font-size: 12px;

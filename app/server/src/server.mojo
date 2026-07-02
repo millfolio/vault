@@ -66,6 +66,9 @@ from vault.derive.store import (
     materialize_status_json,
     ml_materialize_slice,
     set_pause,
+    get_priority,
+    set_priority,
+    nap_ms_for_priority,
     preview_ml_json,
     add_category,
     verify_amount_password,
@@ -526,6 +529,8 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_materialize_pause(req)
         if path == "/api/materialize/resume":
             return self.handle_materialize_resume()
+        if path == "/api/materialize/priority":
+            return self.handle_materialize_priority(req)
         if path == "/api/tags/preview-ai":
             return self.handle_tags_preview_ai(req)
         if path == "/api/tags/add":
@@ -789,6 +794,22 @@ struct Api(Copyable, Handler, Movable):
     def handle_materialize_resume(self) raises -> Response:
         """POST /api/materialize/resume → clear any pause (resume now)."""
         set_pause(0)
+        return _cors(
+            ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
+        )
+
+    def handle_materialize_priority(self, req: Request) raises -> Response:
+        """POST /api/materialize/priority {"priority":"high"|"medium"|"low"} → set the
+        background materializer's throttle. Low naps ~5s between classify slices (GPU
+        mostly free), high ~0.1s (fastest). Returns the fresh status (with priority).
+        """
+        var p: String
+        try:
+            var j = loads(req.text())
+            p = j["priority"].string_value()
+        except:
+            return _cors(bad_request('{"error":"expected {priority}"}'))
+        set_priority(p)
         return _cors(
             ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
         )
@@ -1062,15 +1083,15 @@ def _materialize_worker(arg: _OpaquePtr) -> _OpaquePtr:
     longer when idle (so a freshly-created tag starts within a few seconds). A pthread
     start routine must NEVER raise — swallow everything."""
     while True:
-        var changed: Int
+        var nap_us = 3000000  # ~3s idle poll for newly-pending work
         try:
-            changed = ml_materialize_slice(_engine_url())
+            if ml_materialize_slice(_engine_url()) > 0:
+                # Throttle between active slices per the user's priority — low leaves
+                # long GPU-idle gaps (laptop stays usable), high runs near back-to-back.
+                nap_us = nap_ms_for_priority(get_priority()) * 1000
         except:
-            changed = 0
-        if changed > 0:
-            _usleep(300000)  # ~0.3s between active slices (engine not pegged)
-        else:
-            _usleep(3000000)  # ~3s idle poll for newly-pending work
+            pass
+        _usleep(nap_us)
 
 
 def _progress_label(line: String) raises -> String:

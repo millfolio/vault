@@ -62,7 +62,9 @@ export interface TagsEvent {
 export interface TagProposalEvent {
   type: "tag-proposal";
   name: string;
-  keywords: string;
+  ml?: boolean;      // true = AI rule (prompt), false/absent = keyword rule
+  keywords?: string; // keyword rule: comma-joined keywords
+  prompt?: string;   // AI rule: the yes/no question to classify with
 }
 
 export type ServerEvent =

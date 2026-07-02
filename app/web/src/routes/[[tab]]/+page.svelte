@@ -16,7 +16,7 @@
     | { kind: "status"; id: string; stepId: string; label: string; state: StepState; detail?: string }
     | { kind: "debug"; id: string; title: string; body: string; language?: string }
     | { kind: "tags"; id: string; tags: string }
-    | { kind: "tag-proposal"; id: string; name: string; keywords: string }
+    | { kind: "tag-proposal"; id: string; name: string; ml?: boolean; keywords?: string; prompt?: string }
     | {
         kind: "approval";
         id: string;
@@ -194,8 +194,16 @@
       case "tag-proposal":
         // The model suggested a reusable tag for a category that isn't one yet —
         // surface it so the user can save it (next time = a fast .tags filter).
-        if (e.name && e.keywords)
-          items.push({ kind: "tag-proposal", id: uid(), name: e.name, keywords: e.keywords });
+        // AI form carries `prompt` (a yes/no question); keyword form carries `keywords`.
+        if (e.name && (e.prompt || e.keywords))
+          items.push({
+            kind: "tag-proposal",
+            id: uid(),
+            name: e.name,
+            ml: !!e.ml,
+            keywords: e.keywords ?? "",
+            prompt: e.prompt ?? "",
+          });
         break;
       case "debug":
         items.push({ kind: "debug", id: uid(), title: e.title, body: e.body, language: e.language });
