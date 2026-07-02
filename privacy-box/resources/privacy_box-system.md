@@ -53,7 +53,7 @@ Questions are open-ended but personal, e.g.
 |---|---|---|
 | `manifest` | `manifest() -> List[VaultFile]` | the aliased file list; each `VaultFile` has **`.alias`** (e.g. `file_0`), `.kind` (`"csv"`/`"pdf"`/`"md"`/`"docx"`), `.size`, and `.columns` (aliased CSV columns; empty otherwise). Read it; never CONSTRUCT one. (`alias` is a reserved Mojo keyword, but member access `f.alias` reads the field fine — use `.alias`, NOT `.id`.) |
 | `search` | `search(query: String, k: Int) -> List[Chunk]` | **semantic search across the whole indexed vault**; each `Chunk` has `.file_alias`, `.text`, `.score`. **Similarity-ranked top-k** — great to *find* the relevant passages for an open question, but it returns only ~k chunks, so it **structurally undercounts aggregations** (a file can have hundreds of chunks). Do NOT use it to count/sum/total — use `transactions`/`file_chunks`/`csv_rows` for those. |
-| `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date`, `.desc` (merchant), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out), and `.tags` (a `List[String]` of category tags assigned at index time — currently `phone`/`travel`/`restaurant`/`groceries`/`health`; empty when none match). These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest, `.tags` to filter by category — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
+| `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date` (a normalized ISO **`"YYYY-MM-DD"`** string, or `""` if unknown — already includes the year, so compare/sort directly and split on `"-"` for day math; do NOT assume `M/D`), `.desc` (merchant), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out), and `.tags` (a `List[String]` of category tags assigned at index time — currently `phone`/`travel`/`restaurant`/`groceries`/`health`; empty when none match). These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest, `.tags` to filter by category — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
 | `file_chunks` | `file_chunks(file_alias: String) -> List[String]` | **EVERY chunk of one file, in document order** — complete coverage for enumeration (count/sum/max), unlike `search`'s top-k. Reuses the index's already-extracted text. Use this to scan a whole file. |
 | `csv_rows` | `csv_rows(file_alias: String) -> List[Row]` | a table's rows; columns by alias (`row[0]`, `row["col_2"]`) — exact + complete for a CSV |
 | `pdf_text` | `pdf_text(file_alias: String) -> String` | extracted text of a PDF (pdftotext) |
@@ -377,45 +377,88 @@ def main() raises:
         print_answer("I couldn't find any purchases with amounts in your vault.")
 ```
 
-**"What is my oldest transaction?"** (statement dates are M/D — fold in the year)
-Statement transaction lines show the **month/day only** (`4/6`); the **year** is
-in the header / statement period, not on the line. So read the year ONCE, then
-fold each transaction's M/D with `iso_date(year, md)` (returns sortable
-`YYYY-MM-DD`, or `""` when it isn't a date). Compare with `<`.
+**"What is my oldest / most recent transaction?"** (`transactions().date` is ISO — compare directly)
+`Txn.date` is a normalized `"YYYY-MM-DD"`, so a running min/max is a plain string
+compare — NO `ask_local`, NO year-folding. (Only if every `transactions()` is empty
+do you fall back to `file_chunks` + `ask_local` + `iso_date` on raw chunk text.)
 ```mojo
 from vault import *
 def main() raises:
-    var hits = search("statement period transactions purchases dates amounts", 40)
-    # 1) the statement year (first one clearly stated wins).
-    var year = 0
-    for c in hits:
-        var y = ask_local(
-            "Use ONLY the text. If it states the statement's year (e.g. the"
-            " statement period or a header date), reply with just that 4-digit"
-            " year. Otherwise reply 'none'. Do not guess.", c.text)
-        var ys = String(y.strip())
-        if ys != "none" and ys != "":
-            year = Int(atof(ys)); break
-    # 2) running min over real transaction dates, M/D folded with the year.
-    var have = False
+    var files = manifest()
     var oldest = String("")          # sentinel, not None
-    for i in range(len(hits)):
-        progress("scanning " + String(i + 1) + "/" + String(len(hits)))
-        ref c = hits[i]
-        var md = ask_local(
-            "Use ONLY the text. If it clearly contains a transaction, reply with"
-            " just its month/day as M/D (e.g. 4/6). Otherwise reply 'none'. Do not"
-            " guess or invent.", c.text)
-        var iso = iso_date(year, String(md.strip()))   # "" when not a date
-        if iso == "":
-            continue
-        if not have or iso < oldest:
-            have = True
-            oldest = iso
-    if have:
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)
+        for t in range(len(txns)):
+            var d = txns[t].date
+            if d == "":
+                continue
+            if oldest == "" or d < oldest:
+                oldest = d
+    if oldest != "":
         print_answer("Your oldest transaction is from " + oldest + ".")
     else:
         print_answer("I couldn't find any dated transactions in your vault.")
+```
+
+**"How much do I spend on groceries per week?"** (a RATE = total ÷ time span; use the ISO `.date`)
+Sum the matching transactions' `.amount` AND track the min & max `.date` (ISO, so a
+plain `<`/`>` compare finds them). The span is a day-number difference; the weekly
+rate is `total / (span_days / 7)`. CLAMP the span to at least one period so a
+single-day range doesn't collapse to "per week == total". Same shape for per-month
+(`/ 30.44`) or per-day. Filter the category with a tag when its note fits (here
+`groceries`), else classify inline as usual.
+```mojo
+from vault import *
+
+def day_num(iso: String) raises -> Int:
+    # ISO "YYYY-MM-DD" -> Julian day number (for date differences).
+    var p = iso.split("-")
+    if len(p) < 3:
+        return 0
+    var y = Int(atof(String(p[0])))
+    var m = Int(atof(String(p[1])))
+    var d = Int(atof(String(p[2])))
+    var a = (14 - m) // 12
+    var yy = y + 4800 - a
+    var mm = m + 12 * a - 3
+    return d + (153 * mm + 2) // 5 + 365 * yy + yy // 4 - yy // 100 + yy // 400 - 32045
+
+def main() raises:
+    var files = manifest()
+    var total = 0.0
+    var n = 0
+    var lo = String("")
+    var hi = String("")
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit":
+                continue
+            var is_g = False
+            for k in range(len(x.tags)):
+                if x.tags[k] == "groceries":
+                    is_g = True
+                    break
+            if not is_g:
+                continue
+            total += x.amount
+            n += 1
+            if x.date != "":
+                if lo == "" or x.date < lo:
+                    lo = x.date
+                if hi == "" or x.date > hi:
+                    hi = x.date
+    if n == 0:
+        print_answer("I couldn't find any grocery transactions in your vault.")
+        return
+    var weeks = 1.0
+    if lo != "" and hi != "":
+        var span = Float64(day_num(hi) - day_num(lo))
+        if span >= 7.0:
+            weeks = span / 7.0
+    print_answer("You spend about " + money(total / weeks) + " per week on groceries ("
+        + money(total) + " across " + String(n) + " transactions).")
 ```
 
 **"When do I renew my insurance?"**

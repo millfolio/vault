@@ -33,7 +33,8 @@ comptime _EPS = 0.005  # half-a-cent tolerance for money reconciliation
 struct Txn(Copyable, Movable):
     """One extracted transaction. `amount` is a non-negative MAGNITUDE; the sign of
     the money flow is in `direction` (`"credit"` = money in, `"debit"` = money out,
-    `""` = unknown). `date` is the raw statement date token (e.g. `"4/20"`).
+    `""` = unknown). `date` is a normalized ISO date `"YYYY-MM-DD"` (or `""` if the
+    date is unknown) — safe for direct comparison, sorting, and span math.
     `tags` are derived category tags (e.g. `phone`, `travel`) materialised at index
     time from the description — empty at extraction, populated when read back from
     the index (see `select_txns`); multi-valued (see `vault.derive`)."""
@@ -1355,14 +1356,31 @@ def dedupe_txns(rows: List[TxnRow]) raises -> List[TxnRow]:
     return out^
 
 
+def _row_iso_date(r: TxnRow) raises -> String:
+    """The row's date as a GUARANTEED ISO `"YYYY-MM-DD"` (combining the stored `year`
+    with the raw `M/D` token via `iso_date`), or `""` when the year/date is unknown.
+    This is what the API `Txn.date` exposes so generated programs can do date math
+    (spans, per-week/month rates, sorting) without guessing the format — never the
+    raw `M/D` token, and never a bogus `0000-…` for a row with no year."""
+    if r.year > 0:
+        return iso_date(r.year, r.date)
+    # No stored year — only produce a date if the token itself embeds one
+    # (`M/D/YYYY`); otherwise it's genuinely unknown → "".
+    var maybe = iso_date(0, r.date)
+    if maybe != "" and not maybe.startswith("0000"):
+        return maybe^
+    return String("")
+
+
 def select_txns(rows: List[TxnRow], file_alias: String) raises -> List[Txn]:
-    """The Txns for one file (in stored order)."""
+    """The Txns for one file (in stored order). `Txn.date` is normalized to ISO
+    `"YYYY-MM-DD"` (see `_row_iso_date`)."""
     var out = List[Txn]()
     for i in range(len(rows)):
         ref r = rows[i]
         if r.falias == file_alias:
             var t = Txn(
-                r.date.copy(), r.desc.copy(), r.amount, r.direction.copy()
+                _row_iso_date(r), r.desc.copy(), r.amount, r.direction.copy()
             )
             t.tags = r.tags.copy()
             out.append(t^)

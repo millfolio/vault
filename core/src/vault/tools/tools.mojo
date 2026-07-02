@@ -361,7 +361,8 @@ def file_chunks(file_alias: String) raises -> List[String]:
 
 def transactions(file_alias: String) raises -> List[Txn]:
     """The reconcile-VERIFIED structured transactions of a statement file: a list of
-    `Txn` with `.date` (raw `M/D`), `.desc` (merchant/description), `.amount` (a
+    `Txn` with `.date` (ISO `"YYYY-MM-DD"`, or `""` if unknown), `.desc`
+    (merchant/description), `.amount` (a
     non-negative magnitude), and `.direction` (`"credit"` money-in / `"debit"`
     money-out). Extracted ONCE at index time and kept ONLY when they reconcile
     against the statement's own arithmetic (running balance or printed totals), so
@@ -421,7 +422,9 @@ def ask_local(instruction: String, content: String) raises -> String:
             # Mojo json lib crashes (uncatchable debug_assert) indexing that trailing
             # nested object, so parse the numbers straight from the raw response text.
             _stat_model_from_raw(raw)
-            _log_local(msg, out)  # debug: what was sent to the local model + its reply
+            _log_local(
+                msg, out
+            )  # debug: what was sent to the local model + its reply
             return out
         except:
             attempt += 1
@@ -583,7 +586,8 @@ def _log_local(sent: String, got: String) raises:
     """When $MILLFOLIO_LOG_LOCAL is set, emit one on-device-model exchange to fd 1
     under LOCAL_SENTINEL — `<sent>\x1f=>\x1f<got>` with newlines escaped to `\\n` so
     it stays a single line — via the same unbuffered raw write(2) as progress(), so
-    it survives the run sandbox + the captured-stdout buffering. No-op otherwise."""
+    it survives the run sandbox + the captured-stdout buffering. No-op otherwise.
+    """
     if getenv("MILLFOLIO_LOG_LOCAL", "") == "":
         return
     var line = String(LOCAL_SENTINEL)

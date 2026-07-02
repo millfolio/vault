@@ -554,6 +554,32 @@ def main() raises:
     )
     _say(ss, "transactions: select_txns returns file_0's two rows (with tags)")
     ok = ss and ok
+
+    # Txn.date is normalized to ISO YYYY-MM-DD (row year folded into the M/D token);
+    # "" when the year is unknown (so it's never a bogus 0000-.. date).
+    var isorows = List[TxnRow]()
+    isorows.append(
+        TxnRow("f9", "3/5", 10.0, "debit", "a", List[String](), 0, 2026)
+    )
+    isorows.append(
+        TxnRow("f9", "12/25", 20.0, "debit", "b", List[String](), 0, 2025)
+    )
+    isorows.append(TxnRow("f9", "4/2", 5.0, "debit", "c", List[String](), 0, 0))
+    var iso = select_txns(isorows, String("f9"))
+    var iso_ok = (
+        len(iso) == 3
+        and iso[0].date == "2026-03-05"
+        and iso[1].date == "2025-12-25"
+        and iso[2].date == ""
+    )
+    _say(
+        iso_ok,
+        (
+            "transactions: select_txns normalizes .date to ISO (year folded; ''"
+            " when no year)"
+        ),
+    )
+    ok = iso_ok and ok
     var dropped = drop_aliases(back, [String("file_0")])
     var sd = len(dropped) == 1 and dropped[0].falias == "file_1"
     _say(sd, "transactions: drop_aliases evicts file_0, keeps file_1")
