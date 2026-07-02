@@ -23,8 +23,13 @@
   // The build currently serving this page (vite define) — to highlight the live row.
   const CURRENT = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
 
+  // Cumulative ML-tag backfill dedup savings: identical transaction descriptions
+  // (recurring charges) are classified once, not per row. saved = seen - classified.
+  type Backfill = { rows_seen: number; rows_classified: number; saved: number };
+
   let model = $state("");
   let records = $state<Rec[]>([]);
+  let backfill = $state<Backfill | null>(null);
   let loaded = $state(false);
   let failed = $state(false);
 
@@ -42,6 +47,8 @@
       .then((d) => {
         model = typeof d?.model === "string" ? d.model : "";
         records = Array.isArray(d?.records) ? d.records : [];
+        backfill =
+          d?.backfill && typeof d.backfill.rows_seen === "number" ? d.backfill : null;
         loaded = true;
       })
       .catch(() => {
@@ -153,6 +160,24 @@
           <div class="cap">avg tokens (prefill / gen)</div>
         </div>
       </section>
+
+      {#if backfill && backfill.rows_seen > 0}
+        <h2>AI-tag backfill dedup</h2>
+        <section class="cards">
+          <div class="card">
+            <div class="num">{backfill.saved.toLocaleString()}</div>
+            <div class="cap">classifications skipped (duplicate descriptions)</div>
+          </div>
+          <div class="card">
+            <div class="num">{Math.round((backfill.saved / backfill.rows_seen) * 100)}<span class="unit">%</span></div>
+            <div class="cap">of {backfill.rows_seen.toLocaleString()} rows were duplicates</div>
+          </div>
+          <div class="card">
+            <div class="num">{backfill.rows_classified.toLocaleString()}</div>
+            <div class="cap">distinct descriptions classified</div>
+          </div>
+        </section>
+      {/if}
 
       <h2>Average per deployed version</h2>
       <div class="tablewrap">

@@ -66,6 +66,7 @@ from vault.derive.store import (
     save_categories,
     preview_categories,
     backfill_status_json,
+    backfill_dedup_json,
     ml_backfill_slice,
     set_pause,
     get_priority,
@@ -777,7 +778,9 @@ struct Api(Copyable, Handler, Movable):
                 + json_escape(_model_label())
                 + ',"records":['
                 + recs
-                + "]}"
+                + '],"backfill":'
+                + backfill_dedup_json()
+                + "}"
             )
         )
 
