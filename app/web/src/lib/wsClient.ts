@@ -30,12 +30,15 @@ class WsSession implements Session {
     url: string,
     text: string,
     private onEvent: (e: ServerEvent) => void,
+    demoToken?: string,
   ) {
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
       this.ready = true;
-      this.put({ type: "ask", id: safeId(), text });
+      // demo_token: the demo bot gate echoes the Turnstile-minted token on the ask
+      // frame (server on_connect validates it). Omitted (harmless) outside the demo.
+      this.put({ type: "ask", id: safeId(), text, ...(demoToken ? { demo_token: demoToken } : {}) });
       for (const m of this.pending) this.write(m);
       this.pending = [];
     };
@@ -88,10 +91,13 @@ class WsSession implements Session {
   }
 }
 
-export function createWsClient(url: string): MillfolioClient {
+export function createWsClient(
+  url: string,
+  getDemoToken?: () => string,
+): MillfolioClient {
   return {
     ask(text, onEvent) {
-      return new WsSession(url, text, onEvent);
+      return new WsSession(url, text, onEvent, getDemoToken?.());
     },
   };
 }

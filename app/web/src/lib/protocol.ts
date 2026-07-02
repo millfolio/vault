@@ -10,7 +10,7 @@ export type StepState =
   | "error";
 
 export type ClientMessage =
-  | { type: "ask"; id: string; text: string }
+  | { type: "ask"; id: string; text: string; demo_token?: string }
   | { type: "approve"; stepId: string }
   | { type: "reject"; stepId: string; reason?: string };
 

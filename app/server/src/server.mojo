@@ -34,7 +34,7 @@ from std.os.path import isfile, isdir, getsize, exists
 
 
 from flare.prelude import *
-from flare.http import Handler
+from flare.http import Handler, HttpClient
 from flare.ws import WsConnection, WsOpcode, WsCloseCode
 from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 
@@ -298,6 +298,103 @@ def _new_token() -> String:
     return out^
 
 
+# ── Cloudflare Turnstile: demo-only human/bot gate ─────────────────────────────
+# The public replay demo (demo.millfolio.app) gates chat behind a Turnstile check:
+# the intro modal solves it, POSTs the token to /api/demo/verify, we validate it with
+# Cloudflare siteverify, then mint a short-lived demo-access token the client echoes
+# on each WS chat frame (on_connect rejects a missing/invalid one). Enabled ONLY when
+# MILLFOLIO_TURNSTILE_SECRET is set AND we're the demo — so the real product + local
+# dev are untouched. Keys come from a Cloudflare Turnstile widget (sitekey is public,
+# secret is server-side); Cloudflare's test keys work on any host incl. localhost.
+
+
+def _turnstile_sitekey() -> String:
+    return String(getenv("MILLFOLIO_TURNSTILE_SITEKEY", "").strip())
+
+
+def _turnstile_secret() -> String:
+    return String(getenv("MILLFOLIO_TURNSTILE_SECRET", "").strip())
+
+
+def _turnstile_enabled() raises -> Bool:
+    """Active only in the demo AND when a secret is configured (else a no-op).
+    """
+    return _is_demo() and _turnstile_secret() != ""
+
+
+def _demo_tokens_path() -> String:
+    return _config_dir() + "/demo_tokens.tsv"
+
+
+def _verify_turnstile(token: String, remoteip: String) raises -> Bool:
+    """POST the client token to Cloudflare siteverify with our secret; True iff
+    `success`. Fails CLOSED — any empty token / network / parse error → False. Uses a
+    JSON body so the token's base64url chars need no form-encoding."""
+    if token == "":
+        return False
+    var body = String('{"secret":') + json_escape(_turnstile_secret())
+    body += ',"response":' + json_escape(token)
+    if remoteip != "":
+        body += ',"remoteip":' + json_escape(remoteip)
+    body += "}"
+    var req = Request(
+        method="POST",
+        url="https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        body=List[UInt8](body.as_bytes()),
+    )
+    req.headers.set("content-type", "application/json")
+    try:
+        var client = HttpClient()
+        var resp = client.send(req)
+        var v = resp.json()
+        return v["success"].bool_value()
+    except:
+        return False
+
+
+def _mint_demo_token() raises -> String:
+    """Append a fresh 30-min demo-access token to the set (concurrent visitors each
+    get their own), pruning expired entries as we rewrite. Returns the new token.
+    """
+    var tok = _new_token()
+    var exp = _epoch_s() + Int64(1800)
+    var kept = String("")
+    if exists(_demo_tokens_path()):
+        var cur: String
+        with open(_demo_tokens_path(), "r") as f:
+            cur = f.read()
+        var lines = cur.split("\n")
+        for i in range(len(lines)):
+            var ln = String(lines[i].strip())
+            if ln == "":
+                continue
+            var parts = ln.split("\t")
+            if len(parts) >= 2 and _epoch_s() < Int64(
+                atol(String(parts[1].strip()))
+            ):
+                kept += ln + "\n"
+    kept += tok + "\t" + String(exp) + "\n"
+    with open(_demo_tokens_path(), "w") as f:
+        f.write(kept)
+    return tok^
+
+
+def _demo_token_valid(tok: String) raises -> Bool:
+    """True iff `tok` is a known, unexpired demo-access token (minted after a
+    successful Turnstile solve)."""
+    if tok == "" or not exists(_demo_tokens_path()):
+        return False
+    var cur: String
+    with open(_demo_tokens_path(), "r") as f:
+        cur = f.read()
+    var lines = cur.split("\n")
+    for i in range(len(lines)):
+        var parts = String(lines[i].strip()).split("\t")
+        if len(parts) >= 2 and String(parts[0].strip()) == tok:
+            return _epoch_s() < Int64(atol(String(parts[1].strip())))
+    return False
+
+
 def unauthorized(msg: String = "Unauthorized") -> Response:
     """A 401 (mirrors flare's `bad_request`)."""
     var resp = Response(
@@ -538,15 +635,26 @@ struct Api(Copyable, Handler, Movable):
             return _cors(ok("millfolio ok"))
         # The on-device model name — the UI shows it in the bottom bar.
         if path == "/api/model":
+            # `turnstile_sitekey` is non-empty only when the demo gate is active — the
+            # client renders the widget iff it's present.
+            var sitekey = (
+                _turnstile_sitekey() if _turnstile_enabled() else String("")
+            )
             return _cors(
                 ok_json(
                     '{"model":'
                     + json_escape(_model_label())
                     + ',"version":'
                     + json_escape(_app_version())
+                    + ',"turnstile_sitekey":'
+                    + json_escape(sitekey)
                     + "}"
                 )
             )
+        # Demo bot gate: validate a Turnstile token → mint a demo-access token the
+        # client echoes on WS chat frames. No-op (empty token) when Turnstile is off.
+        if req.method == Method.POST and path == "/api/demo/verify":
+            return self.handle_demo_verify(req)
         # Instantaneous GPU utilization (%); the bottom bar keeps a 30s average.
         if path == "/api/gpu":
             return _cors(ok_json('{"util":' + String(_gpu_util_pct()) + "}"))
@@ -740,6 +848,29 @@ struct Api(Copyable, Handler, Movable):
         with open(_reveal_token_path(), "w") as f:
             f.write(tok + " " + String(_epoch_s() + 900))  # 15-min TTL
         return _cors(ok_json('{"token":"' + tok + '"}'))
+
+    def handle_demo_verify(self, req: Request) raises -> Response:
+        """POST /api/demo/verify {token} → validate the Turnstile token with Cloudflare
+        siteverify; on success mint a demo-access token the client echoes on WS chat
+        frames. When the gate is OFF (not demo / no secret), return ok with an empty
+        token so the client flow is a harmless no-op."""
+        if not _turnstile_enabled():
+            return _cors(ok_json('{"ok":true,"token":""}'))
+        var token: String
+        try:
+            var j = loads(req.text())
+            token = j["token"].string_value()
+        except:
+            return _cors(bad_request('{"error":"expected {token}"}'))
+        # Cloudflare passes the real client IP in cf-connecting-ip at the edge.
+        var ip = String(req.headers.get("cf-connecting-ip"))
+        if not _verify_turnstile(token, ip):
+            return _cors(
+                unauthorized('{"error":"turnstile verification failed"}')
+            )
+        return _cors(
+            ok_json('{"ok":true,"token":"' + _mint_demo_token() + '"}')
+        )
 
     def _reveal_authorized(self, req: Request) raises -> Bool:
         """True iff the request carries a valid, unexpired reveal token
@@ -1434,6 +1565,17 @@ def on_connect(mut conn: WsConnection) raises:
     var question = field(frame.text_payload(), "text")
     if question == "":
         conn.send_text(error_event("empty or malformed ask"))
+        conn.close(WsCloseCode.NORMAL)
+        return
+    # Demo bot gate: require a valid demo-access token (minted after a Turnstile solve)
+    # on every chat frame. Server-enforced, so a bot can't skip the client widget. No-op
+    # when the gate is off (real product / local dev / no secret configured).
+    if _turnstile_enabled() and not _demo_token_valid(
+        field(frame.text_payload(), "demo_token")
+    ):
+        conn.send_text(
+            error_event("please complete the human check to use the demo")
+        )
         conn.close(WsCloseCode.NORMAL)
         return
     var ticket = (

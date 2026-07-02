@@ -43,7 +43,9 @@
     // wrongly fell back to the mock over Tailscale, so we invert: real WS unless dev.
     if (location.port === "5173") return createMockClient();
     const scheme = location.protocol === "https:" ? "wss" : "ws";
-    return createWsClient(`${scheme}://${location.host}/chat`);
+    // Pass a live getter for the demo-access token (empty until the Turnstile gate is
+    // solved; the WS ask frame includes it so the server can validate — demo only).
+    return createWsClient(`${scheme}://${location.host}/chat`, () => demoToken);
   }
   const client = pickClient();
 
@@ -158,6 +160,19 @@
   // so a reload within the same tab doesn't nag, but every new visitor sees it once.
   const INTRO_KEY = "millfolio-demo-intro-dismissed";
   let showIntro = $state(false);
+  // Cloudflare Turnstile (demo bot gate). The server exposes a non-empty sitekey ONLY
+  // when the gate is active; the intro modal then renders the widget, and "Got it" is
+  // blocked until it's solved. On solve we POST the token to /api/demo/verify, which
+  // (server-side) validates it with Cloudflare and mints `demoToken` — echoed on every
+  // WS chat ask (server on_connect rejects a missing/invalid one). Empty sitekey → the
+  // whole gate is a no-op (real product / local dev).
+  let turnstileSitekey = $state("");
+  let turnstileToken = $state(""); // the widget's response token (once solved)
+  let demoToken = $state(""); // our minted demo-access token (post-verify)
+  let turnstileError = $state("");
+  let verifying = $state(false);
+  let turnstileEl = $state<HTMLDivElement | undefined>(undefined);
+  let turnstileWidgetId: string | undefined;
   // Outside the demo: true when the on-device vault has nothing indexed yet, so we can
   // prompt the user to run `mill index` instead of dropping them into an empty chat.
   let vaultEmpty = $state(false);
@@ -182,6 +197,13 @@
       .then((d) => {
         if (d && typeof d.model === "string") modelName = d.model;
         if (d && typeof d.version === "string") serverVersion = d.version;
+        // Demo bot gate: load Turnstile's script once we know the sitekey (the
+        // $effect below renders the widget into the intro modal). Explicit render so
+        // we control placement + callbacks.
+        if (d && typeof d.turnstile_sitekey === "string" && d.turnstile_sitekey) {
+          turnstileSitekey = d.turnstile_sitekey;
+          loadTurnstileScript();
+        }
       })
       .catch(() => {});
     // Bottom-bar backfill + GPU telemetry — only on a real install (the demo has no
@@ -197,6 +219,61 @@
     try {
       sessionStorage.setItem(INTRO_KEY, "1");
     } catch {}
+  }
+
+  // ── Turnstile (demo only) ──────────────────────────────────────────────────
+  const TURNSTILE_SRC =
+    "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+  let turnstileScriptLoaded = $state(false);
+  function loadTurnstileScript() {
+    if (typeof document === "undefined") return;
+    if ((window as any).turnstile) { turnstileScriptLoaded = true; return; }
+    if (document.querySelector(`script[src="${TURNSTILE_SRC}"]`)) return;
+    const s = document.createElement("script");
+    s.src = TURNSTILE_SRC;
+    s.async = true;
+    s.defer = true;
+    s.onload = () => (turnstileScriptLoaded = true);
+    document.head.appendChild(s);
+  }
+  // Render the widget once the modal is up, the script is ready, and we haven't yet.
+  $effect(() => {
+    if (!showIntro || !turnstileSitekey || !turnstileScriptLoaded) return;
+    if (!turnstileEl || turnstileWidgetId !== undefined) return;
+    const ts = (window as any).turnstile;
+    if (!ts) return;
+    turnstileWidgetId = ts.render(turnstileEl, {
+      sitekey: turnstileSitekey,
+      callback: (t: string) => { turnstileToken = t; turnstileError = ""; },
+      "expired-callback": () => (turnstileToken = ""),
+      "error-callback": () => { turnstileToken = ""; turnstileError = "Verification failed — please retry."; },
+    });
+  });
+  // "Got it": when the gate is on, verify the Turnstile token server-side (mints the
+  // demo-access token) BEFORE dismissing; otherwise just dismiss.
+  async function acknowledgeIntro() {
+    if (!turnstileSitekey) { dismissIntro(); return; }
+    if (!turnstileToken || verifying) return;
+    verifying = true;
+    turnstileError = "";
+    try {
+      const r = await fetch("/api/demo/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: turnstileToken }),
+      });
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      demoToken = d.token ?? "";
+      dismissIntro();
+    } catch {
+      turnstileError = "Verification failed — please retry.";
+      turnstileToken = "";
+      const ts = (window as any).turnstile;
+      if (ts && turnstileWidgetId !== undefined) ts.reset(turnstileWidgetId);
+    } finally {
+      verifying = false;
+    }
   }
 
   // Safe unique id: crypto.randomUUID() throws in a non-secure context (plain
@@ -301,11 +378,12 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => { if (showIntro && e.key === "Escape") dismissIntro(); }} />
+<!-- Escape closes the intro only when the human-check gate isn't active (don't let it be bypassed). -->
+<svelte:window onkeydown={(e) => { if (showIntro && !turnstileSitekey && e.key === "Escape") dismissIntro(); }} />
 
 {#if showIntro}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="intro-backdrop" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) dismissIntro(); }}>
+  <div class="intro-backdrop" role="presentation" onclick={(e) => { if (e.target === e.currentTarget && !turnstileSitekey) dismissIntro(); }}>
     <div class="intro-card" role="dialog" aria-modal="true" aria-labelledby="intro-title" tabindex="-1">
       <h2 id="intro-title">About this demo</h2>
       <p>
@@ -321,7 +399,18 @@
       <p>
         See <a href="https://millfolio.app" target="_blank" rel="noopener">millfolio.app</a>.
       </p>
-      <button class="intro-ok" onclick={dismissIntro}>Got it</button>
+      {#if turnstileSitekey}
+        <p class="ts-prompt">Quick human check to start the demo:</p>
+        <div class="ts-widget" bind:this={turnstileEl}></div>
+        {#if turnstileError}<p class="ts-error" role="alert">{turnstileError}</p>{/if}
+      {/if}
+      <button
+        class="intro-ok"
+        onclick={acknowledgeIntro}
+        disabled={verifying || (!!turnstileSitekey && !turnstileToken)}
+      >
+        {verifying ? "Verifying…" : "Got it"}
+      </button>
     </div>
   </div>
 {/if}
@@ -545,6 +634,25 @@
   }
   .intro-ok:hover {
     filter: brightness(1.08);
+  }
+  .intro-ok:disabled {
+    opacity: 0.5;
+    cursor: default;
+    filter: none;
+  }
+  .ts-prompt {
+    margin: 4px 0 8px !important;
+    font-weight: 600;
+    color: var(--text) !important;
+  }
+  .ts-widget {
+    min-height: 65px;
+    margin-bottom: 6px;
+  }
+  .ts-error {
+    color: var(--warn, #e5484d) !important;
+    font-size: 12px;
+    margin: 0 0 8px !important;
   }
   .queue-badge {
     position: fixed;
