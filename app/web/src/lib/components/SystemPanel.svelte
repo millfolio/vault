@@ -1,22 +1,22 @@
 <script lang="ts">
   // System — the operator/diagnostics tab. Collapses what used to be the separate
   // Stats and System tabs into one, with a Files|Records-style sub-tab switch:
-  //   Materialization — AI-tag materialization progress + controls
+  //   Backfill — AI-tag backfill progress + controls
   //   Stats           — per-question timing
   //   Logs            — data + log file locations
   import { untrack } from "svelte";
   import SubTabs from "./SubTabs.svelte";
-  import MaterializationPanel from "./MaterializationPanel.svelte";
+  import BackfillPanel from "./BackfillPanel.svelte";
   import StatsPanel from "./StatsPanel.svelte";
   import LogsPanel from "./LogsPanel.svelte";
 
   let {
     demo = false,
-    initialSub = "materialization",
+    initialSub = "backfill",
   }: { demo?: boolean; initialSub?: string } = $props();
 
   const TABS = [
-    { id: "materialization", label: "Materialization" },
+    { id: "backfill", label: "Backfill" },
     { id: "stats", label: "Stats" },
     { id: "logs", label: "Logs" },
   ];
@@ -31,8 +31,8 @@
     <SubTabs tabs={TABS} active={sub} onselect={(id) => (sub = id)} />
   </div>
   <div class="pane">
-    {#if sub === "materialization"}
-      <MaterializationPanel {demo} standalone />
+    {#if sub === "backfill"}
+      <BackfillPanel {demo} standalone />
     {:else if sub === "stats"}
       <StatsPanel />
     {:else}

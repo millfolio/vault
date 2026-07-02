@@ -1,6 +1,6 @@
 <script lang="ts">
   // A small segmented sub-tab switch — the Files | Records control under Vault,
-  // reused for Materialization | Stats | Logs under System. Purely presentational:
+  // reused for Backfill | Stats | Logs under System. Purely presentational:
   // the parent owns the active id and gets a callback on change.
   type Tab = { id: string; label: string };
   let {

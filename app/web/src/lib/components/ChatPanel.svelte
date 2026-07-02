@@ -439,7 +439,7 @@
           </div>
           {#if !demo}
             {#if proposalState[it.id] === "added"}
-              <span class="padded">{it.ml ? "✓ Created — materializing in the background" : "✓ Saved to your tags"}</span>
+              <span class="padded">{it.ml ? "✓ Created — backfilling in the background" : "✓ Saved to your tags"}</span>
             {:else if customizing[it.id]}
               <div class="pcustom">
                 <label class="pmltoggle" title="The model decides per transaction — no keyword list needed (slower, evaluated at index time)">
@@ -461,7 +461,7 @@
             {:else}
               <div class="pactions">
                 <button class="padd" disabled={proposalState[it.id] === "saving"} onclick={() => acceptProposal(it)}>
-                  {proposalState[it.id] === "saving" ? "Adding…" : it.ml ? "Create & materialize" : "Add as suggested"}
+                  {proposalState[it.id] === "saving" ? "Adding…" : it.ml ? "Create & backfill" : "Add as suggested"}
                 </button>
                 <button class="pbtn" onclick={() => startCustomize(it)}>Customize…</button>
                 {#if proposalState[it.id] === "error"}<span class="perr">Couldn't save</span>{/if}

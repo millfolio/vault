@@ -105,6 +105,54 @@
       : buildSha,
   );
 
+  // Bottom-bar telemetry (real install only): AI-tag backfill progress + a rolling
+  // 30-second GPU-utilization average. Both poll lightweight endpoints every 2s; the
+  // 30s window is kept here so /api/gpu can stay a cheap, stateless instantaneous read.
+  let gpuAvg = $state<number | null>(null);
+  let bkPending = $state(0);
+  let bkPriority = $state("");
+  let bkEta = $state<number | null>(null);
+  const gpuRing: { t: number; v: number }[] = [];
+  let bkLast: { pending: number; t: number } | null = null;
+  const fmtEta = (s: number) =>
+    s >= 90 ? `${Math.round(s / 60)} min` : `${Math.max(1, Math.round(s))}s`;
+
+  async function pollTelemetry() {
+    // GPU: one instantaneous sample → averaged over the last 30s (client-side ring).
+    try {
+      const r = await fetch("/api/gpu");
+      if (r.ok) {
+        const d = await r.json();
+        if (typeof d.util === "number" && d.util >= 0) {
+          const t = Date.now();
+          gpuRing.push({ t, v: d.util });
+          while (gpuRing.length && t - gpuRing[0].t > 30000) gpuRing.shift();
+          gpuAvg = Math.round(gpuRing.reduce((s, x) => s + x.v, 0) / gpuRing.length);
+        }
+      }
+    } catch {}
+    // Backfill: pending count + priority + a live ETA measured from the drain rate
+    // (mirrors the Backfill panel), so it reflects the current priority's throttle.
+    try {
+      const r = await fetch("/api/backfill/status");
+      if (r.ok) {
+        const d = await r.json();
+        bkPending = d.pendingTotal ?? 0;
+        bkPriority = d.priority ?? "";
+        const t = Date.now();
+        if (bkLast && bkPending < bkLast.pending) {
+          const dt = (t - bkLast.t) / 1000;
+          if (dt > 0.5) {
+            const rate = (bkLast.pending - bkPending) / dt; // rows/sec
+            if (rate > 0) bkEta = Math.round(bkPending / rate);
+          }
+        }
+        if (!bkLast || bkPending !== bkLast.pending) bkLast = { pending: bkPending, t };
+        if (bkPending <= 0) bkEta = 0;
+      }
+    } catch {}
+  }
+
   // Intro disclaimer — ONLY the public demo shows it (it explains the replay/queue
   // caveats that don't apply to a real local install). Remembered per browser session
   // so a reload within the same tab doesn't nag, but every new visitor sees it once.
@@ -136,6 +184,13 @@
         if (d && typeof d.version === "string") serverVersion = d.version;
       })
       .catch(() => {});
+    // Bottom-bar backfill + GPU telemetry — only on a real install (the demo has no
+    // System tab and shares a replay GPU). The mock (:5173) has no backend → fetch
+    // fails quietly and the indicators just stay hidden.
+    if (!isDemo) {
+      pollTelemetry();
+      setInterval(pollTelemetry, 2000);
+    }
   });
   function dismissIntro() {
     showIntro = false;
@@ -285,7 +340,7 @@
         <!-- The public demo has no System tab, so Stats stays top-level. -->
         <a class:active={view === "stats"} href="/stats">Stats</a>
       {:else}
-        <!-- Real install: Stats + Logs + Materialization live under one System tab. -->
+        <!-- Real install: Stats + Logs + Backfill live under one System tab. -->
         <a class:active={view === "system" || view === "stats"} href="/system">System</a>
       {/if}
     </nav>
@@ -309,7 +364,7 @@
       <!-- /tags deep-links (tag pills) open the Vault → Tags sub-tab. -->
       <VaultPanel demo={isDemo} initialSub="tags" />
     {:else if view === "system"}
-      <SystemPanel demo={isDemo} initialSub="materialization" />
+      <SystemPanel demo={isDemo} initialSub="backfill" />
     {:else if view === "stats"}
       <!-- Demo keeps a dedicated Stats tab; the real app opens System on its Stats sub-tab. -->
       {#if isDemo}
@@ -325,6 +380,22 @@
     {#if modelName}
       <span class="model" title="on-device model answering your questions">
         <span class="dot" aria-hidden="true"></span>{modelName}
+      </span>
+    {/if}
+    {#if !isDemo && bkPending > 0}
+      <a
+        class="metric link"
+        href="/system"
+        title="AI-tag backfill in progress — click to open System → Backfill"
+      >
+        <span class="mlabel">Backfill</span>
+        {#if bkEta && bkEta > 0}~{fmtEta(bkEta)}{:else}{bkPending} left{/if}
+        {#if bkPriority}· {bkPriority}{/if}
+      </a>
+    {/if}
+    {#if !isDemo && gpuAvg !== null}
+      <span class="metric" title="average GPU utilization over the last 30 seconds">
+        GPU avg: {gpuAvg}%
       </span>
     {/if}
     <span class="spacer"></span>
@@ -520,6 +591,26 @@
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .statusbar .metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    text-decoration: none;
+  }
+  .statusbar .metric.link {
+    cursor: pointer;
+  }
+  .statusbar .metric.link:hover {
+    color: var(--accent);
+  }
+  .statusbar .mlabel {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
   .statusbar .ver {
     opacity: 0.6;

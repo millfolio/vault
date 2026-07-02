@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
 
-  // AI-tag materialization: an AI rule (`tag : question?`) costs one model call per
-  // transaction, so its verdicts are materialized once and cached in the `.tags`
+  // AI-tag backfill: an AI rule (`tag : question?`) costs one model call per
+  // transaction, so its verdicts are backfilled once and cached in the `.tags`
   // column, then reused as a fast exact filter. This panel shows how far each AI
-  // rule has been materialized (a per-rule completion marker keyed on the insertion
+  // rule has been backfilled (a per-rule completion marker keyed on the insertion
   // generation), lets you drain the queue now, and pause the between-questions
-  // worker. Backed by /api/materialize/{status,run,pause,resume}.
-  // `standalone` = rendered as its own tab (System → Materialization) rather than
+  // worker. Backed by /api/backfill/{status,run,pause,resume}.
+  // `standalone` = rendered as its own tab (System → Backfill) rather than
   // embedded in another panel: it then owns its padding/scroll and shows an empty
   // state when there are no AI rules yet.
   let { demo = false, standalone = false }: { demo?: boolean; standalone?: boolean } =
@@ -61,7 +61,7 @@
 
   async function loadStatus() {
     try {
-      const r = await fetch(`${apiBase()}/api/materialize/status`);
+      const r = await fetch(`${apiBase()}/api/backfill/status`);
       if (!r.ok) throw new Error();
       st = await r.json();
       if (st) noteProgress(st.pendingTotal);
@@ -75,7 +75,7 @@
   async function setPriority(p: string) {
     lastSample = null;
     etaSeconds = null;
-    const r = await fetch(`${apiBase()}/api/materialize/priority`, {
+    const r = await fetch(`${apiBase()}/api/backfill/priority`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ priority: p }),
@@ -85,7 +85,7 @@
   const fmtEta = (s: number) =>
     s >= 90 ? `${Math.round(s / 60)} min` : `${Math.max(1, Math.round(s))}s`;
 
-  // "Materialize now" drains the whole queue by looping bounded slices, so each
+  // "Backfill now" drains the whole queue by looping bounded slices, so each
   // request stays short and the bars advance live. Stops when nothing is pending,
   // a slice makes no progress (engine down), or the user leaves.
   let stop = false;
@@ -96,7 +96,7 @@
     try {
       for (let i = 0; i < 1000; i++) {
         if (stop) break;
-        const r = await fetch(`${apiBase()}/api/materialize/run`, { method: "POST" });
+        const r = await fetch(`${apiBase()}/api/backfill/run`, { method: "POST" });
         if (!r.ok) break;
         const body = await r.json();
         st = body.status as Status;
@@ -111,7 +111,7 @@
   }
 
   async function pause(seconds: number) {
-    const r = await fetch(`${apiBase()}/api/materialize/pause`, {
+    const r = await fetch(`${apiBase()}/api/backfill/pause`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seconds }),
@@ -120,7 +120,7 @@
   }
   async function resume() {
     stop = false;
-    const r = await fetch(`${apiBase()}/api/materialize/resume`, { method: "POST" });
+    const r = await fetch(`${apiBase()}/api/backfill/resume`, { method: "POST" });
     if (r.ok) st = (await r.json()).status as Status;
   }
 
@@ -145,24 +145,24 @@
 <div class="wrap" class:standalone>
 {#if loaded && st && st.perTag.length === 0 && standalone}
   <div class="empty">
-    <h3>AI-tag materialization</h3>
+    <h3>AI-tag backfill</h3>
     <p>
       No AI category rules yet. An AI rule (<code>tag : question?</code>) is answered
       by the on-device model and cached, then reused as a fast filter. Add one in the
-      <a href="/tags">Tags</a> tab, and its materialization progress will appear here.
+      <a href="/tags">Tags</a> tab, and its backfill progress will appear here.
     </p>
   </div>
 {/if}
 {#if loaded && st && st.perTag.length > 0}
   <div class="mat">
     <div class="mhead">
-      <h3>AI-tag materialization</h3>
+      <h3>AI-tag backfill</h3>
       <span class="sub">
         {#if st.pendingTotal > 0}
           {st.pendingTotal} transaction-verdict{st.pendingTotal === 1 ? "" : "s"} to compute
           {#if etaSeconds && etaSeconds > 0} · ~{fmtEta(etaSeconds)} left{/if}
         {:else}
-          all AI tags materialized
+          all AI tags backfilled
         {/if}
       </span>
     </div>
@@ -214,7 +214,7 @@
             onclick={runDrain}
             disabled={running || st.pendingTotal === 0}
           >
-            {running ? "Materializing…" : "Materialize now"}
+            {running ? "Backfilling…" : "Backfill now"}
           </button>
           <button type="button" class="btn" onclick={() => pause(3600)}>Pause 1h</button>
         {/if}

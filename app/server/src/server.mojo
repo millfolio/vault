@@ -63,8 +63,8 @@ from vault.derive.store import (
     preview_categories,
     effective_tags,
     effective_tag_descriptions,
-    materialize_status_json,
-    ml_materialize_slice,
+    backfill_status_json,
+    ml_backfill_slice,
     set_pause,
     get_priority,
     set_priority,
@@ -210,6 +210,54 @@ def _config_dir() -> String:
     if d != "":
         return d
     return getenv("HOME", ".") + "/Library/Application Support/Millfolio/data"
+
+
+def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
+    """NUL-terminated C string for `external_call` (caller `.free()`s it)."""
+    var n = s.byte_length()
+    var p = alloc[c_char](n + 1)
+    var sp = s.unsafe_ptr()
+    for i in range(n):
+        (p + i).init_pointee_copy(c_char(Int(sp[i])))
+    (p + n).init_pointee_copy(c_char(0))
+    return p
+
+
+def _gpu_util_pct() -> Int:
+    """Instantaneous GPU utilization (%), read WITHOUT root from IOKit's
+    IOAccelerator `PerformanceStatistics` via `ioreg`. A shell pipeline extracts
+    the single "Device Utilization %" integer to a temp file we then read.
+    Returns -1 when unavailable (non-Apple-GPU host / parse miss) so the bar can
+    hide the indicator. The 30-second rolling average is kept CLIENT-side (the
+    bottom bar polls this), so a sample stays cheap + stateless."""
+    var out_path = _config_dir() + "/.gpu_util"
+    var cmd = (
+        String("ioreg -r -d 1 -c IOAccelerator 2>/dev/null | ")
+        + "sed -n 's/.*\"Device Utilization %\"=\\([0-9][0-9]*\\).*/\\1/p' | "
+        + "head -1 > '"
+        + out_path
+        + "' 2>/dev/null"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    try:
+        var s: String
+        with open(out_path, "r") as f:
+            s = f.read()
+        var cur = 0
+        var indig = False
+        var b = s.as_bytes()
+        for i in range(len(b)):
+            var c = Int(b[i])
+            if c >= 48 and c <= 57:
+                cur = cur * 10 + (c - 48)
+                indig = True
+            elif indig:
+                break
+        return cur if indig else -1
+    except:
+        return -1
 
 
 # ── WebAuthn (Touch-ID) amount gate: single-file challenge + token stores ──────
@@ -497,6 +545,9 @@ struct Api(Copyable, Handler, Movable):
                     + "}"
                 )
             )
+        # Instantaneous GPU utilization (%); the bottom bar keeps a 30s average.
+        if path == "/api/gpu":
+            return _cors(ok_json('{"util":' + String(_gpu_util_pct()) + "}"))
         # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
         if path == "/api/stats":
             return self.handle_stats()
@@ -521,16 +572,16 @@ struct Api(Copyable, Handler, Movable):
             if req.method == Method.POST:
                 return self.handle_categories_save(req)
             return self.handle_categories_get()
-        if path == "/api/materialize/status":
-            return self.handle_materialize_status()
-        if path == "/api/materialize/run":
-            return self.handle_materialize_run()
-        if path == "/api/materialize/pause":
-            return self.handle_materialize_pause(req)
-        if path == "/api/materialize/resume":
-            return self.handle_materialize_resume()
-        if path == "/api/materialize/priority":
-            return self.handle_materialize_priority(req)
+        if path == "/api/backfill/status":
+            return self.handle_backfill_status()
+        if path == "/api/backfill/run":
+            return self.handle_backfill_run()
+        if path == "/api/backfill/pause":
+            return self.handle_backfill_pause(req)
+        if path == "/api/backfill/resume":
+            return self.handle_backfill_resume()
+        if path == "/api/backfill/priority":
+            return self.handle_backfill_priority(req)
         if path == "/api/tags/preview-ai":
             return self.handle_tags_preview_ai(req)
         if path == "/api/tags/add":
@@ -748,36 +799,36 @@ struct Api(Copyable, Handler, Movable):
             return _cors(bad_request('{"error":"expected {text}"}'))
         return _cors(ok_json(preview_categories(text)))
 
-    def handle_materialize_status(self) raises -> Response:
-        """GET /api/materialize/status → per-AI-tag materialization progress
+    def handle_backfill_status(self) raises -> Response:
+        """GET /api/backfill/status → per-AI-tag backfill progress
         (`{status,paused_until,perTag:[…],pendingTotal}`) for the Tags-tab
-        Materialization panel. Lock-free read; no engine call."""
-        return _cors(ok_json(materialize_status_json()))
+        Backfill panel. Lock-free read; no engine call."""
+        return _cors(ok_json(backfill_status_json()))
 
-    def handle_materialize_run(self) raises -> Response:
-        """POST /api/materialize/run → run ONE bounded materialization slice (a
+    def handle_backfill_run(self) raises -> Response:
+        """POST /api/backfill/run → run ONE bounded backfill slice (a
         generation-batch) via the on-device engine, then return the fresh status.
         The UI loops this until `pendingTotal` hits 0, so each call stays short and
         shows progress. Non-blocking try-lock inside → returns changed:0 when
-        another writer holds it or materialization is paused."""
+        another writer holds it or backfill is paused."""
         var changed = 0
         try:
-            changed = ml_materialize_slice(_engine_url())
+            changed = ml_backfill_slice(_engine_url())
         except e:
             # Engine down / chat model not serving → best-effort, report 0 + status.
-            print("  materialize slice skipped: ", String(e), sep="")
+            print("  backfill slice skipped: ", String(e), sep="")
         return _cors(
             ok_json(
                 '{"ok":true,"changed":'
                 + String(changed)
                 + ',"status":'
-                + materialize_status_json()
+                + backfill_status_json()
                 + "}"
             )
         )
 
-    def handle_materialize_pause(self, req: Request) raises -> Response:
-        """POST /api/materialize/pause {"seconds":N} → pause the between-questions
+    def handle_backfill_pause(self, req: Request) raises -> Response:
+        """POST /api/backfill/pause {"seconds":N} → pause the between-questions
         worker for N seconds (auto-resumes when it elapses). Returns the status.
         """
         var seconds: Int
@@ -788,19 +839,19 @@ struct Api(Copyable, Handler, Movable):
             return _cors(bad_request('{"error":"expected {seconds}"}'))
         set_pause(seconds)
         return _cors(
-            ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
+            ok_json('{"ok":true,"status":' + backfill_status_json() + "}")
         )
 
-    def handle_materialize_resume(self) raises -> Response:
-        """POST /api/materialize/resume → clear any pause (resume now)."""
+    def handle_backfill_resume(self) raises -> Response:
+        """POST /api/backfill/resume → clear any pause (resume now)."""
         set_pause(0)
         return _cors(
-            ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
+            ok_json('{"ok":true,"status":' + backfill_status_json() + "}")
         )
 
-    def handle_materialize_priority(self, req: Request) raises -> Response:
-        """POST /api/materialize/priority {"priority":"high"|"medium"|"low"} → set the
-        background materializer's throttle. Low naps ~5s between classify slices (GPU
+    def handle_backfill_priority(self, req: Request) raises -> Response:
+        """POST /api/backfill/priority {"priority":"high"|"medium"|"low"} → set the
+        background backfiller's throttle. Low naps ~5s between classify slices (GPU
         mostly free), high ~0.1s (fastest). Returns the fresh status (with priority).
         """
         var p: String
@@ -811,7 +862,7 @@ struct Api(Copyable, Handler, Movable):
             return _cors(bad_request('{"error":"expected {priority}"}'))
         set_priority(p)
         return _cors(
-            ok_json('{"ok":true,"status":' + materialize_status_json() + "}")
+            ok_json('{"ok":true,"status":' + backfill_status_json() + "}")
         )
 
     def handle_tags_preview_ai(self, req: Request) raises -> Response:
@@ -842,7 +893,7 @@ struct Api(Copyable, Handler, Movable):
         """POST /api/tags/add {"name":…, "prompt"?:…, "keywords"?:…} → append a new
         category rule (AI rule when `prompt` is set, else a keyword rule) to
         categories.txt and re-tag. Returns {"ok":true,"retagged":N}. An AI rule
-        materializes afterwards via the worker / Materialize now."""
+        backfills afterwards via the worker / Backfill now."""
         var name: String
         var prompt: String
         var keywords: String
@@ -1074,10 +1125,10 @@ def _usleep(usec: Int):
     _ = external_call["usleep", Int](Int(usec))
 
 
-def _materialize_worker(arg: _OpaquePtr) -> _OpaquePtr:
-    """Detached background thread — drains pending AI-tag materialization in bounded
-    slices so an AI tag materializes ON ITS OWN (no open browser needed) WITHOUT
-    blocking the request reactor. `ml_materialize_slice` is a non-blocking try-lock
+def _backfill_worker(arg: _OpaquePtr) -> _OpaquePtr:
+    """Detached background thread — drains pending AI-tag backfill in bounded
+    slices so an AI tag backfills ON ITS OWN (no open browser needed) WITHOUT
+    blocking the request reactor. `ml_backfill_slice` is a non-blocking try-lock
     that honors the pause deadline (a live question is never delayed) and returns 0
     when paused, locked, or nothing is pending. Naps briefly between active slices,
     longer when idle (so a freshly-created tag starts within a few seconds). A pthread
@@ -1085,7 +1136,7 @@ def _materialize_worker(arg: _OpaquePtr) -> _OpaquePtr:
     while True:
         var nap_us = 3000000  # ~3s idle poll for newly-pending work
         try:
-            if ml_materialize_slice(_engine_url()) > 0:
+            if ml_backfill_slice(_engine_url()) > 0:
                 # Throttle between active slices per the user's priority — low leaves
                 # long GPU-idle gaps (laptop stays usable), high runs near back-to-back.
                 nap_us = nap_ms_for_priority(get_priority()) * 1000
@@ -1161,7 +1212,7 @@ def _epoch_s() -> Int64:
 
 def _engine_url() -> String:
     """The on-device inference server's OpenAI-style root — where ML-tag
-    classification (`ml_materialize_slice`) POSTs its yes/no batches. Same env the
+    classification (`ml_backfill_slice`) POSTs its yes/no batches. Same env the
     `millfolio` CLI reads, so the app and the CLI hit the one engine."""
     return String(getenv("MILLFOLIO_LOCAL_URL", "http://127.0.0.1:8000/v1"))
 
@@ -1798,19 +1849,17 @@ def on_connect(mut conn: WsConnection) raises:
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")
         # Between-questions worker: with the run slot already released, opportunistically
-        # advance ML-tag materialization by ONE bounded generation-batch. Try-locked +
+        # advance ML-tag backfill by ONE bounded generation-batch. Try-locked +
         # pause-aware + best-effort (a down engine just no-ops), so it can never delay
         # a question or fail the turn. Usually a fast no-op (nothing pending); it only
         # does real work when there's a backlog (a newly-added AI rule, or first run
         # after upgrade).
         try:
-            var mchanged = ml_materialize_slice(_engine_url())
+            var mchanged = ml_backfill_slice(_engine_url())
             if mchanged > 0:
-                log(
-                    "[materialize] slice tagged " + String(mchanged) + " txn(s)"
-                )
+                log("[backfill] slice tagged " + String(mchanged) + " txn(s)")
         except e:
-            log("[materialize] slice skipped: " + String(e))
+            log("[backfill] slice skipped: " + String(e))
     except e:
         conn.send_text(error_event(String(e)))
         if ticket >= 0:
@@ -1877,20 +1926,17 @@ def main() raises:
             ),
             sep="",
         )
-    # Background AI-tag materialization: a DETACHED thread drains pending classification
-    # in bounded slices so an AI tag materializes on its own (survives a closed browser)
-    # WITHOUT blocking the reactor. Best-effort — materialization also runs at index time
-    # and via the System → Materialization panel, so a spawn failure isn't fatal.
+    # Background AI-tag backfill: a DETACHED thread drains pending classification
+    # in bounded slices so an AI tag backfills on its own (survives a closed browser)
+    # WITHOUT blocking the reactor. Best-effort — backfill also runs at index time
+    # and via the System → Backfill panel, so a spawn failure isn't fatal.
     try:
-        var mth = ThreadHandle.spawn[_materialize_worker](_null_ptr())
+        var mth = ThreadHandle.spawn[_backfill_worker](_null_ptr())
         mth.detach()
-        print(
-            "  background materializer: on (AI tags materialize automatically)"
-        )
+        print("  background backfiller: on (AI tags backfill automatically)")
     except:
         print(
-            "  background materializer: could not start (index-time still"
-            " works)"
+            "  background backfiller: could not start (index-time still works)"
         )
     # num_workers=1 (default) → single-threaded reactor (real product). >1 → N pthread
     # workers via the multicore Handler-serve; Api is Copyable (shares the state

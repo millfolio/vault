@@ -129,10 +129,10 @@
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error ?? "create failed");
-      // An AI rule tags nothing synchronously — the server's background materializer
+      // An AI rule tags nothing synchronously — the server's background backfiller
       // picks it up within a few seconds (no blocking /run call here; that used to
       // freeze the single-threaded server while it classified). Progress shows in
-      // System → Materialization.
+      // System → Backfill.
       oncreated?.();
       onclose?.();
     } catch (e) {
