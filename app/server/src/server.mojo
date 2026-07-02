@@ -55,14 +55,16 @@ from runqueue import runq_take, runq_peek, runq_done, runq_reset
 
 # The LanceDB-free registry/tags/retag store — the SAME functions the `millfolio`
 # CLI uses, so the Tags panel + category editor run in-process (no engine spawn).
+from vault.derive.tags import (
+    read_categories,
+    effective_tags,
+    effective_tag_descriptions,
+)
 from vault.derive.store import (
     tags_report_json,
     transactions_json,
-    read_categories,
     save_categories,
     preview_categories,
-    effective_tags,
-    effective_tag_descriptions,
     backfill_status_json,
     ml_backfill_slice,
     set_pause,
