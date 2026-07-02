@@ -6,7 +6,7 @@
   import SubTabs from "./SubTabs.svelte";
   import TagsPanel from "./TagsPanel.svelte";
   import DefineTagModal from "./DefineTagModal.svelte";
-  import { touchIdAvailable, unlockAmounts as webauthnUnlock } from "$lib/touchid";
+  import { unlockAmounts as revealUnlock } from "$lib/reveal";
 
   // Vault sub-tabs: Records | Tags | Files. `initialSub` lets /tags deep-link open
   // the Tags sub-tab (the tag pills link there).
@@ -187,6 +187,8 @@
   let unlocked = $state(false);
   let unlocking = $state(false);
   let unlockErr = $state("");
+  let showUnlock = $state(false); // the passphrase prompt is open
+  let pwInput = $state(""); // the passphrase the user is typing
   let revealToken = ""; // the server-issued bearer token that authorizes ?amounts=1
 
   // Fetch the extracted transactions — with amounts only once unlocked. `force`
@@ -220,22 +222,30 @@
     }
   }
 
-  const canTouchId = touchIdAvailable();
-  async function unlockAmounts() {
-    if (unlocking) return;
+  // "Show amounts" opens a passphrase prompt (the token lives only in memory, so a
+  // reload re-prompts — no persisted unlock).
+  function openUnlock() {
+    unlockErr = "";
+    pwInput = "";
+    showUnlock = true;
+  }
+  function cancelUnlock() {
+    showUnlock = false;
+    unlockErr = "";
+    pwInput = "";
+  }
+  async function submitUnlock() {
+    if (unlocking || !pwInput.trim()) return;
     unlocking = true;
     unlockErr = "";
     try {
-      const token = canTouchId ? await webauthnUnlock() : null;
-      if (!token) {
-        unlockErr = canTouchId
-          ? "Touch ID cancelled, or verification failed."
-          : "Touch ID isn't available in this browser.";
-        return;
-      }
-      revealToken = token;
+      revealToken = await revealUnlock(pwInput);
       unlocked = true;
+      showUnlock = false;
+      pwInput = "";
       await loadTxns(true); // re-fetch, now with the reveal token → amounts
+    } catch (e) {
+      unlockErr = e instanceof Error ? e.message : "Unlock failed.";
     } finally {
       unlocking = false;
     }
@@ -563,13 +573,29 @@
             {#if !mock && !demo}
               {#if unlocked}
                 <button type="button" class="lockbtn" onclick={lockAmounts} title="Hide amounts again">🔓 Hide amounts</button>
-              {:else}
-                <button type="button" class="lockbtn primary" onclick={unlockAmounts} disabled={unlocking}>
-                  {unlocking ? "Waiting for Touch ID…" : "🔒 Show amounts"}
-                </button>
+              {:else if !showUnlock}
+                <button type="button" class="lockbtn primary" onclick={openUnlock}>🔒 Show amounts</button>
               {/if}
             {/if}
           </div>
+          {#if showUnlock && !unlocked}
+            <form class="unlock" onsubmit={(e) => { e.preventDefault(); submitUnlock(); }}>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                class="pw"
+                type="password"
+                autocomplete="off"
+                autofocus
+                placeholder="Amount passphrase"
+                bind:value={pwInput}
+              />
+              <button type="submit" class="lockbtn primary" disabled={unlocking || !pwInput.trim()}>
+                {unlocking ? "Checking…" : "Unlock"}
+              </button>
+              <button type="button" class="lockbtn" onclick={cancelUnlock}>Cancel</button>
+              <span class="pwhint">Forgot it? <code>mill get amount-password</code></span>
+            </form>
+          {/if}
           <p class="reccount">
             {#if recFilter.trim()}
               {filteredTxns.length} of {txns.length} records
@@ -701,6 +727,38 @@
   .lockbtn:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  .unlock {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 12px;
+  }
+  .unlock .pw {
+    flex: 0 1 220px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+  }
+  .unlock .pw:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .pwhint {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .pwhint code {
+    font-family: var(--mono);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1px 5px;
+    font-size: 11.5px;
   }
   .masked {
     letter-spacing: 2px;

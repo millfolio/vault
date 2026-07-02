@@ -46,9 +46,5 @@ test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../
 test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I src -I ../../flare -o build/runqueue-test && rm -f /tmp/millfolio-runq-test /tmp/millfolio-runq-test.lock && MILLFOLIO_RUNQ_PATH=/tmp/millfolio-runq-test ./build/runqueue-test" }
 # Unit-test the on-device JSON store builders (store.mojo) — ask history + /api/system.
 test-store = { cmd = "mkdir -p build && mojo build test/store_test.mojo -I src -I ../../json -o build/store-test && ./build/store-test" }
-# Unit-test the WebAuthn/ES256 assertion verifier (webauthn.mojo) against a frozen
-# OpenSSL-generated P-256 test vector — proves the ECDSA-verify FFI path (libcrypto).
-# MILLFOLIO_DATA_DIR points the enrollment-storage roundtrip at a scratch dir.
-test-webauthn = { cmd = "mkdir -p build && mojo build test/webauthn_test.mojo -I src -I ../../json -o build/webauthn-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-webauthn-test bash -c 'mkdir -p /tmp/millfolio-webauthn-test && ./build/webauthn-test'" }
-# Full unit suite — what `moon run app-server:check` runs (events + run-queue + store + webauthn).
-test-all = { depends-on = ["test", "test-runqueue", "test-store", "test-webauthn"] }
+# Full unit suite — what `moon run app-server:check` runs (events + run-queue + store).
+test-all = { depends-on = ["test", "test-runqueue", "test-store"] }

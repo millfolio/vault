@@ -32,16 +32,6 @@ from std.memory import alloc, UnsafePointer
 from std.os import getenv, listdir, makedirs, remove
 from std.os.path import isfile, isdir, getsize, exists
 
-from webauthn import (
-    verify_assertion,
-    new_challenge_b64u,
-    new_token,
-    load_enrollment,
-    save_enrollment,
-    Enrollment,
-    pubkey_from_spki,
-    base64url_decode,
-)
 
 from flare.prelude import *
 from flare.http import Handler
@@ -77,6 +67,7 @@ from vault.derive.store import (
     set_pause,
     preview_ml_json,
     add_category,
+    verify_amount_password,
 )
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
@@ -233,33 +224,24 @@ def _is_demo() raises -> Bool:
     return _port() == 10010
 
 
-def _wa_challenge_path() -> String:
-    return _config_dir() + "/webauthn_challenge.txt"
+def _reveal_token_path() -> String:
+    return _config_dir() + "/reveal_token.txt"
 
 
-def _wa_token_path() -> String:
-    return _config_dir() + "/webauthn_token.txt"
+def _hex_nibble(n: Int) -> String:
+    return chr(48 + n) if n < 10 else chr(87 + n)  # 0-9 then a-f
 
 
-def _wa_enroll_path() -> String:
-    return _config_dir() + "/webauthn.json"
-
-
-def _origin_and_rpid(req: Request) raises -> Tuple[String, String]:
-    """Derive the expected WebAuthn origin + rpId from the request Host — so it
-    matches whatever the browser used (localhost / 127.0.0.1), which is what the
-    passkey was scoped to. Scheme defaults to http (the local :10000 case);
-    X-Forwarded-Proto overrides for an https reverse-proxy/Tailscale host."""
-    var host = String(req.headers.get("host"))
-    if host == "":
-        host = String("localhost:") + String(_port())
-    var rp_id = host
-    var colon = host.find(":")
-    if colon > 0:
-        rp_id = String(host[byte=:colon])  # strip the port for the rpId
-    var proto = String(req.headers.get("x-forwarded-proto"))
-    var scheme = String("https") if proto == "https" else String("http")
-    return (scheme + "://" + host, rp_id^)
+def _new_token() -> String:
+    """A 128-bit random reveal token (32 hex chars) via libc arc4random — minted
+    when the amount passphrase is entered correctly, then required (Bearer) on
+    `?amounts=1`."""
+    var out = String("")
+    for _ in range(4):
+        var v = Int(external_call["arc4random", UInt32]())
+        for i in range(8):
+            out += _hex_nibble((v >> ((7 - i) * 4)) & 0xF)
+    return out^
 
 
 def unauthorized(msg: String = "Unauthorized") -> Response:
@@ -519,14 +501,8 @@ struct Api(Copyable, Handler, Movable):
         if path == "/api/transactions" or path.find("/api/transactions?") == 0:
             return self.handle_transactions(req)
         # WebAuthn (Touch-ID) gate for revealing transaction amounts.
-        if path == "/api/auth/status":
-            return self.handle_auth_status()
-        if req.method == Method.POST and path == "/api/auth/challenge":
-            return self.handle_auth_challenge()
-        if req.method == Method.POST and path == "/api/auth/enroll":
-            return self.handle_auth_enroll(req)
-        if req.method == Method.POST and path == "/api/auth/verify":
-            return self.handle_auth_verify(req)
+        if req.method == Method.POST and path == "/api/auth/unlock":
+            return self.handle_auth_unlock(req)
         if path == "/api/categories/preview":
             return self.handle_categories_preview(req)
         if path == "/api/categories":
@@ -677,140 +653,38 @@ struct Api(Copyable, Handler, Movable):
         prints. No engine spawn."""
         return _cors(ok_json(tags_report_json()))
 
-    # ── WebAuthn (Touch-ID) amount gate ───────────────────────────────────────
+    # ── amount-reveal gate (passphrase) ───────────────────────────────────────
 
-    def handle_auth_status(self) raises -> Response:
-        """GET /api/auth/status → {"enrolled":bool} so the UI knows whether the
-        first-run enrollment ceremony is needed before it can unlock."""
-        var enrolled = "true" if exists(_wa_enroll_path()) else "false"
-        return _cors(ok_json('{"enrolled":' + enrolled + "}"))
-
-    def handle_auth_challenge(self) raises -> Response:
-        """POST /api/auth/challenge → {"challenge":<b64url>} — a fresh single-use
-        challenge the browser signs (get) / includes (create). Stored with an
-        issue time; consumed by verify."""
-        var c = new_challenge_b64u()
-        with open(_wa_challenge_path(), "w") as f:
-            f.write(c + " " + String(_epoch_s()))
-        return _cors(ok_json('{"challenge":"' + c + '"}'))
-
-    def handle_auth_enroll(self, req: Request) raises -> Response:
-        """POST /api/auth/enroll {credentialId, publicKey} → store the platform
-        passkey's public key (SPKI DER, base64url — from getPublicKey(), so no CBOR).
-        TRUST-ON-FIRST-USE: refused once already enrolled, so a later open POST can't
-        replace the credential to bypass the gate (a reset = delete webauthn.json,
-        which needs local file access — by then the data itself is readable)."""
-        if exists(_wa_enroll_path()):
-            return _cors(unauthorized('{"error":"already enrolled"}'))
-        var cred_id: String
-        var pk: String
+    def handle_auth_unlock(self, req: Request) raises -> Response:
+        """POST /api/auth/unlock {password} → if it matches the local reveal
+        passphrase (`amount_password`, look it up with `mill get amount-password`),
+        mint a ~15-min bearer token that unlocks `?amounts=1`. 401 on a wrong
+        passphrase. The check + the secret live server-side, so this genuinely gates
+        the amounts (a curl without a valid token gets `amount:null`)."""
+        var candidate: String
         try:
             var j = loads(req.text())
-            cred_id = j["credentialId"].string_value()
-            pk = j["publicKey"].string_value()
+            candidate = j["password"].string_value()
         except:
-            return _cors(
-                bad_request('{"error":"expected {credentialId, publicKey}"}')
-            )
-        try:
-            var spki = base64url_decode(pk)
-            var xy = pubkey_from_spki(spki)
-            save_enrollment(
-                _config_dir(),
-                Enrollment(cred_id, xy[0].copy(), xy[1].copy(), 0),
-            )
-            return _cors(ok_json('{"ok":true}'))
-        except e:
-            return _cors(
-                bad_request(
-                    '{"error":"enroll failed: ' + _json_escape(String(e)) + '"}'
-                )
-            )
-
-    def handle_auth_verify(self, req: Request) raises -> Response:
-        """POST /api/auth/verify {credentialId, authenticatorData, clientDataJSON,
-        signature} → verify the assertion (challenge + origin + rpIdHash + UP + UV +
-        signCount + ES256 signature), persist the new signCount, and mint a ~5-min
-        bearer token that unlocks `?amounts=1`. 401 on any failure."""
-        var cred_id: String
-        var ad: String
-        var cdj: String
-        var sig: String
-        try:
-            var j = loads(req.text())
-            cred_id = j["credentialId"].string_value()
-            ad = j["authenticatorData"].string_value()
-            cdj = j["clientDataJSON"].string_value()
-            sig = j["signature"].string_value()
-        except:
-            return _cors(
-                bad_request('{"error":"expected the assertion fields"}')
-            )
-
-        # Pop the single-use challenge (TTL 120s).
-        if not exists(_wa_challenge_path()):
-            return _cors(unauthorized('{"error":"no active challenge"}'))
-        var chline: String
-        with open(_wa_challenge_path(), "r") as f:
-            chline = f.read()
-        try:
-            remove(_wa_challenge_path())  # single-use
-        except:
-            pass
-        var cparts = chline.split(" ")
-        if len(cparts) < 2:
-            return _cors(unauthorized('{"error":"bad challenge"}'))
-        var challenge = String(cparts[0].strip())
-        if _epoch_s() - Int64(atol(String(cparts[1].strip()))) > 120:
-            return _cors(unauthorized('{"error":"challenge expired"}'))
-
-        var oi = _origin_and_rpid(req)
-        try:
-            var enr = load_enrollment(_config_dir())
-            if enr.credential_id != cred_id:
-                return _cors(unauthorized('{"error":"unknown credential"}'))
-            var new_sc = verify_assertion(
-                ad,
-                cdj,
-                sig,
-                enr.pub_x,
-                enr.pub_y,
-                challenge,
-                oi[0],
-                oi[1],
-                enr.sign_count,
-            )
-            save_enrollment(
-                _config_dir(),
-                Enrollment(
-                    enr.credential_id,
-                    enr.pub_x.copy(),
-                    enr.pub_y.copy(),
-                    new_sc,
-                ),
-            )
-            var tok = new_token()
-            with open(_wa_token_path(), "w") as f:
-                f.write(tok + " " + String(_epoch_s() + 300))
-            return _cors(ok_json('{"token":"' + tok + '"}'))
-        except e:
-            return _cors(
-                unauthorized(
-                    '{"error":"verify failed: ' + _json_escape(String(e)) + '"}'
-                )
-            )
+            return _cors(bad_request('{"error":"expected {password}"}'))
+        if not verify_amount_password(candidate):
+            return _cors(unauthorized('{"error":"wrong passphrase"}'))
+        var tok = _new_token()
+        with open(_reveal_token_path(), "w") as f:
+            f.write(tok + " " + String(_epoch_s() + 900))  # 15-min TTL
+        return _cors(ok_json('{"token":"' + tok + '"}'))
 
     def _reveal_authorized(self, req: Request) raises -> Bool:
         """True iff the request carries a valid, unexpired reveal token
-        (`Authorization: Bearer <token>`) matching the one minted by verify."""
+        (`Authorization: Bearer <token>`) matching the one minted by unlock."""
         var auth = String(req.headers.get("authorization"))
         if not auth.startswith("Bearer "):
             return False
         var tok = String(auth.removeprefix("Bearer ").strip())
-        if tok == "" or not exists(_wa_token_path()):
+        if tok == "" or not exists(_reveal_token_path()):
             return False
         var line: String
-        with open(_wa_token_path(), "r") as f:
+        with open(_reveal_token_path(), "r") as f:
             line = f.read()
         var parts = line.split(" ")
         if len(parts) < 2 or String(parts[0].strip()) != tok:
