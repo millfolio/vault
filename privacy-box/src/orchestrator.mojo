@@ -80,6 +80,13 @@ def _session_append(text: String):
         pass
 
 
+comptime _NO_REMOTE_MSG = (
+    "This question needs the frontier model to write its program, but no remote"
+    " budget is available — set ANTHROPIC_API_KEY and retry. (The on-device"
+    " model is no longer used to write programs; it isn't capable enough.)"
+)
+
+
 def _tags_context(tags: String) raises -> String:
     """Format the available-tags block for the codegen prompt, or empty when there
     are none. `tags` is one `name <TAB> description` per line (from `millfolio
@@ -145,20 +152,22 @@ struct Orchestrator(Movable):
         self.max_fix_attempts = 6
 
     def _codegen(mut self, messages: List[ChatMessage]) raises -> String:
-        """Route code generation: the remote frontier model while budget remains,
-        else the LOCAL model (trusted + free). Charges the budget by the remote
-        token cost."""
+        """Code generation runs on the REMOTE frontier model ONLY. The on-device
+        model isn't capable enough to write correct vault programs (it ignores the
+        tag list, hand-rolls raw CSV columns, mislabels output), so with no remote
+        budget we FAIL LOUDLY rather than emit a bad local program. Charges the
+        budget by the remote token cost."""
         if self.budget.depleted():
-            return self.local.codegen(messages)
+            raise Error(_NO_REMOTE_MSG)
         var g = self.remote.codegen(messages)
         self.budget.charge(g.tokens)
         return g.code.copy()
 
     def _fix(mut self, code: String, errors: String) raises -> String:
-        """Route a fix the same way — remote while budget remains, else local.
-        """
+        """Compile-fix is codegen too — frontier model only (same reason as
+        `_codegen`); raise if the budget ran out mid-run."""
         if self.budget.depleted():
-            return self.local.fix_code(code, errors)
+            raise Error(_NO_REMOTE_MSG)
         var g = self.remote.fix_code(code, errors)
         self.budget.charge(g.tokens)
         return g.code.copy()
@@ -226,18 +235,15 @@ struct Orchestrator(Movable):
         _codegen) for a `from vault import *` program from the question + the
         aliased manifest. The system prompt is resources/privacy_box-system.md.
         """
-        # Report the route HONESTLY — `_codegen` falls back to the local model when
-        # there's no remote budget (no ANTHROPIC_API_KEY → token_budget=0), and the
-        # status used to claim "outside model" unconditionally (a ~90s local run
-        # mislabeled as frontier).
+        # Codegen is frontier-only now — fail fast with a clear message rather than
+        # emit a bad on-device program.
         if self.budget.depleted():
             log(
-                "• no remote budget — writing the program on the LOCAL"
-                " on-device model (slower; set ANTHROPIC_API_KEY for the fast"
-                " frontier model)…"
+                "• no remote budget — cannot write the program (need a frontier"
+                " model)"
             )
-        else:
-            log("• asking the frontier model to write the program…")
+            raise Error(_NO_REMOTE_MSG)
+        log("• asking the frontier model to write the program…")
         var tags = self._vault_tags()
         if tags.byte_length() > 0:
             log("• category tags + scope notes sent to the model")
@@ -272,18 +278,16 @@ struct Orchestrator(Movable):
     ](
         mut self, question: String, manifest: String, mut sink: S
     ) raises -> String:
-        """Like `vault_codegen` but STREAMS the program to `sink` (live UI). Budget-
-        routed: streams from the remote model while budget remains, else falls back to
-        the LOCAL model (no streaming). Same EgressGuard gate + session transcript.
-        """
+        """Like `vault_codegen` but STREAMS the program to `sink` (live UI). Streams
+        from the remote frontier model; with no remote budget it FAILS (codegen is
+        frontier-only). Same EgressGuard gate + session transcript."""
         if self.budget.depleted():
             log(
-                "• no remote budget — writing the program on the LOCAL"
-                " on-device model (slower; set ANTHROPIC_API_KEY for the fast"
-                " frontier model)…"
+                "• no remote budget — cannot write the program (need a frontier"
+                " model)"
             )
-        else:
-            log("• asking the frontier model to write the program (streaming)…")
+            raise Error(_NO_REMOTE_MSG)
+        log("• asking the frontier model to write the program (streaming)…")
         var tags = self._vault_tags()
         if tags.byte_length() > 0:
             log("• category tags + scope notes sent to the model")
@@ -299,13 +303,10 @@ struct Orchestrator(Movable):
         )
         var msgs = List[ChatMessage]()
         msgs.append(ChatMessage(String("user"), user_msg))
-        var code: String
-        if self.budget.depleted():
-            code = self.local.codegen(msgs)  # local has no streaming
-        else:
-            var g = self.remote.codegen_stream(msgs, sink)
-            self.budget.charge(g.tokens)
-            code = g.code.copy()
+        # Budget was checked above (frontier-only); stream from the remote model.
+        var g = self.remote.codegen_stream(msgs, sink)
+        self.budget.charge(g.tokens)
+        var code = g.code.copy()
         _session_append(
             "QUESTION: "
             + question
