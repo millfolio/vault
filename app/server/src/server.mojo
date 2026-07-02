@@ -326,17 +326,20 @@ def _demo_tokens_path() -> String:
     return _config_dir() + "/demo_tokens.tsv"
 
 
-def _verify_turnstile(token: String, remoteip: String) raises -> Bool:
+def _verify_turnstile(token: String) raises -> Bool:
     """POST the client token to Cloudflare siteverify with our secret; True iff
     `success`. Fails CLOSED — any empty token / network / parse error → False. Uses a
-    JSON body so the token's base64url chars need no form-encoding."""
+    JSON body so the token's base64url chars need no form-encoding.
+
+    We do NOT send `remoteip`: behind the cloudflared tunnel the origin's view of the
+    client IP can differ from where the token was issued, and a mismatch there is a
+    needless failure mode (the param is optional). On failure we log the error-codes +
+    token length so a rejection is diagnosable in the server log."""
     if token == "":
+        log("turnstile: empty token")
         return False
     var body = String('{"secret":') + json_escape(_turnstile_secret())
-    body += ',"response":' + json_escape(token)
-    if remoteip != "":
-        body += ',"remoteip":' + json_escape(remoteip)
-    body += "}"
+    body += ',"response":' + json_escape(token) + "}"
     var req = Request(
         method="POST",
         url="https://challenges.cloudflare.com/turnstile/v0/siteverify",
@@ -347,8 +350,24 @@ def _verify_turnstile(token: String, remoteip: String) raises -> Bool:
         var client = HttpClient()
         var resp = client.send(req)
         var v = resp.json()
-        return v["success"].bool_value()
-    except:
+        var ok = v["success"].bool_value()
+        if not ok:
+            var codes = String("")
+            try:
+                var arr = v["error-codes"]
+                for i in range(arr.array_count()):
+                    codes += String(arr[i].string_value()) + " "
+            except:
+                pass
+            log(
+                "turnstile siteverify rejected: codes=["
+                + codes
+                + "] token_len="
+                + String(token.byte_length())
+            )
+        return ok
+    except e:
+        log("turnstile siteverify error: " + String(e))
         return False
 
 
@@ -862,9 +881,7 @@ struct Api(Copyable, Handler, Movable):
             token = j["token"].string_value()
         except:
             return _cors(bad_request('{"error":"expected {token}"}'))
-        # Cloudflare passes the real client IP in cf-connecting-ip at the edge.
-        var ip = String(req.headers.get("cf-connecting-ip"))
-        if not _verify_turnstile(token, ip):
+        if not _verify_turnstile(token):
             return _cors(
                 unauthorized('{"error":"turnstile verification failed"}')
             )
