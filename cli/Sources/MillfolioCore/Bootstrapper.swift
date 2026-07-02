@@ -898,6 +898,11 @@ public final class Bootstrapper: ObservableObject {
         try run(mojo, ["build", "src/privacy_box.mojo",
                        "-I", "../flare", "-I", "../json", "-I", "../jinja2.mojo/src",
                        "-I", "../logging.mojo/src",  // orchestrator/sandbox: from logging import log
+                       // orchestrator reads tags IN-PROCESS: `from vault.derive.tags import …`
+                       // against the precompiled vault pkg (installMillfolio runs FIRST — see
+                       // installVault). Dead-code elimination keeps the sandbox binary lean
+                       // (no lancedb/csv/pdf linked).
+                       "-I", millfolioDir.appendingPathComponent("pkgs").path,
                        "-o", "build/privacy_box"],
                 cwd: privacy_boxDir, env: privacy_boxMojoEnv(python: python))
         // The millfolio web UI is served by the app server (millfolio-server +
@@ -1401,8 +1406,11 @@ public final class Bootstrapper: ObservableObject {
     public func installVault() async throws {
         try requireEnv()                    // fail fast on missing Xcode/Metal/Python
         try await installServer()           // engine + chat + embedding weights
-        try await installPrivacyBoxEngine()   // the vault orchestrator/sandbox + tools
-        try await installMillfolioEngine()    // the vault tools + indexer
+        // Millfolio (vault tools + precompiled pkgs) BEFORE privacy_box: the
+        // orchestrator now builds against the vault pkg for in-process tags, so the
+        // pkgs must be unpacked first.
+        try await installMillfolioEngine()    // the vault tools + indexer + pkgs
+        try await installPrivacyBoxEngine()   // the vault orchestrator/sandbox (needs vault pkgs)
         try await installAppServer()        // the millfolio web app (UI on :10000, WS on :10001)
         linkVaultShims()                    // millfolio FFI shims → privacy_box-mojo/lib (vault-run dlopen)
         primeVaultCompile()                 // warm privacy_box-mojo's .mojo_cache so query #1 is fast
