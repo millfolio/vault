@@ -6,7 +6,7 @@ into that distinct list, so the backfill can classify each unique merchant strin
 once and fan the verdict back to every row that shares it (recurring charges).
 """
 
-from vault.derive.classify import dedup_descs, DedupMap
+from vault.derive.classify import dedup_descs, DedupMap, normalize_desc
 
 
 def expect(cond: Bool, what: String) raises:
@@ -60,5 +60,44 @@ def main() raises:
     expect(
         mn.per_row[0] != mn.per_row[1], "#1 and #2 stay separate (exact match)"
     )
+
+    # ── normalize_desc: strip trailing IDs, keep the merchant, fold near-dupes ───
+    expect(
+        normalize_desc("NETFLIX.COM") == "netflix.com", "lowercases, no tail"
+    )
+    expect(
+        normalize_desc("ACME STORE #4471") == "acme store",
+        "strips a trailing # ref",
+    )
+    expect(
+        normalize_desc("ACME STORE #4471")
+        == normalize_desc("ACME STORE #4472"),
+        "different store numbers normalize together",
+    )
+    expect(
+        normalize_desc("WALMART 1234") == "walmart", "strips a trailing number"
+    )
+    # merchant tokens that merely CONTAIN a digit are preserved
+    expect(
+        normalize_desc("7-ELEVEN 123") == "7-eleven",
+        "keeps 7-eleven, drops 123",
+    )
+    # payload after a `*` marker is NOT the trailing token → preserved
+    expect(
+        normalize_desc("SQ *BLUE BOTTLE") == "sq *blue bottle",
+        "keeps the merchant after SQ *",
+    )
+    # never strips the only remaining token (never empties)
+    expect(normalize_desc("4471") == "4471", "a bare number is left intact")
+    # collapses internal whitespace
+    expect(normalize_desc("FOO   BAR") == "foo bar", "collapses whitespace")
+
+    # ── normalization folds near-dupes that exact dedup keeps separate ──────────
+    var idlike: List[String] = ["ACME #1", "ACME #2", "ACME #3"]
+    expect(len(dedup_descs(idlike).unique) == 3, "exact: 3 distinct")
+    var normed = List[String]()
+    for i in range(len(idlike)):
+        normed.append(normalize_desc(idlike[i]))
+    expect(len(dedup_descs(normed).unique) == 1, "normalized: all fold to 1")
 
     print("classify_test: all assertions passed")

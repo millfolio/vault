@@ -225,7 +225,7 @@ def ml_backfill_rows(
         if len(descs) == 0:
             continue
         var dc = classify_batch_dedup(base_url, r.ml_prompt, descs)
-        record_backfill_dedup(dc.seen, dc.unique)
+        record_backfill_dedup(dc.seen, dc.unique, dc.unique_norm)
         for k in range(len(idxs)):
             if k < len(dc.verdicts) and dc.verdicts[k]:
                 var row = rows[idxs[k]].copy()
@@ -394,19 +394,22 @@ def _json_int(text: String, key: String) -> Int:
     return -v if neg else v
 
 
-def record_backfill_dedup(seen: Int, unique: Int) raises:
-    """Accumulate one classify slice's counts (rows handed in vs distinct descriptions
-    actually classified) into the cumulative counter. Best-effort — a stats write must
-    never fail a backfill."""
+def record_backfill_dedup(seen: Int, unique: Int, unique_norm: Int) raises:
+    """Accumulate one classify slice's counts into the cumulative counter: rows handed
+    in, DISTINCT descriptions actually classified (exact dedup), and the PROJECTED
+    distinct-after-normalization count (`unique_norm` — a measurement, not what's
+    classified). Best-effort — a stats write must never fail a backfill."""
     try:
         var seen_tot = seen
         var uniq_tot = unique
+        var norm_tot = unique_norm
         if exists(_dedup_stats_path()):
             var text: String
             with open(_dedup_stats_path(), "r") as f:
                 text = f.read()
             seen_tot += _json_int(text, "rows_seen")
             uniq_tot += _json_int(text, "rows_classified")
+            norm_tot += _json_int(text, "rows_norm")
         ensure_data_dir()
         with open(_dedup_stats_path(), "w") as f:
             f.write(
@@ -414,6 +417,8 @@ def record_backfill_dedup(seen: Int, unique: Int) raises:
                 + String(seen_tot)
                 + ',"rows_classified":'
                 + String(uniq_tot)
+                + ',"rows_norm":'
+                + String(norm_tot)
                 + "}\n"
             )
     except:
@@ -421,23 +426,32 @@ def record_backfill_dedup(seen: Int, unique: Int) raises:
 
 
 def backfill_dedup_json() raises -> String:
-    """The cumulative dedup counter for /api/stats:
-    `{"rows_seen":N,"rows_classified":M,"saved":N-M}`."""
+    """The cumulative dedup counter for /api/stats. `saved` = exact-dedup savings
+    (rows_seen - rows_classified); `saved_norm` = the EXTRA that normalization would
+    save on top (rows_classified - rows_norm), a projection:
+    `{"rows_seen":N,"rows_classified":M,"rows_norm":K,"saved":N-M,"saved_norm":M-K}`.
+    """
     var seen = 0
     var uniq = 0
+    var norm = 0
     if exists(_dedup_stats_path()):
         var text: String
         with open(_dedup_stats_path(), "r") as f:
             text = f.read()
         seen = _json_int(text, "rows_seen")
         uniq = _json_int(text, "rows_classified")
+        norm = _json_int(text, "rows_norm")
     return (
         String('{"rows_seen":')
         + String(seen)
         + ',"rows_classified":'
         + String(uniq)
+        + ',"rows_norm":'
+        + String(norm)
         + ',"saved":'
         + String(seen - uniq)
+        + ',"saved_norm":'
+        + String(uniq - norm)
         + "}"
     )
 
@@ -522,7 +536,7 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
                 # The slow part — no lock is meant to span it (the CLI holds the
                 # lock for the whole drain; the worker's slice is bounded).
                 var dc = classify_batch_dedup(base_url, r.ml_prompt, descs)
-                record_backfill_dedup(dc.seen, dc.unique)
+                record_backfill_dedup(dc.seen, dc.unique, dc.unique_norm)
                 for k in range(len(idxs)):
                     if k < len(dc.verdicts) and dc.verdicts[k]:
                         var row = rows[idxs[k]].copy()

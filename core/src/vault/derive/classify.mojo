@@ -166,6 +166,53 @@ def dedup_descs(descs: List[String]) raises -> DedupMap:
     return DedupMap(unique^, per_row^)
 
 
+def _is_id_token(t: String) -> Bool:
+    """A trailing token that looks like a NON-semantic reference — a store/order/txn
+    number, a `#`/`*` ref, or a date fragment — rather than part of the merchant name.
+    Conservative: a `#`/`*` prefix, or a token that is ≥3 chars AND at least half
+    digits. Keeps merchant tokens that merely contain a digit (`7-eleven`, `76`).
+    """
+    if t.byte_length() == 0:
+        return False
+    var c0 = Int(t.unsafe_ptr()[0])
+    if c0 == 35 or c0 == 42:  # '#' or '*'
+        return True
+    var digits = 0
+    var p = t.unsafe_ptr()
+    for i in range(t.byte_length()):
+        var c = Int(p[i])
+        if c >= 48 and c <= 57:
+            digits += 1
+    return t.byte_length() >= 3 and digits * 2 >= t.byte_length()
+
+
+def normalize_desc(s: String) raises -> String:
+    """Best-effort NORMALIZATION of a merchant description for dedup MEASUREMENT:
+    lowercase, collapse whitespace, and strip trailing non-semantic reference tails
+    (store/order numbers, `#`/`*` refs, dates) so `ACME STORE #4471` and
+    `ACME STORE #4472` fold together. Conservative — only trailing ID-ish tokens are
+    dropped, never the leading merchant name, and never the last remaining token.
+
+    NOTE: this changes the string the model would see, so it is used only to PROJECT
+    potential savings (how many DISTINCT merchants remain), NOT to pick what gets
+    classified — that stays on exact matches (see classify_batch_dedup)."""
+    var low = _lower(String(s.strip()))
+    var parts = low.split(" ")
+    var toks = List[String]()
+    for i in range(len(parts)):
+        var t = String(String(parts[i]).strip())
+        if t.byte_length() > 0:
+            toks.append(t^)
+    while len(toks) > 1 and _is_id_token(toks[len(toks) - 1]):
+        _ = toks.pop()
+    var out = String("")
+    for i in range(len(toks)):
+        if i > 0:
+            out += " "
+        out += toks[i]
+    return out^
+
+
 @fieldwise_init
 struct DedupClassify(Movable):
     """Per-row verdicts + dedup savings counts (surfaced on the Backfill stats page).
@@ -174,6 +221,7 @@ struct DedupClassify(Movable):
     var verdicts: List[Bool]  # aligned to the input `descs`
     var seen: Int  # total rows classified (input count)
     var unique: Int  # DISTINCT descriptions actually sent to the model
+    var unique_norm: Int  # distinct AFTER normalize_desc (projection, not classified)
 
 
 def classify_batch_dedup(
@@ -183,7 +231,10 @@ def classify_batch_dedup(
     back to every row that shares that description. Identical merchant strings
     (recurring charges — same subscription/ACH each month) collapse to a single model
     call: correct by construction, since identical input ⇒ identical classification.
-    Returns per-row verdicts aligned to `descs` + (rows seen, distinct classified).
+    Returns per-row verdicts aligned to `descs` + (rows seen, distinct classified,
+    distinct-after-normalization). `unique_norm` is a PROJECTION — how few merchants
+    remain if trailing IDs were stripped (normalize_desc) — recorded for the stats page
+    to show the potential extra savings; it does NOT change what is classified here.
     """
     var m = dedup_descs(descs)
     var uv = classify_batch(base_url, question, m.unique)
@@ -191,4 +242,9 @@ def classify_batch_dedup(
     for i in range(len(m.per_row)):
         var p = m.per_row[i]
         out.append(uv[p] if p < len(uv) else False)
-    return DedupClassify(out^, len(descs), len(m.unique))
+    # Projection: how many DISTINCT merchants remain after normalization.
+    var norm = List[String]()
+    for i in range(len(descs)):
+        norm.append(normalize_desc(descs[i]))
+    var mn = dedup_descs(norm)
+    return DedupClassify(out^, len(descs), len(m.unique), len(mn.unique))
