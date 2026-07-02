@@ -303,6 +303,11 @@
   function nameFor(alias: string): string {
     return info?.files.find((f) => f.alias === alias)?.name ?? alias;
   }
+  // Short label for the Records → File link — the LAST n chars (keeps the date/
+  // extension suffix, which distinguishes statements); full name stays in the title.
+  function abbrev(s: string, n = 12): string {
+    return s.length > n ? "…" + s.slice(-n) : s;
+  }
   // The indexed file behind a hit's alias (for opening it in the viewer).
   function fileFor(alias: string): VaultFile | undefined {
     return info?.files.find((f) => f.alias === alias);
@@ -565,6 +570,13 @@
               {/if}
             {/if}
           </div>
+          <p class="reccount">
+            {#if recFilter.trim()}
+              {filteredTxns.length} of {txns.length} records
+            {:else}
+              {txns.length} record{txns.length === 1 ? "" : "s"}
+            {/if}
+          </p>
           {#if unlockErr}<p class="banner warn">{unlockErr}</p>{/if}
           {#if unlocked}
             <div class="totals" role="status">
@@ -606,11 +618,11 @@
                   </td>
                   <td class="rfile">
                     {#if !mock && fileFor(t.file)}
-                      <button type="button" class="filelink" onclick={() => openHit(t.file)} title="View source document">
-                        <span class="open" aria-hidden="true">↗</span>{nameFor(t.file)}
+                      <button type="button" class="filelink" onclick={() => openHit(t.file)} title={nameFor(t.file)}>
+                        <span class="open" aria-hidden="true">↗</span>{abbrev(nameFor(t.file))}
                       </button>
                     {:else}
-                      <span class="muted" title={t.file}>{nameFor(t.file)}</span>
+                      <span class="muted" title={nameFor(t.file)}>{abbrev(nameFor(t.file))}</span>
                     {/if}
                   </td>
                   <td class="act">
@@ -658,6 +670,12 @@
   .recbar .filter:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  .reccount {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
   }
   .lockbtn {
     flex: none;
