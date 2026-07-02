@@ -138,6 +138,17 @@
     } catch {}
   }
   // Pick a past question → drop it into the box to edit/resend (non-destructive).
+  // Copy a code box (the generated program) to the clipboard, with a transient ✓ on
+  // the box that was copied (keyed so only that one shows the checkmark).
+  let copiedKey = $state("");
+  async function copyCode(text: string, key: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedKey = key;
+      setTimeout(() => (copiedKey = copiedKey === key ? "" : copiedKey), 1500);
+    } catch {} // clipboard blocked — the text is still selectable
+  }
+
   function pickRecent(q: string) {
     draft = q;
     // Focus FIRST — focusing fires the input's onfocus (which would re-open the
@@ -326,6 +337,27 @@
   }
 </script>
 
+<!-- A generated-program box with a copy icon (top-right); clicking it copies the code. -->
+{#snippet codeBox(code: string, key: string)}
+  <div class="codebox">
+    <button
+      type="button"
+      class="codecopy"
+      class:copied={copiedKey === key}
+      onclick={() => copyCode(code, key)}
+      title={copiedKey === key ? "Copied" : "Copy program"}
+      aria-label={copiedKey === key ? "Copied" : "Copy program"}
+    >
+      {#if copiedKey === key}
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+      {:else}
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+      {/if}
+    </button>
+    <pre><code>{code}</code></pre>
+  </div>
+{/snippet}
+
 <section class="chat">
   {#if !demo && showHistory}
     <!-- click anywhere outside the panel to dismiss -->
@@ -347,7 +379,7 @@
                 {#if r.code}
                   <details class="hist-code">
                     <summary>generated program</summary>
-                    <pre><code>{r.code}</code></pre>
+                    {@render codeBox(r.code, "hist-" + r.q)}
                   </details>
                 {/if}
                 <button type="button" class="hist-use" onclick={() => pickRecent(r.q)}>Ask again</button>
@@ -437,12 +469,12 @@
       {:else if it.kind === "debug"}
         <details class="debug">
           <summary>{it.title}</summary>
-          <pre><code>{it.body}</code></pre>
+          {@render codeBox(it.body ?? "", "dbg-" + it.id)}
         </details>
       {:else if it.kind === "approval"}
         <div class="approval">
           <p class="atitle">{it.title}</p>
-          {#if it.body}<pre><code>{it.body}</code></pre>{/if}
+          {#if it.body}{@render codeBox(it.body, "appr-" + it.id)}{/if}
           {#if it.resolved}
             <p class="decision {it.resolved}">
               {it.resolved === "approved" ? "✓ Approved" : "✕ Rejected"}
@@ -674,6 +706,40 @@
     max-height: 40vh;
     overflow: auto;
     font-size: 11px;
+  }
+  /* Copyable code box (generated program) — copy icon top-right; the <pre> keeps its
+     context-specific styling (.hist-code pre / .debug pre / .approval pre). */
+  .codebox {
+    position: relative;
+  }
+  .codecopy {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0.65;
+    transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .codecopy:hover {
+    opacity: 1;
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  .codecopy.copied {
+    opacity: 1;
+    color: var(--ok, #3fb950);
+    border-color: var(--ok, #3fb950);
   }
   .hist-use {
     margin: 2px 10px 8px;
