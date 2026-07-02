@@ -53,10 +53,10 @@ def main() raises:
         "tags_event encoding",
     )
     expect_eq(
-        tag_proposal_event("gym", "planet fitness, equinox"),
+        tag_proposal_event("gym", "planet fitness, equinox", "kw"),
         (
-            '{"type":"tag-proposal","name":"gym","keywords":"planet fitness,'
-            ' equinox"}'
+            '{"type":"tag-proposal","name":"gym","ml":false,"keywords":"planet'
+            ' fitness, equinox"}'
         ),
         "tag_proposal_event encoding",
     )
