@@ -19,7 +19,9 @@ from sandbox import (
     _write,
 )
 
-comptime _TMPL = "privacy-box/sandbox/privacy_box.sb.template"
+# Resolved via resource_path under PRIVACY_BOX_HOME (the test task sets it to the
+# privacy-box dir) — matches how the app/CLI resolve it, no cwd dependence.
+comptime _TMPL = "sandbox/privacy_box.sb.template"
 
 
 def _grants(profile: String, path: String) -> Bool:

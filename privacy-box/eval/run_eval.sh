@@ -69,6 +69,13 @@ fi
 # binary is driving the harness self-test (it ignores the model).
 if [ -z "${PRIVACY_BOX_BIN:-}" ]; then
   export PRIVACY_BOX_MODEL="$MODEL"
+  # CRITICAL: point codegen at the REAL system prompt. _codegen_system() resolves
+  # `resources/privacy_box-system.md` relative to PRIVACY_BOX_HOME/cwd; from here cwd
+  # is the vault root, so it wouldn't find it and would silently fall back to the
+  # built-in stub prompt (which tells the model to read __DATA_CSV__ and print()) —
+  # making the eval test the WRONG prompt. Pin the override to the real file.
+  export PRIVACY_BOX_PROMPT="${PRIVACY_BOX_PROMPT:-$DIR/../resources/privacy_box-system.md}"
+  [ -f "$PRIVACY_BOX_PROMPT" ] || { echo "real prompt not found at $PRIVACY_BOX_PROMPT" >&2; exit 2; }
 fi
 # Codegen with a zero remote budget falls back to local-only; give it room.
 export PRIVACY_BOX_REMOTE_TOKEN_BUDGET="${PRIVACY_BOX_REMOTE_TOKEN_BUDGET:-200000}"

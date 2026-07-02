@@ -132,73 +132,34 @@ def _mock_program() -> String:
     return s
 
 
-def _default_codegen_system() -> String:
-    """Built-in fallback prompt, used only if the resource file can't be read.
-    The model's training predates current Mojo, so it emits removed syntax (`let`,
-    `fn`, `alias`, `from pathlib import`). Teach the current dialect + give a
-    known-good example to pattern-match. (Static, no private data — safe to send.)
-    """
-    var s = String(
-        "You generate ONE self-contained Mojo program. Output ONLY Mojo code —"
-        " no prose, no markdown fences.\n\n"
-    )
-    s += (
-        "Mojo has CHANGED since your training data. Follow these rules"
-        " EXACTLY:\n"
-    )
-    s += (
-        "- Use `def`, never `fn` (removed). `def` does NOT imply raising; write"
-        " `def main() raises:`.\n"
-    )
-    s += "- Use `var`, never `let` (removed).\n"
-    s += "- Use `comptime`, never `alias` (removed).\n"
-    s += (
-        "- Stdlib imports need the `std.` prefix (e.g. `from std.os import"
-        " ...`). Avoid pathlib — read files with `open()`.\n"
-    )
-    s += (
-        "- No String slicing (`s[a:b]` is invalid). Use `s.split(sep)` and wrap"
-        " parts with `String(...)`.\n"
-    )
-    s += (
-        "- `len(x)` for lists; `s.byte_length()` for a String's length;"
-        " `String(s.strip())` to trim.\n\n"
-    )
-    s += (
-        "TASK: read the CSV at the literal path __DATA_CSV__ (first row is a"
-        " header), compute the requested result, and `print` it. Refer to"
-        " columns by their aliases (col_0, col_1, ...).\n\n"
-    )
-    s += "COMPLETE VALID EXAMPLE — match this exact style and API:\n"
-    s += _mock_program()
-    return s
-
-
 def _prompt_path() raises -> String:
-    """Where to load the system prompt from. `PRIVACY_BOX_PROMPT` overrides; otherwise
-    `resources/privacy_box-system.md` resolved under `PRIVACY_BOX_HOME` (the launcher
-    sets it) so it does NOT depend on cwd — falling back to the cwd-relative path in a
-    dev `pixi run`. Same resolution as the sandbox templates (see vaultcfg)."""
+    """Where to load the system prompt from. `PRIVACY_BOX_PROMPT` (an absolute path)
+    overrides; otherwise `resources/privacy_box-system.md` resolved under
+    `PRIVACY_BOX_HOME` (every launcher sets it — see resource_path). NEVER cwd.
+    """
     var override = getenv("PRIVACY_BOX_PROMPT", "")
     if override != "":
         return override
     return resource_path(String("resources/privacy_box-system.md"))
 
 
-def _codegen_system() -> String:
-    """System prompt for the remote (and fallback local) code generator. Loaded at
-    runtime from `resources/privacy_box-system.md` so the agent's contract — the
-    confidentiality rules, the vault tool API, the Mojo dialect — can be edited
-    without recompiling. Falls back to the built-in prompt if the file is absent.
-    """
-    try:
-        with open(_prompt_path(), "r") as f:
-            var text = f.read()
-            if String(text.strip()).byte_length() > 0:
-                return text^
-    except:
-        pass  # missing/unreadable -> built-in fallback below
-    return _default_codegen_system()
+def _codegen_system() raises -> String:
+    """System prompt for the frontier code generator. Loaded at runtime from
+    `resources/privacy_box-system.md` (resolved by ABSOLUTE path — PRIVACY_BOX_HOME /
+    PRIVACY_BOX_PROMPT, never cwd) so the agent's contract — the confidentiality rules,
+    the vault tool API, the Mojo dialect — can be edited without recompiling.
+
+    RAISES if the prompt can't be read or is empty — there is NO built-in stub
+    fallback. A silent fallback previously masked a misconfigured path and shipped a
+    wrong 'read __DATA_CSV__ and print()' stub prompt to the model; failing loud makes
+    that a fast, obvious error instead of silently-degraded codegen."""
+    var path = _prompt_path()
+    var text: String
+    with open(path, "r") as f:
+        text = f.read()
+    if String(text.strip()).byte_length() == 0:
+        raise Error("codegen system prompt is empty: " + path)
+    return text^
 
 
 struct ChatMessage(Copyable, Movable):

@@ -28,16 +28,24 @@ from std.os import getenv
 def resource_path(rel: String) raises -> String:
     """Resolve a privacy_box resource (a `sandbox/*.sb.template` profile, the
     `resources/privacy_box-system.md` prompt) to an ABSOLUTE path under
-    `PRIVACY_BOX_HOME` when that's set — so resolution does NOT depend on the
-    process's cwd. The launcher (mill's run wrapper / the app-server launch agent)
-    exports `PRIVACY_BOX_HOME` = the privacy_box install dir. An already-absolute
-    `rel` is returned unchanged; with no `PRIVACY_BOX_HOME` (a dev `pixi run`) we
-    fall back to the historical cwd-relative path."""
+    `PRIVACY_BOX_HOME` — resolution NEVER depends on the process's cwd. Every launcher
+    exports `PRIVACY_BOX_HOME` = the privacy_box install dir (mill's run script, the
+    app-server launch agent, the demo's run-demo.sh); dev/eval set `PRIVACY_BOX_PROMPT`
+    to bypass this. An already-absolute `rel` is returned unchanged.
+
+    RAISES when `PRIVACY_BOX_HOME` is unset rather than guessing from cwd — a silent
+    cwd fallback once made codegen load a wrong stub prompt (the file wasn't found from
+    the caller's cwd), which is far worse than a clear startup error."""
     if rel.startswith("/"):
         return rel
     var home = getenv("PRIVACY_BOX_HOME", "")
     if home == "":
-        return rel
+        raise Error(
+            "PRIVACY_BOX_HOME is not set — refusing to resolve resource '"
+            + rel
+            + "' from cwd. Export PRIVACY_BOX_HOME=<privacy_box install dir>"
+            " (or set PRIVACY_BOX_PROMPT to the prompt file)."
+        )
     return home + "/" + rel
 
 

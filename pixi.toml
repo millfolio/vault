@@ -77,7 +77,7 @@ test-ledger = { cmd = "mkdir -p build && mojo build core/test/derive/ledger_test
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
-test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/test/sandbox_test.mojo -I privacy-box/src -I ../logging.mojo/src -o build/sandbox-test && ./build/sandbox-test" }
+test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/test/sandbox_test.mojo -I privacy-box/src -I ../logging.mojo/src -o build/sandbox-test && PRIVACY_BOX_HOME=\"$PWD/privacy-box\" ./build/sandbox-test" }
 # Gate: M/D statement dates fold with the statement's year into sortable ISO.
 test-dates = { cmd = "mkdir -p build && mojo build core/test/extract/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
 # Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
