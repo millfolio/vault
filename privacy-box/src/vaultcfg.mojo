@@ -104,7 +104,14 @@ def vault_dir() raises -> String:
 
 
 def vault_index_dir() raises -> String:
-    """The millfolio LanceDB index dir — read-allowed in the vault run sandbox so
-    search() can reach the vector store + chunks.tsv side-table. Mirrors
-    millfolio/src/index.mojo `_config_dir()`."""
-    return getenv("HOME", ".") + "/.config/millfolio"
+    """The millfolio DATA/index dir — read-allowed in the vault run sandbox so a
+    generated program can reach the vector store, chunks.tsv, and the manifest.tsv /
+    transactions.tsv side-tables. MUST mirror vault/core `derive/store.config_dir()`:
+    `MILLFOLIO_DATA_DIR` overrides; else the macOS-native
+    `~/Library/Application Support/Millfolio/data` (moved from `~/.config/millfolio` —
+    a stale path here makes the sandbox DENY `manifest.tsv` with `Operation not
+    permitted`)."""
+    var d = getenv("MILLFOLIO_DATA_DIR", "")
+    if d != "":
+        return d
+    return getenv("HOME", ".") + "/Library/Application Support/Millfolio/data"

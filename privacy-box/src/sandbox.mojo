@@ -27,7 +27,7 @@ from std.ffi import external_call, c_int, c_char, CStringSlice
 from std.memory import UnsafePointer, stack_allocation
 from std.os import getenv
 from logging import log
-from vaultcfg import resource_path
+from vaultcfg import resource_path, vault_index_dir
 
 
 # ── posix_spawn-based exec ────────────────────────────────────────────────────
@@ -476,12 +476,13 @@ struct Sandbox(Movable):
         rendered = _replace_all(rendered, String("@HOME@"), home_c)
         rendered = _replace_all(rendered, String("@RUNTIME_PREFIX@"), runtime)
         if is_vault:
-            # The index dir (~/.config/millfolio) lives under $HOME; canonicalize it
-            # so the vault profile can re-allow reads of the vector store + the
-            # chunks.tsv side-table that search() resolves hits through.
+            # The data/index dir lives under $HOME; canonicalize it so the vault
+            # profile can re-allow reads of the vector store, the chunks.tsv side-table
+            # search() resolves hits through, and the manifest/transactions tables.
+            # Fallback must match vault/core's data dir (see vault_index_dir).
             var index_raw = (
                 self.policy.index_dir if self.policy.index_dir
-                != "" else (getenv("HOME", "/") + "/.config/millfolio")
+                != "" else vault_index_dir()
             )
             var index_c = _canonical(index_raw)
             rendered = _replace_all(rendered, String("@INDEX_DIR@"), index_c)
