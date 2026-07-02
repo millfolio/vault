@@ -129,10 +129,10 @@
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error ?? "create failed");
-      if (mode === "ai") {
-        // An AI rule tags nothing synchronously — kick materialization so it starts.
-        fetch(`${apiBase()}/api/materialize/run`, { method: "POST" }).catch(() => {});
-      }
+      // An AI rule tags nothing synchronously — the server's background materializer
+      // picks it up within a few seconds (no blocking /run call here; that used to
+      // freeze the single-threaded server while it classified). Progress shows in
+      // System → Materialization.
       oncreated?.();
       onclose?.();
     } catch (e) {

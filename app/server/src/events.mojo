@@ -61,16 +61,23 @@ def tags_event(names: String) -> String:
     return '{"type":"tags","tags":' + json_escape(names) + "}"
 
 
-def tag_proposal_event(name: String, keywords: String) -> String:
-    """A reusable-tag suggestion the model emitted (`# SUGGEST_TAG: name = kw, kw`)
-    for a durable category that isn't a tag yet. The UI offers to save it to
-    `categories.txt` so the next such question is a fast, exact `.tags` filter
-    instead of an inline per-transaction classify (the slow path)."""
+def tag_proposal_event(name: String, value: String, kind: String) -> String:
+    """A reusable-tag suggestion the model emitted for a durable category that isn't a
+    tag yet. `kind` is `"ml"` (AI rule — `value` is the yes/no question) or `"kw"`
+    (keyword rule — `value` is the comma-joined keywords). The UI offers to save it to
+    `categories.txt` (and, for an AI rule, materialize it) so the next such question is
+    a fast, exact `.tags` filter instead of an inline per-transaction classify.
+    """
+    var is_ml = "true" if kind == "ml" else "false"
+    var field = '"prompt":' if kind == "ml" else '"keywords":'
     return (
         '{"type":"tag-proposal","name":'
         + json_escape(name)
-        + ',"keywords":'
-        + json_escape(keywords)
+        + ',"ml":'
+        + is_ml
+        + ","
+        + field
+        + json_escape(value)
         + "}"
     )
 

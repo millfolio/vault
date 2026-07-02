@@ -36,6 +36,7 @@ from std.os.path import isfile, isdir, getsize, exists
 from flare.prelude import *
 from flare.http import Handler
 from flare.ws import WsConnection, WsOpcode, WsCloseCode
+from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 
 from std.ffi import external_call, c_char, c_int
 from std.time import perf_counter_ns
@@ -417,12 +418,15 @@ def _tags_in_program(code: String) raises -> String:
 
 
 def _tag_proposal_in_program(code: String) raises -> List[String]:
-    """A reusable-tag suggestion the model emitted as a program comment
-    `# SUGGEST_TAG: <name> = <kw>, <kw>` (for a durable, keyword-able category
-    that isn't a tag yet — so the next such question is a fast `.tags` filter
-    instead of an inline classify). Returns `[name, keywords_csv]` when present,
-    well-formed, and NOT already a known tag; `[]` otherwise. Static scan — the
-    comment never executes, mirroring `_tags_in_program`."""
+    """A reusable-tag suggestion the model emitted as a program comment — so the next
+    such question is a fast `.tags` filter instead of an inline classify. Two forms:
+      `# SUGGEST_TAG: <name> = <kw>, <kw>`   → a KEYWORD rule (merchant-nameable)
+      `# SUGGEST_TAG: <name> : <question>`   → an AI rule (semantic — reuse the yes/no
+                                               question the model classified with)
+    Returns `[name, value, kind]` (kind = `"ml"` or `"kw"`) when present, well-formed,
+    and NOT already a known tag; `[]` otherwise. The separator that appears FIRST wins
+    (an AI question may contain `=`; a keyword list won't contain `:`). Static scan —
+    the comment never executes."""
     var lines = code.split("\n")
     var marker = String("# SUGGEST_TAG:")
     for i in range(len(lines)):
@@ -430,12 +434,16 @@ def _tag_proposal_in_program(code: String) raises -> List[String]:
         if not ln.startswith(marker):
             continue
         var rest = String(ln.removeprefix(marker).strip())
-        var parts = rest.split("=")
-        if len(parts) < 2:
+        var eq = rest.find("=")
+        var colon = rest.find(":")
+        var is_ml = colon != -1 and (eq == -1 or colon < eq)
+        var sep = ":" if is_ml else "="
+        var cut = rest.find(sep)
+        if cut <= 0:
             continue
-        var name = String(parts[0].strip())
-        var kws = String(parts[1].strip())
-        if name.byte_length() == 0 or kws.byte_length() == 0:
+        var name = String(String(rest[byte=:cut]).strip())
+        var value = String(String(rest[byte = cut + 1 :]).strip())
+        if name.byte_length() == 0 or value.byte_length() == 0:
             continue
         # Skip a suggestion for a tag that already exists (redundant).
         var avail = effective_tags()
@@ -448,7 +456,8 @@ def _tag_proposal_in_program(code: String) raises -> List[String]:
             continue
         var out = List[String]()
         out.append(name^)
-        out.append(kws^)
+        out.append(value^)
+        out.append(String("ml") if is_ml else String("kw"))
         return out^
     return List[String]()
 
@@ -1044,6 +1053,26 @@ def _usleep(usec: Int):
     _ = external_call["usleep", Int](Int(usec))
 
 
+def _materialize_worker(arg: _OpaquePtr) -> _OpaquePtr:
+    """Detached background thread — drains pending AI-tag materialization in bounded
+    slices so an AI tag materializes ON ITS OWN (no open browser needed) WITHOUT
+    blocking the request reactor. `ml_materialize_slice` is a non-blocking try-lock
+    that honors the pause deadline (a live question is never delayed) and returns 0
+    when paused, locked, or nothing is pending. Naps briefly between active slices,
+    longer when idle (so a freshly-created tag starts within a few seconds). A pthread
+    start routine must NEVER raise — swallow everything."""
+    while True:
+        var changed: Int
+        try:
+            changed = ml_materialize_slice(_engine_url())
+        except:
+            changed = 0
+        if changed > 0:
+            _usleep(300000)  # ~0.3s between active slices (engine not pegged)
+        else:
+            _usleep(3000000)  # ~3s idle poll for newly-pending work
+
+
 def _progress_label(line: String) raises -> String:
     """Strip the progress sentinel off a captured stdout line, leaving the message
     the generated program passed to `progress(...)`."""
@@ -1449,8 +1478,8 @@ def on_connect(mut conn: WsConnection) raises:
         # yet, surface it so the user can save it (next time = a fast `.tags`
         # filter, not an inline classify). A comment in the program; never runs.
         var prop = _tag_proposal_in_program(code)
-        if len(prop) == 2:
-            conn.send_text(tag_proposal_event(prop[0], prop[1]))
+        if len(prop) == 3:
+            conn.send_text(tag_proposal_event(prop[0], prop[1], prop[2]))
         pre_ms = _ms_since(
             t_total0
         )  # manifest + codegen, before the approval pause
@@ -1826,6 +1855,21 @@ def main() raises:
                 " the run-queue)"
             ),
             sep="",
+        )
+    # Background AI-tag materialization: a DETACHED thread drains pending classification
+    # in bounded slices so an AI tag materializes on its own (survives a closed browser)
+    # WITHOUT blocking the reactor. Best-effort — materialization also runs at index time
+    # and via the System → Materialization panel, so a spawn failure isn't fatal.
+    try:
+        var mth = ThreadHandle.spawn[_materialize_worker](_null_ptr())
+        mth.detach()
+        print(
+            "  background materializer: on (AI tags materialize automatically)"
+        )
+    except:
+        print(
+            "  background materializer: could not start (index-time still"
+            " works)"
         )
     # num_workers=1 (default) → single-threaded reactor (real product). >1 → N pthread
     # workers via the multicore Handler-serve; Api is Copyable (shares the state
