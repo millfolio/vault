@@ -225,6 +225,7 @@ def ml_backfill_rows(
         if len(descs) == 0:
             continue
         var dc = classify_batch_dedup(base_url, r.ml_prompt, descs)
+        record_backfill_dedup(dc.seen, dc.unique)
         for k in range(len(idxs)):
             if k < len(dc.verdicts) and dc.verdicts[k]:
                 var row = rows[idxs[k]].copy()
@@ -362,6 +363,85 @@ def nap_ms_for_priority(p: String) -> Int:
     return 1200  # medium
 
 
+# ── backfill dedup savings counter (surfaced on the Stats page) ────────
+# Cumulative across passes: rows_seen = transactions handed to classification,
+# rows_classified = DISTINCT descriptions actually sent to the model (recurring charges
+# collapse). saved = rows_seen - rows_classified. Best-effort JSON in the data dir.
+
+
+def _dedup_stats_path() raises -> String:
+    return config_dir() + "/backfill_dedup.json"
+
+
+def _json_int(text: String, key: String) -> Int:
+    """Integer value of `"key":<int>` in a tiny JSON blob (0 if absent/malformed).
+    """
+    var k = String('"') + key + '":'
+    var at = text.find(k)
+    if at < 0:
+        return 0
+    var i = at + k.byte_length()
+    var b = text.as_bytes()
+    while i < len(b) and (Int(b[i]) == 32 or Int(b[i]) == 9):
+        i += 1
+    var neg = i < len(b) and Int(b[i]) == 45  # '-'
+    if neg:
+        i += 1
+    var v = 0
+    while i < len(b) and Int(b[i]) >= 48 and Int(b[i]) <= 57:
+        v = v * 10 + (Int(b[i]) - 48)
+        i += 1
+    return -v if neg else v
+
+
+def record_backfill_dedup(seen: Int, unique: Int) raises:
+    """Accumulate one classify slice's counts (rows handed in vs distinct descriptions
+    actually classified) into the cumulative counter. Best-effort — a stats write must
+    never fail a backfill."""
+    try:
+        var seen_tot = seen
+        var uniq_tot = unique
+        if exists(_dedup_stats_path()):
+            var text: String
+            with open(_dedup_stats_path(), "r") as f:
+                text = f.read()
+            seen_tot += _json_int(text, "rows_seen")
+            uniq_tot += _json_int(text, "rows_classified")
+        ensure_data_dir()
+        with open(_dedup_stats_path(), "w") as f:
+            f.write(
+                String('{"rows_seen":')
+                + String(seen_tot)
+                + ',"rows_classified":'
+                + String(uniq_tot)
+                + "}\n"
+            )
+    except:
+        pass
+
+
+def backfill_dedup_json() raises -> String:
+    """The cumulative dedup counter for /api/stats:
+    `{"rows_seen":N,"rows_classified":M,"saved":N-M}`."""
+    var seen = 0
+    var uniq = 0
+    if exists(_dedup_stats_path()):
+        var text: String
+        with open(_dedup_stats_path(), "r") as f:
+            text = f.read()
+        seen = _json_int(text, "rows_seen")
+        uniq = _json_int(text, "rows_classified")
+    return (
+        String('{"rows_seen":')
+        + String(seen)
+        + ',"rows_classified":'
+        + String(uniq)
+        + ',"saved":'
+        + String(seen - uniq)
+        + "}"
+    )
+
+
 # ── ML backfill: the ledger-based, incremental, resumable drain ────────
 
 
@@ -442,6 +522,7 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
                 # The slow part — no lock is meant to span it (the CLI holds the
                 # lock for the whole drain; the worker's slice is bounded).
                 var dc = classify_batch_dedup(base_url, r.ml_prompt, descs)
+                record_backfill_dedup(dc.seen, dc.unique)
                 for k in range(len(idxs)):
                     if k < len(dc.verdicts) and dc.verdicts[k]:
                         var row = rows[idxs[k]].copy()
