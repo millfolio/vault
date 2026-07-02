@@ -37,13 +37,16 @@ tasks:
   eval: # per-MODEL codegen PROMPT eval — manual pre-release gate (needs ANTHROPIC_API_KEY)
     #   moon run vault:eval             → default model (claude-sonnet-5)
     #   moon run vault:eval -- <model>  → e.g. claude-sonnet-4-6
-    # Model-nondeterministic + key-requiring, so it is NOT in :check. Re-run after
-    # any model change or major prompt edit — see CONTRIBUTING.md.
+    # Model-nondeterministic + key-requiring, so it is NOT in :check and NOT in CI.
+    # NB: intentionally NO `deps: [build]` — that would make it downstream of `build`,
+    # so the affected pre-push (`:check --downstream deep`) would run it keyless.
+    # run_eval.sh builds privacy_box itself if missing. Re-run after any model change
+    # or major prompt edit — see CONTRIBUTING.md.
     command: 'bash privacy-box/eval/run_eval.sh'
-    deps: ['build']
     toolchain: 'system'
     options:
       cache: false
+      runInCI: false
   eval-selftest: # mock-driven unit tests for the eval HARNESS (no key/model/network) — in :check
     command: 'bash privacy-box/eval/run_eval_test.sh'
     toolchain: 'system'

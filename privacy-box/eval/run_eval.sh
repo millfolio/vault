@@ -49,8 +49,15 @@ if [ ! -f "$GOLDEN" ]; then
   echo "  create one (copy the closest) when introducing a new model." >&2
   exit 2
 fi
+if [ ! -x "$BIN" ] && [ -z "${PRIVACY_BOX_BIN:-}" ]; then
+  # Build it ourselves — the moon task intentionally has no `deps: [build]` (see
+  # vault/moon.yml) so it isn't pulled into the affected pre-push run keyless.
+  echo "privacy_box not built — building it (pixi run privacy-box)…" >&2
+  (cd "$ROOT" && pixi run privacy-box) >&2 ||
+    { echo "build failed; run: (cd '$ROOT' && pixi run privacy-box)" >&2; exit 2; }
+fi
 if [ ! -x "$BIN" ]; then
-  echo "privacy_box not built — run: (cd '$ROOT' && pixi run privacy-box)" >&2
+  echo "privacy_box binary not found at $BIN" >&2
   exit 2
 fi
 if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${PRIVACY_BOX_BIN:-}" ]; then
