@@ -73,7 +73,7 @@ context, like the manifest is today, so the model knows what exists.
    - ML-backed → needs the engine up, slower, results cached.
    Future indexing auto-applies every registry rule to new statement rows.
 5. **Model generates the final query** (a filter predicate / aggregation)
-   against the now-materialized attribute.
+   against the now-backfilled attribute.
 6. **Debug view** — the user sees the records + their tags + the generated code
    + the output, and can **edit a definition → re-backfill → answers update.**
    The preview-before-persist in step 3 is part of this same inspect/edit loop.
@@ -86,7 +86,7 @@ context, like the manifest is today, so the model knows what exists.
 Two **independent** axes govern every tag. Conflating them is the main source of
 confusion; keep them separate.
 
-|                          | **Transient** (query-scoped)               | **Stored** (registry + materialized to `.tags`)        |
+|                          | **Transient** (query-scoped)               | **Stored** (registry + backfilled to `.tags`)        |
 | ------------------------ | ------------------------------------------ | ------------------------------------------------------ |
 | **Deterministic** (kw/regex) | one-off slice ("names containing 'yoga'") | the default for durable categories (phone, travel)     |
 | **ML** (`ask_local` classify) | one-off semantic slice ("felt like impulse buys") | the long tail — **pay the cost once at index, reuse** |
@@ -125,7 +125,7 @@ keywords | ml_prompt}`; the trusted on-device layer (`vault.derive.store`) commi
 it **after the user approves**.
 
 Extend the registry with a second rule type beside keyword rules: an **ML rule**
-= `tag : <classification prompt>`, materialized at index time by batched
+= `tag : <classification prompt>`, backfilled at index time by batched
 `ask_local` over each txn into the same `.tags` column. The slow cost is paid
 **once per statement at ingest**; every later query is a free exact filter,
 identical downstream to a deterministic tag. ML+transient stays the one-off escape
@@ -155,14 +155,14 @@ frontier model — that would leak exactly the data we alias. Refinement is the 
 + optionally the trusted local model, which (seeing real text) can *suggest* missing
 keywords the frontier model couldn't safely give.
 
-## ML materialization: ledger, incremental worker, and controls
+## ML backfill: ledger, incremental worker, and controls
 
 An ML rule (`<tag> : <question>`) is expensive — a model call per transaction — so
-its results are **materialized once and cached** in the `.tags` column, then reused
-as a fast exact filter. This section specs how that materialization is tracked,
+its results are **backfilled once and cached** in the `.tags` column, then reused
+as a fast exact filter. This section specs how that backfill is tracked,
 run incrementally, made observable, and controlled (cancel / pause).
 
-Today's `ml_materialize` just re-scans "rows missing this tag" each run, which
+Today's `ml_backfill` just re-scans "rows missing this tag" each run, which
 **conflates "not yet evaluated" with "evaluated → no"** — so it can't tell what's
 left, and it re-does the engine work for every true-negative. The fix is a decision
 ledger.
@@ -212,14 +212,14 @@ café   1b7e    412
 
 - **`qhash`** — short hash of the rule's question. Editing `is this a gym?`
   changes `qhash` → the marker no longer matches → that rule (only) fully
-  re-materializes from `done_gen = 0`.
-- **`done_gen`** — rule R is materialized for every row with
+  re-backfills from `done_gen = 0`.
+- **`done_gen`** — rule R is backfilled for every row with
   `added_gen <= done_gen` at this `qhash`. **Pending = rows with
   `added_gen > done_gen`** (or a stale/absent `qhash`). After a pass completes,
   `done_gen = max(added_gen)`.
 
 **Negatives are IMPLICIT** — the marker covers the whole `added_gen <= done_gen`
-range; positives live in `.tags`, everything else in-range is a materialized
+range; positives live in `.tags`, everything else in-range is a backfilled
 negative. So the mostly-negative case costs **O(1) per rule**, no per-negative
 rows. The durable footprint is a handful of marker lines, regardless of vault
 size.
@@ -232,14 +232,14 @@ per-txn rows: advance `done_gen` in-marker as batches commit.
 
 **Migration.** Pre-existing rows (written before `added_gen`) default to
 `added_gen = 0`; markers start absent (treated as `done_gen = -1`) → on first run
-EVERYTHING is pending and materializes exactly once, after which the marker
-tracks only the delta. Ledger loss re-materializes (negatives are derived facts —
+EVERYTHING is pending and backfills exactly once, after which the marker
+tracks only the delta. Ledger loss re-backfills (negatives are derived facts —
 unavoidable), but that's a bounded one-time cost; the invariant holds:
 **ledger-is-a-cache.**
 
 ### The controller — runtime state
 
-Tiny `~/.config/millfolio/materializer.json` holding ONLY control/observability
+Tiny `~/.config/millfolio/backfiller.json` holding ONLY control/observability
 state (anything derivable — progress, ETA — is computed from the ledger, not
 stored):
 
@@ -257,14 +257,14 @@ stored):
   the next real question.
 - The app-server slice uses a **non-blocking try-lock** (skip this tick if the CLI
   holds it) so it can never delay a question.
-- `millfolio materialize` (CLI) drains the whole queue in one go; honors
+- `millfolio backfill` (CLI) drains the whole queue in one go; honors
   `paused_until` too.
 - Progress is durable (the ledger), so pause/resume/crash all resume exactly where
   they stopped.
 
 ### Codegen readiness gate (the correctness tie-in)
 
-An ML tag advertised to codegen but NOT yet materialized is a hazard: codegen
+An ML tag advertised to codegen but NOT yet backfilled is a hazard: codegen
 filters `"gym" in t.tags` → empty `.tags` → false "no gym spending." So:
 
 - A rule is **ready** iff `done_gen >= max(added_gen)` at the current `qhash`
@@ -273,7 +273,7 @@ filters `"gym" in t.tags` → empty `.tags` → false "no gym spending." So:
 - **Pending** → advertise as `gym (pending)` (or withhold it) so codegen classifies
   INLINE meanwhile, exactly like the first time it was asked.
 
-So materialization is what flips a tag from "classify inline each time" → "fast
+So backfill is what flips a tag from "classify inline each time" → "fast
 exact filter," and the gate falls out of the ledger for free.
 
 ### Operations
@@ -295,16 +295,16 @@ exact filter," and the gate falls out of the ledger for free.
 
 ### UI + endpoints
 
-A **Materialization panel** (Tags tab, or a small Activity area): overall
-status + a pause control (duration → "paused for 42 min" + Resume) + **Materialize
+A **Backfill panel** (Tags tab, or a small Activity area): overall
+status + a pause control (duration → "paused for 42 min" + Resume) + **Backfill
 now**; per AI tag a progress bar (`38/152 · 25%`), ready/pending badge, yes/no
 counts, and a **Cancel** (×) button; footer with total pending + ETA. Backed by:
 
-- `GET  /api/materialize/status` — `{status, paused_until, perTag:[{tag,question,
+- `GET  /api/backfill/status` — `{status, paused_until, perTag:[{tag,question,
   total,evaluated,pending,yes,ready}], pendingTotal}` (lock-free read; backs
-  `millfolio materialize --status`).
-- `POST /api/materialize/pause {seconds}` / `.../resume`
-- `POST /api/materialize/run` — kick a bounded slice / drain.
+  `millfolio backfill --status`).
+- `POST /api/backfill/pause {seconds}` / `.../resume`
+- `POST /api/backfill/run` — kick a bounded slice / drain.
 - tag cancel — the existing category delete (editor save) reconciles the ledger:
   `save_categories` drops the marker of any rule no longer an active ML rule, and
   the retag pass strips its `.tags`.
@@ -312,16 +312,16 @@ counts, and a **Cancel** (×) button; footer with total pending + ETA. Backed by
 ### Build order (each shippable on its own) — STATUS
 
 1. ✅ **Readiness gate** — `store.codegen_tags_describe()` withholds an
-   un-materialized ML tag from `millfolio tags --describe`, so codegen never
+   un-backfilled ML tag from `millfolio tags --describe`, so codegen never
    filters `.tags` on it and returns a false empty.
 2. ✅ **Decision ledger** (`derive/ledger.mojo`, pure + unit-tested) + rewrite
-   `ml_materialize` to drain the queue from `added_gen > done_gen` incrementally
+   `ml_backfill` to drain the queue from `added_gen > done_gen` incrementally
    (each true negative classified once), under the advisory lock, classify outside
-   nothing that spans a held lock across writers. `ledger_note_materialized`
+   nothing that spans a held lock across writers. `ledger_note_backfilled`
    advances markers after the index-time inline pass so routine re-indexes don't
    redo a generation.
-3. ✅ **Status / pause** endpoints + the Materialization UI panel + the
-   between-questions worker slice (`ml_materialize_slice`, try-lock, pause-aware).
+3. ✅ **Status / pause** endpoints + the Backfill UI panel + the
+   between-questions worker slice (`ml_backfill_slice`, try-lock, pause-aware).
 
 ## Storage
 
@@ -345,11 +345,11 @@ counts, and a **Cancel** (×) button; footer with total pending + ETA. Backed by
   year detected once per document (`statement_year`, 0 = unknown). Extracted **once
   at index time**, only kept when it reconciles against the statement's own
   arithmetic. Incremental: load → drop changed aliases → re-extract changed → rewrite.
-- **`ml_ledger.tsv`** — the ML-materialization completion markers
+- **`ml_ledger.tsv`** — the ML-backfill completion markers
   (`# ml_ledger v1`, one `rule ⇥ qhash ⇥ done_gen` line per ML rule). A CACHE, not
-  truth (see the ML-materialization section). Guarded by a `mkdir`-based advisory
+  truth (see the ML-backfill section). Guarded by a `mkdir`-based advisory
   lock (`ml_ledger.lock`).
-- `materializer.json` — the controller/pause state (`{status, paused_until}`).
+- `backfiller.json` — the controller/pause state (`{status, paused_until}`).
 
 Read path: `transactions(alias)` → `index.file_transactions(alias)` →
 in-memory filter. No model call; already exact.
@@ -357,7 +357,7 @@ in-memory filter. No model call; already exact.
 A derived attribute is, in this model, **a generic `(txn, attribute_name) →
 value` side-table** (e.g. `derived.tsv`) keyed by a stable txn hash — so new
 attributes need **no schema migration** and a txn can carry many tags.
-Materialized at index time / backfilled when a rule changes; ML results cached.
+Backfilled at index time / backfilled when a rule changes; ML results cached.
 
 ### Why TSV today (not a LanceDB limitation)
 

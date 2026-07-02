@@ -1,4 +1,4 @@
-"""Ledger_test — the ML-materialization completion marker (pure).
+"""Ledger_test — the ML-backfill completion marker (pure).
 
 Builds + runs as a plain Mojo program with only `-I core/src` (no FFI/network):
 `pixi run test-ledger`. Pins the marker contract: the insertion-generation
@@ -51,8 +51,8 @@ def main() raises:
     # ── is_pending: qhash match + generation boundary ───────────────────────────
     var cur = q  # current question hash for the "gym" rule
     # Marker matches, done_gen = 10 → rows at gen <= 10 done, > 10 pending.
-    expect(not is_pending(10, cur, 10, cur), "gen == done_gen → materialized")
-    expect(not is_pending(5, cur, 10, cur), "gen < done_gen → materialized")
+    expect(not is_pending(10, cur, 10, cur), "gen == done_gen → backfilled")
+    expect(not is_pending(5, cur, 10, cur), "gen < done_gen → backfilled")
     expect(is_pending(11, cur, 10, cur), "gen > done_gen → pending")
     # Stale/absent marker (qhash mismatch) → everything pending regardless of gen.
     expect(
@@ -62,7 +62,7 @@ def main() raises:
     # Migration: absent marker modeled as done_gen = GEN_ABSENT(-1) → gen 0 pending.
     expect(
         is_pending(0, cur, GEN_ABSENT, cur),
-        "GEN_ABSENT marker → gen-0 row pending (first run materializes all)",
+        "GEN_ABSENT marker → gen-0 row pending (first run backfills all)",
     )
 
     # ── is_ready: covers the max inserted generation, matching qhash ────────────

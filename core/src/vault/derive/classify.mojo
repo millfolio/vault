@@ -2,7 +2,7 @@
 
 POSTs to `<base_url>/chat/completions` (OpenAI shape) asking the local model a
 yes/no question about each transaction description, BATCHED. Backs the ML category
-rules (`<tag> : <question>`) materialized by `vault.derive.store` at index time.
+rules (`<tag> : <question>`) backfilled by `vault.derive.store` at index time.
 Local-only (no egress guard); mirrors `vault.index.embed`'s flare wiring. The engine
 serves the loaded model regardless of the `model` field, so it's omitted.
 

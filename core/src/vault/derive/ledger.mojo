@@ -1,7 +1,7 @@
-"""Ledger — the ML-materialization completion marker (pure, LanceDB-free).
+"""Ledger — the ML-backfill completion marker (pure, LanceDB-free).
 
 An ML category rule (`<tag> : <question>`) costs a model call per transaction, so
-its verdicts are materialized once and cached in the `.tags` column. This module
+its verdicts are backfilled once and cached in the `.tags` column. This module
 holds the tiny durable bookkeeping that says HOW FAR each rule got, so a pass is
 incremental, resumable, and never re-does a true negative.
 
@@ -9,7 +9,7 @@ Coverage is keyed on a monotonic **insertion generation** (`added_gen`), NOT the
 transaction's date: every transaction gets an `added_gen` at index time from a
 persisted counter, so a back-dated statement indexed late still gets a HIGH gen →
 correctly pending. Per rule we keep ONE marker `(rule, qhash, done_gen)`: rule R
-is materialized for every row with `added_gen <= done_gen` at question-hash
+is backfilled for every row with `added_gen <= done_gen` at question-hash
 `qhash`; the pending set is `{ rows : added_gen > done_gen }`. Negatives are
 implicit (the marker covers the whole in-range span; positives live in `.tags`),
 so the mostly-negative case costs O(1) per rule.
@@ -17,7 +17,7 @@ so the mostly-negative case costs O(1) per rule.
 This file is deliberately PURE — parse/serialize + the coverage predicates, no
 file I/O, no engine, no FFI — so the hermetic test suite exercises it directly
 (`pixi run test-ledger`). The worker that reads/writes `ml_ledger.tsv` under the
-run-queue `flock` lives elsewhere (see `QUERY_FLOW.md` → ML materialization).
+run-queue `flock` lives elsewhere (see `QUERY_FLOW.md` → ML backfill).
 """
 
 from vault.index.sha256 import sha256_hex
@@ -36,7 +36,7 @@ comptime GEN_ABSENT = -1  # a rule with no marker → done_gen treated as -1
 def qhash(prompt: String) -> String:
     """A short, stable hash of an ML rule's question — the first `QHASH_LEN` hex
     chars of its SHA-256. Editing the question changes `qhash`, so the old marker
-    stops matching → that rule (only) re-materializes from scratch."""
+    stops matching → that rule (only) re-backfills from scratch."""
     var b = List[UInt8]()
     var p = prompt.unsafe_ptr()
     for i in range(prompt.byte_length()):
@@ -54,7 +54,7 @@ def qhash(prompt: String) -> String:
 
 @fieldwise_init
 struct RuleMarker(Copyable, Movable):
-    """One durable line: rule R is materialized for every transaction with
+    """One durable line: rule R is backfilled for every transaction with
     `added_gen <= done_gen`, evaluated at question-hash `qhash`. If `qhash` no
     longer matches the rule's current question the marker is stale (the whole
     rule re-queues)."""
@@ -83,7 +83,7 @@ def is_pending(
 def is_ready(
     marker_qhash: String, done_gen: Int, cur_qhash: String, max_added_gen: Int
 ) -> Bool:
-    """Is a rule fully materialized — safe to advertise to codegen as a fast exact
+    """Is a rule fully backfilled — safe to advertise to codegen as a fast exact
     `.tags` filter rather than classified inline? True iff the marker matches the
     current question AND covers the highest inserted generation. An empty vault
     (`max_added_gen == GEN_ABSENT`) is trivially ready."""
@@ -199,7 +199,7 @@ def marker_done_gen(
 ) -> Int:
     """The effective `done_gen` for `rule` at the current question hash: the
     stored value when the marker matches `cur_qhash`, else `GEN_ABSENT` (a missing
-    OR stale marker means nothing is materialized → the whole rule is pending).
+    OR stale marker means nothing is backfilled → the whole rule is pending).
     """
     var idx = find_marker(markers, rule)
     if idx < 0:
@@ -215,7 +215,7 @@ def upsert_marker(
     cur_qhash: String,
     done_gen: Int,
 ):
-    """Record that `rule` is materialized through `done_gen` at `cur_qhash`. If a
+    """Record that `rule` is backfilled through `done_gen` at `cur_qhash`. If a
     marker exists it's overwritten (a re-hash from an edited question resets its
     generation); otherwise a new line is appended."""
     var idx = find_marker(markers, rule)

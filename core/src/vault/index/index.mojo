@@ -58,8 +58,8 @@ from vault.derive.store import (
     load_txn_rows,
     write_txn_rows,
     retag,
-    ml_materialize_rows,
-    ledger_note_materialized,
+    ml_backfill_rows,
+    ledger_note_backfilled,
 )
 
 
@@ -104,7 +104,7 @@ struct Manifest(Copyable, Movable):
     var source_dir: String
     # Next free INSERTION generation for transaction rows (monotonic). Each index
     # run that adds transactions stamps them with the current value, then bumps it,
-    # so the ML-materialization ledger can tell late-inserted (back-dated) rows
+    # so the ML-backfill ledger can tell late-inserted (back-dated) rows
     # apart from ones a rule has already covered. See `TxnRow.added_gen`.
     var next_gen: Int
 
@@ -871,27 +871,25 @@ def build_index(
     # from the current registry — one pure pass, the single source of tags.
     _ = retag(trows, reg)
     write_txn_rows(trows)
-    # Materialize ML-rule tags (`<tag> : <question>`) for the NEWLY-extracted files
+    # Backfill ML-rule tags (`<tag> : <question>`) for the NEWLY-extracted files
     # via the on-device model — the fuzzy tail no keyword captures, paid once at
     # index (carried-over rows keep their cached ML tags). Best-effort: a classify
     # failure (engine busy, chat model not serving) must never abort indexing.
     if len(emb_alias) > 0:
         try:
-            var ml_changed = ml_materialize_rows(
-                trows, reg, base_url, emb_alias
-            )
+            var ml_changed = ml_backfill_rows(trows, reg, base_url, emb_alias)
             if ml_changed > 0:
                 write_txn_rows(trows)
                 print(
-                    "  materialized ML tags on "
+                    "  backfilled ML tags on "
                     + String(ml_changed)
                     + " transaction(s)"
                 )
             # The freshly-inserted generation is now classified inline for every
             # active ML rule → advance the ledger markers so the between-questions
-            # worker / `millfolio materialize` don't redo this generation's
+            # worker / `millfolio backfill` don't redo this generation's
             # negatives (only advances rules with no older backlog).
-            ledger_note_materialized(reg, trows, cur_gen)
+            ledger_note_backfilled(reg, trows, cur_gen)
         except e:
             print("  (ML tag pass skipped: " + String(e) + ")")
     _write_manifest(Manifest(new_entries^, next_id, next_alias, base, next_gen))

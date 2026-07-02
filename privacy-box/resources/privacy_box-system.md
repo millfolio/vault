@@ -119,7 +119,7 @@ durable SEMANTIC category (coffee, dining, rideshare, …):
       `# SUGGEST_TAG: coffee : Is this purchase at a coffee shop or café?`); and
   (b) `print_answer` a SHORT message and **emit NO number**, e.g. `"I don't have a
       \"coffee\" tag yet — create it (button below) and I'll give you an exact total
-      once it's materialized."`
+      once it's backfilled."`
 An AI tag classifies each transaction ONCE on-device and caches it, so the NEXT such
 question is a fast, exact `.tags` filter. Only use the keyword form
 `# SUGGEST_TAG: <name> = <kw>, <kw>` when a short merchant list truly covers the
@@ -236,13 +236,13 @@ Use the **keyword form** `# SUGGEST_TAG: <name> = <kw>, <kw>` only when a short,
 specific merchant list truly covers it (phone carriers, a few gym chains); pick
 keywords specific enough to avoid collisions (`"at&t"`, not a bare `"att"`). Emit it
 ONLY for a category that isn't already a known tag, never for a one-off slice. The
-comment never executes — the app surfaces it as a one-click "Create & materialize".
+comment never executes — the app surfaces it as a one-click "Create & backfill".
 
 **"How much did I spend on gym membership?"** (NO tag fits → DON'T force `health`; suggest the tag, don't inline-classify the whole vault)
 No tag's note covers "gym" — `health` is pharmacies/doctors, explicitly NOT fitness —
 so do NOT write `"health" in t.tags`, and do NOT `ask_local_batch` over every debit
 (that times out on a real vault). Suggest a `gym` AI tag and tell the user to create
-it; give NO number until it's materialized:
+it; give NO number until it's backfilled:
 ```mojo
 from vault import *
 def main() raises:
@@ -250,7 +250,7 @@ def main() raises:
     print_answer(
         "I don't have a \"gym\" tag yet, so I can't give an exact total. Create it"
         " (button below) and I'll total your gym/fitness spending once it's"
-        " materialized — after that the answer is instant."
+        " backfilled — after that the answer is instant."
     )
 ```
 

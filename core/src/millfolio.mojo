@@ -21,9 +21,9 @@ from vault.index import (
     vault_files,
     effective_tags,
     effective_retag,
-    ml_materialize,
+    ml_backfill,
     codegen_tags_describe,
-    materialize_status_json,
+    backfill_status_json,
     tags_report_json,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
@@ -195,7 +195,7 @@ def main() raises:
             # One tag per line, `name <TAB> description` (description may be
             # empty) — the codegen orchestrator formats this into the prompt so
             # the model picks a tag by its scope, not just its name. Applies the
-            # READINESS GATE: an ML tag not yet fully materialized is withheld so
+            # READINESS GATE: an ML tag not yet fully backfilled is withheld so
             # codegen never filters `.tags` on it and reports a false "no X".
             print(codegen_tags_describe())
         else:
@@ -216,18 +216,18 @@ def main() raises:
             + String(changed)
             + " transaction(s) from the current category rules"
         )
-    elif cmd == "materialize":
+    elif cmd == "backfill":
         # Run the ML category rules (`<tag> : <question>`) over the stored
         # transactions via the on-device model — the fuzzy tail no keyword rule
         # captures. Ledger-based + incremental: each true negative is classified
         # once (the marker remembers it), so a re-run only does genuinely-new work.
         # `--status` prints the per-tag progress JSON without touching the engine.
         if len(args) >= 3 and String(args[2]) == "--status":
-            print(materialize_status_json())
+            print(backfill_status_json())
         else:
-            var changed = ml_materialize(_local_url())
+            var changed = ml_backfill(_local_url())
             print(
-                "materialized — "
+                "backfilled — "
                 + String(changed)
                 + " transaction(s) updated from the category rules"
             )
@@ -251,7 +251,7 @@ def main() raises:
     else:
         print(
             "usage: millfolio <manifest|read|embed|index|search|tags|retag"
-            "|materialize|amount-password> ..."
+            "|backfill|amount-password> ..."
         )
 
 

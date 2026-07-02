@@ -104,7 +104,7 @@ def embed_batch(
 
     var out = List[List[Float32]]()
     try:
-        # Materialize each array ONCE via array_items() — O(n). Indexing the lazy
+        # Backfill each array ONCE via array_items() — O(n). Indexing the lazy
         # value (`data[i]`, `arr[j]`) instead re-traverses per access, which is
         # O(n^2) on a large batched response (358 KB for 28 chunks → 20s+ at 100% CPU).
         var data = resp.json()["data"].array_items()

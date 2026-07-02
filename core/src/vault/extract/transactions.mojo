@@ -1181,7 +1181,7 @@ struct TxnRow(Copyable, Movable):
     var desc: String
     var tags: List[String]
     # Monotonic INSERTION generation, assigned at index time (see the manifest's
-    # `next_gen`) — the key the ML-materialization ledger uses to tell which rows a
+    # `next_gen`) — the key the ML-backfill ledger uses to tell which rows a
     # rule still needs classified, DECOUPLED from `date` so a back-dated statement
     # indexed late is correctly seen as pending. Rows written before this column
     # existed parse as gen 0 (see `tsv_to_txn_rows`).

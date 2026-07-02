@@ -50,7 +50,7 @@ from vault.derive.ledger import (
 
 def config_dir() raises -> String:
     """The on-device DATA dir — the index, extracted transactions, category rules,
-    materialization ledger, and usage/history stores. macOS-native home (matches the
+    backfill ledger, and usage/history stores. macOS-native home (matches the
     install tree + keeps financial data out of a dotfiles-synced `~/.config`);
     `MILLFOLIO_DATA_DIR` overrides it (the demo / tests pin their own)."""
     var d = String(getenv("MILLFOLIO_DATA_DIR", "").strip())
@@ -86,7 +86,7 @@ def _ledger_lock_dir() raises -> String:
 
 
 def controller_path() raises -> String:
-    return config_dir() + "/materializer.json"
+    return config_dir() + "/backfiller.json"
 
 
 # ── transactions side-table I/O ───────────────────────────────────────────────
@@ -104,7 +104,7 @@ def load_txn_rows() raises -> List[TxnRow]:
 def write_txn_rows(rows: List[TxnRow]) raises:
     ensure_data_dir()
     # Atomic replace: write a temp file then rename(2) over the target. The background
-    # materializer writes this file repeatedly; a concurrent reader (a query's
+    # backfiller writes this file repeatedly; a concurrent reader (a query's
     # load_txn_rows, /api/transactions) must never observe a half-written file.
     var final = txns_path()
     var tmp = final + ".tmp"
@@ -206,7 +206,7 @@ def read_categories() raises -> String:
 
 def _reconcile_ledger() raises:
     """Drop ledger markers for any rule that is no longer an ACTIVE ML rule — so
-    removing or de-ML'ing a category (via the editor) purges its materialization
+    removing or de-ML'ing a category (via the editor) purges its backfill
     marker automatically (the cancel path). Its `.tags` are stripped by the retag
     pass, since `retag` only carries over tags of rules still in the registry.
     """
@@ -230,7 +230,7 @@ def _reconcile_ledger() raises:
 def save_categories(text: String) raises -> Int:
     """Overwrite `categories.txt` with the editor's content (this makes the file
     'touched' → authoritative) and re-tag the stored transactions. Also reconciles
-    the materialization ledger (a removed/renamed ML rule loses its stale marker).
+    the backfill ledger (a removed/renamed ML rule loses its stale marker).
     Returns the number of transactions whose tags changed."""
     _write_categories(categories_path(), text)
     var changed = effective_retag()
@@ -238,7 +238,7 @@ def save_categories(text: String) raises -> Int:
     return changed
 
 
-# ── tags: names, materialization, report ──────────────────────────────────────
+# ── tags: names, backfill, report ──────────────────────────────────────
 
 
 def effective_tags() raises -> List[String]:
@@ -275,7 +275,7 @@ def _contains(xs: List[String], s: String) -> Bool:
 def retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
     """Re-apply the registry's DETERMINISTIC tags to every stored transaction in
     place (pure — no model call, no re-embed), PRESERVING any ML-rule tags already
-    materialized on the row. `tags_for` is deterministic-only (an ML rule never
+    backfilled on the row. `tags_for` is deterministic-only (an ML rule never
     matches by keyword), so without the carry-over a plain re-tag would strip the
     ML tags that were assigned, at index time, with a model call. Returns the
     COUNT of rows whose tags changed, so callers persist only when something
@@ -291,7 +291,7 @@ def retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
             rows[i].desc
         )  # deterministic, registry order
         # Carry over any ML tag already on the row (it was a model call to compute,
-        # cached here — re-materialized only at index time for new transactions).
+        # cached here — re-backfilled only at index time for new transactions).
         for g in range(len(rows[i].tags)):
             ref t = rows[i].tags[g]
             if _contains(ml, t) and not _contains(new_tags, t):
@@ -316,7 +316,7 @@ def effective_retag() raises -> Int:
     return changed
 
 
-def ml_materialize_rows(
+def ml_backfill_rows(
     mut rows: List[TxnRow],
     reg: Registry,
     base_url: String,
@@ -356,7 +356,7 @@ def ml_materialize_rows(
     return changed
 
 
-# ── ML materialization ledger: durable state, lock, controller ────────────────
+# ── ML backfill ledger: durable state, lock, controller ────────────────
 # The ledger (`ml_ledger.tsv`) is a per-rule completion marker keyed on the
 # insertion generation (`TxnRow.added_gen`); see `vault.derive.ledger` +
 # `QUERY_FLOW.md`. It is a CACHE — loss/corruption only costs re-work, never
@@ -381,7 +381,7 @@ def save_ledger(markers: List[RuleMarker]) raises:
 
 
 def try_lock() -> Bool:
-    """Acquire the materialization lock (atomic POSIX `mkdir`). Returns False if
+    """Acquire the backfill lock (atomic POSIX `mkdir`). Returns False if
     another writer holds it — the app-server worker skips its tick, so a question
     is never delayed. Best-effort: a lock leaked by a crashed process must be
     cleared by hand (`rmdir ~/.config/millfolio/ml_ledger.lock`)."""
@@ -442,7 +442,7 @@ def _write_controller(paused_until: Int64) raises:
 
 
 def set_pause(seconds: Int) raises:
-    """Pause materialization for `seconds` from now; the workers no-op until it
+    """Pause backfill for `seconds` from now; the workers no-op until it
     elapses, then auto-resume. `seconds <= 0` resumes immediately."""
     if seconds <= 0:
         _write_controller(Int64(0))
@@ -455,11 +455,11 @@ def is_paused() raises -> Bool:
 
 
 def priority_path() raises -> String:
-    return config_dir() + "/materializer_priority"
+    return config_dir() + "/backfiller_priority"
 
 
 def get_priority() raises -> String:
-    """The materialization THROTTLE — "high" | "medium" | "low" (default "medium").
+    """The backfill THROTTLE — "high" | "medium" | "low" (default "medium").
     Governs how long the background worker naps BETWEEN classify slices: low leaves
     the GPU mostly free (long idle gaps → laptop stays usable), high runs nearly
     back-to-back (fastest, GPU-heavy)."""
@@ -493,7 +493,7 @@ def nap_ms_for_priority(p: String) -> Int:
     return 1200  # medium
 
 
-# ── ML materialization: the ledger-based, incremental, resumable drain ────────
+# ── ML backfill: the ledger-based, incremental, resumable drain ────────
 
 
 def _contains_int(xs: List[Int], v: Int) -> Bool:
@@ -590,7 +590,7 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
                         rows[idxs[k]] = row^
                         changed += 1
                 groups_used += 1
-            # Everything with added_gen <= g is now materialized for this rule.
+            # Everything with added_gen <= g is now backfilled for this rule.
             upsert_marker(markers, r.tag, cur, g)
     if changed > 0:
         write_txn_rows(rows)
@@ -598,9 +598,9 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
     return changed
 
 
-def ml_materialize(base_url: String) raises -> Int:
-    """Drain the WHOLE ML-materialization queue and persist — backs `millfolio
-    materialize`. Ledger-based: each true negative is classified once (the marker
+def ml_backfill(base_url: String) raises -> Int:
+    """Drain the WHOLE ML-backfill queue and persist — backs `millfolio
+    backfill`. Ledger-based: each true negative is classified once (the marker
     remembers it), so re-runs after adding a statement or a new rule only do the
     genuinely-new work. No-op (returns 0) if another writer holds the lock.
     """
@@ -615,8 +615,8 @@ def ml_materialize(base_url: String) raises -> Int:
         raise e^
 
 
-def ml_materialize_slice(base_url: String) raises -> Int:
-    """One bounded generation-batch of materialization — the app-server's
+def ml_backfill_slice(base_url: String) raises -> Int:
+    """One bounded generation-batch of backfill — the app-server's
     between-questions worker. Non-blocking try-lock (skip if the CLI holds it) and
     honors the pause deadline, so it can never delay a question. Returns rows
     changed (0 when paused, locked, or nothing pending)."""
@@ -633,7 +633,7 @@ def ml_materialize_slice(base_url: String) raises -> Int:
         raise e^
 
 
-def ledger_note_materialized(
+def ledger_note_backfilled(
     reg: Registry, rows: List[TxnRow], cur_gen: Int
 ) raises:
     """Called at index time AFTER the inline ML pass has classified the freshly
@@ -665,11 +665,11 @@ def ledger_note_materialized(
         pass
 
 
-# ── readiness gate + materialization status (for codegen + the UI panel) ──────
+# ── readiness gate + backfill status (for codegen + the UI panel) ──────
 
 
 def ml_ready_tags() raises -> List[String]:
-    """The ML-rule tag names that are fully materialized at their current question
+    """The ML-rule tag names that are fully backfilled at their current question
     hash — safe for codegen to advertise as an exact `.tags` filter. A pending /
     stale rule is withheld (see `codegen_tags_describe`) so a `"gym" in t.tags`
     filter can never return a false empty over un-classified rows."""
@@ -692,7 +692,7 @@ def ml_ready_tags() raises -> List[String]:
 def codegen_tags_describe() raises -> String:
     """`name <TAB> description` per line for the CODEGEN prompt (the readiness
     gate): every deterministic tag, plus only the ML tags that are fully
-    materialized. Withholding a pending ML tag makes codegen classify inline (or
+    backfilled. Withholding a pending ML tag makes codegen classify inline (or
     skip it) rather than filter an empty `.tags` and report a false "no X". Backs
     `millfolio tags --describe`."""
     var reg = load_registry()
@@ -706,10 +706,10 @@ def codegen_tags_describe() raises -> String:
     return out^
 
 
-def materialize_status_json() raises -> String:
+def backfill_status_json() raises -> String:
     """`{status, paused_until, perTag:[{tag,question,total,evaluated,pending,yes,
-    ready}], pendingTotal}` — the lock-free read backing GET /api/materialize/status
-    and the Tags-tab Materialization panel. `evaluated`/`pending` are derived from
+    ready}], pendingTotal}` — the lock-free read backing GET /api/backfill/status
+    and the Tags-tab Backfill panel. `evaluated`/`pending` are derived from
     the ledger watermark vs each row's `added_gen`; `yes` is the live `.tags`
     count."""
     var reg = load_registry()
@@ -765,7 +765,7 @@ def materialize_status_json() raises -> String:
 
 def preview_ml_json(base_url: String, prompt: String) raises -> String:
     """Time-boxed (~5s) preview of an AI rule (`tag : prompt`) WITHOUT persisting
-    anything — no `.tags`, no ledger, no materialization. Classifies stored
+    anything — no `.tags`, no ledger, no backfill. Classifies stored
     transactions with `prompt` (in insertion order) until the budget elapses, then
     reports how many of the SAMPLE matched. The caller projects a total from
     `matched / evaluated`. This is the "evaluate for 5 seconds, show the count"
@@ -843,7 +843,7 @@ def add_category(name: String, keywords: String, prompt: String) raises -> Int:
     action of the search/define bar. A non-empty `prompt` makes an AI rule
     (`name : prompt`); otherwise a keyword rule (`name = keywords`). Returns the
     number of transactions re-tagged (0 if the name is empty or nothing matched;
-    an AI rule matches 0 here — it materializes via the worker / `materialize`).
+    an AI rule matches 0 here — it backfills via the worker / `backfill`).
     Reuses `save_categories`, so the ledger is reconciled too."""
     var clean = _sanitize_tag(name)
     if clean.byte_length() == 0:

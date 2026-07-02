@@ -47,7 +47,7 @@ struct Rule(Copyable, Movable):
     - **ML** (the fuzzy tail): ``ml_prompt`` is a yes/no classification question
       for the on-device model (e.g. ``"is this merchant a gym?"``). ``ml_prompt``
       non-empty marks the rule ML; such a rule never matches by keyword
-      (``matches`` returns False) — it's materialized separately, at index time,
+      (``matches`` returns False) — it's backfilled separately, at index time,
       by `vault.derive.store` calling the engine, and the result is cached in the
       ``.tags`` column (see QUERY_FLOW). Deterministic rules leave it empty.
 
@@ -70,7 +70,7 @@ struct Rule(Copyable, Movable):
 
     def matches(self, desc_lower: String) -> Bool:
         """Whether this DETERMINISTIC rule applies to an already-lowercased
-        description. ML rules never match here (they're materialized separately,
+        description. ML rules never match here (they're backfilled separately,
         with a model call) — so `tags_for` stays pure and model-free."""
         if self.is_ml():
             return False
@@ -119,7 +119,7 @@ def _ml_rule(
     var tag: String, var prompt: String, var description: String = ""
 ) -> Rule:
     """An ML rule — `tag` is assigned when the on-device model answers yes to
-    `prompt` for a transaction (materialized at index time, cached)."""
+    `prompt` for a transaction (backfilled at index time, cached)."""
     return Rule(tag^, List[String](), List[String](), prompt^, description^)
 
 
