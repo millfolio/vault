@@ -14,17 +14,20 @@ from vault.index.index import (
     Chunk,
 )
 
-# The registry/tags/retag store is LanceDB-free (vault.derive.store) and shared
-# with the app server; re-exported here so existing `vault.index` callers (the
-# CLI) keep their imports.
-from vault.derive.store import (
+# The tag-registry READ layer (vault.derive.tags — LanceDB- and network-free) and
+# the mutate/report layer (vault.derive.store) are shared in-process with the app
+# server and privacy_box; re-exported here so existing `vault.index` callers keep
+# their imports, each from the module that DEFINES it.
+from vault.derive.tags import (
     effective_tags,
     effective_tag_descriptions,
+    codegen_tags_describe,
+    ml_ready_tags,
+)
+from vault.derive.store import (
     effective_retag,
     ml_backfill,
     ml_backfill_slice,
-    codegen_tags_describe,
-    ml_ready_tags,
     ledger_note_backfilled,
     backfill_status_json,
     set_pause,

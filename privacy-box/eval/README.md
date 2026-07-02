@@ -31,22 +31,34 @@ hand-written synthetic manifest (`manifests/*.txt`) and a question to the new
 `privacy_box codegen "<q>" --manifest <file>` subcommand — **no index or embedding
 server required, only the frontier key.**
 
-- `golden.tsv` — one row per case: `question <TAB> must_contain <TAB> must_not_contain
-  <TAB> manifest`. The contain-lists are comma-separated literal substrings.
-- `run_eval.sh` — runs each case and greps the program for the rules; prints
-  `PASS`/`FAIL <reasons>` and a summary, exit non-zero on any failure.
+- `golden.<model>.tsv` — one row per case: `question <TAB> must_contain <TAB>
+  must_not_contain <TAB> manifest`. The contain-lists are comma-separated literal
+  substrings. **The golden set is PER-MODEL** — codegen quality is a property of the
+  (prompt, model) pair, so each served model has its own file (e.g.
+  `golden.claude-sonnet-5.tsv`, `golden.claude-sonnet-4-6.tsv`).
+- `fixtures/data/categories.txt` — the FIXTURE tag registry. `run_eval.sh` copies
+  `fixtures/data` to a temp `MILLFOLIO_DATA_DIR` so codegen sees a fixed, known tag
+  set — never your real categories, and the eval never mutates them.
+- `run_eval.sh [MODEL]` — runs each case (with `PRIVACY_BOX_MODEL=<MODEL>`) and greps
+  the program for the rules; prints `PASS`/`FAIL <reasons>` + a summary, exit non-zero
+  on any failure. Model = `$1` or `$EVAL_MODEL`, default `claude-sonnet-5`.
+- `run_eval_test.sh` — mock-driven UNIT TESTS for the harness itself (no key, no
+  model, no network); asserts the lint contract so `run_eval.sh` can't silently rot.
+  Runs in `:check` via `moon run vault:eval-selftest`.
 
 ## Run it
 
 ```bash
-export ANTHROPIC_API_KEY=sk-...      # else codegen falls back to the LOCAL model
-moon run vault:eval                  # or: (cd vault && pixi run eval)
-EVAL_VERBOSE=1 pixi run eval          # print the generated program for each FAIL
+export ANTHROPIC_API_KEY=sk-...              # else codegen falls back to the LOCAL model
+moon run vault:eval                          # default model (claude-sonnet-5)
+moon run vault:eval -- claude-sonnet-4-6     # a specific model → golden.claude-sonnet-4-6.tsv
+EVAL_VERBOSE=1 moon run vault:eval           # print the generated program for each FAIL
 ```
 
-Add a case: append a row to `golden.tsv` (and a manifest under `manifests/` if you
-need a new file shape). Keep rules to **shape**, not exact wording, so they survive
-the model's phrasing variance.
+Add a case: append a row to the relevant `golden.<model>.tsv` (and a manifest under
+`manifests/` if you need a new file shape). Introducing a model: copy the closest
+golden to `golden.<new-model>.tsv`. Keep rules to **shape**, not exact wording, so
+they survive the model's phrasing variance.
 
 ## TODO — accuracy tier
 

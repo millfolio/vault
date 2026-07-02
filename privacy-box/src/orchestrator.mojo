@@ -29,6 +29,12 @@ from sandbox import Sandbox, RunHandle
 from broker import CapabilityBroker
 from vaultcfg import millfolio_bin, vault_include_paths
 
+# The tag-registry READ layer, shared IN-PROCESS with the CLI + app server. It's
+# LanceDB- and network-free (no flare/HTTP), so pulling it into the sandbox
+# orchestrator keeps the trust surface small — and lets codegen read tags without
+# spawning the CLI binary.
+from vault.derive.tags import codegen_tags_describe
+
 
 # The progress-line sentinel — MUST match `vault.progress` in vault/core/src/vault.mojo
 # (which can't be imported here: vault is only on the *generated* program's include
@@ -211,22 +217,18 @@ struct Orchestrator(Movable):
         return m.output.copy()
 
     def _vault_tags(mut self) raises -> String:
-        """The effective category tag NAMES (built-in defaults + the user's
-        `categories.txt`), via the trusted on-device `millfolio tags`. Just the
-        comma-joined tag names go to the model — NEVER the keyword rules (those
-        are on-device matching detail, and more sensitive: they hold merchant
-        names the user typed). Best-effort: an empty string (→ no tags line in
-        the prompt) when the binary can't produce them, so codegen never fails
-        over tags."""
-        var argv: List[String] = [
-            millfolio_bin(),
-            String("tags"),
-            String("--describe"),
-        ]
-        var t = self.sandbox.capture(argv)
-        if t.exit_code != 0:
-            return String("")
-        return String(t.output.strip())
+        """The effective category tags for codegen — `name <TAB> description` per
+        line for every deterministic tag plus the fully-backfilled ML tags (the
+        readiness gate), read IN-PROCESS from the shared LanceDB-/network-free
+        registry layer (`vault.derive.tags`) — no CLI spawn. Only tag NAMES +
+        scope notes reach the model, NEVER the keyword rules (on-device matching
+        detail that can hold merchant names the user typed).
+
+        HARD-FAIL by design: tags are a critical part of the answer surface and
+        there isn't enough compute for interactive ML exploration, so if the
+        registry can't be read this RAISES rather than letting codegen proceed
+        tag-blind (which would silently mis-answer category questions)."""
+        return String(codegen_tags_describe().strip())
 
     def vault_codegen(
         mut self, question: String, manifest: String

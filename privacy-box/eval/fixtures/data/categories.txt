@@ -1,0 +1,13 @@
+# Eval fixture tag registry — SEPARATE from the developer's PRODUCTION tags.
+#
+# run_eval.sh copies this dir to a temp MILLFOLIO_DATA_DIR before running, so the
+# tags codegen sees during the eval are FIXED and known here — the eval never
+# depends on (or mutates) the real ~/Library/.../Millfolio/data/categories.txt.
+# Keep the set small + stable; add a tag here only when a golden case needs it.
+#
+# Format (see vault.derive.categorize.parse_rules):
+#   <tag> (scope note) = <keyword>, <keyword>, ...   deterministic (substring)
+#   <tag> (scope note) : <yes/no question>           ML (on-device model)
+phone (phone or mobile carrier bills) = at&t, verizon, t-mobile, mint mobile
+groceries (supermarkets and grocery stores) = safeway, whole foods, trader joe, kroger
+dining (restaurants, cafes, coffee shops) = starbucks, chipotle, doordash, ubereats

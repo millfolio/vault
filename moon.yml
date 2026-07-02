@@ -30,8 +30,25 @@ tasks:
     outputs: ['build/pkgs/**/*']
   check: # build BOTH binaries + the precompiled pkg set, then run the unit suite
     command: 'pixi run test'
-    deps: ['build', 'precompile']
+    deps: ['build', 'precompile', 'eval-selftest']
     toolchain: 'system'
+
+  # ── prompt eval (frontier codegen quality) ─────────────────────
+  eval: # per-MODEL codegen PROMPT eval — manual pre-release gate (needs ANTHROPIC_API_KEY)
+    #   moon run vault:eval             → default model (claude-sonnet-5)
+    #   moon run vault:eval -- <model>  → e.g. claude-sonnet-4-6
+    # Model-nondeterministic + key-requiring, so it is NOT in :check. Re-run after
+    # any model change or major prompt edit — see CONTRIBUTING.md.
+    command: 'bash privacy-box/eval/run_eval.sh'
+    deps: ['build']
+    toolchain: 'system'
+    options:
+      cache: false
+  eval-selftest: # mock-driven unit tests for the eval HARNESS (no key/model/network) — in :check
+    command: 'bash privacy-box/eval/run_eval_test.sh'
+    toolchain: 'system'
+    inputs:
+      ['privacy-box/eval/run_eval.sh', 'privacy-box/eval/run_eval_test.sh', 'privacy-box/eval/golden.*.tsv']
   build-cli: # the Swift `mill` umbrella CLI
     command: 'swift build --package-path cli --product mill'
     toolchain: 'system'

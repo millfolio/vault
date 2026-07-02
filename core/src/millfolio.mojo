@@ -19,14 +19,13 @@ from vault.index import (
     search,
     Chunk,
     vault_files,
-    effective_tags,
     effective_retag,
     ml_backfill,
-    codegen_tags_describe,
     backfill_status_json,
     tags_report_json,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
+from vault.derive.tags import effective_tags, codegen_tags_describe
 from vault.derive.store import get_amount_password, set_amount_password
 
 
