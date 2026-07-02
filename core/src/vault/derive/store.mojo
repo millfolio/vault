@@ -103,8 +103,16 @@ def load_txn_rows() raises -> List[TxnRow]:
 
 def write_txn_rows(rows: List[TxnRow]) raises:
     ensure_data_dir()
-    with open(txns_path(), "w") as f:
+    # Atomic replace: write a temp file then rename(2) over the target. The background
+    # materializer writes this file repeatedly; a concurrent reader (a query's
+    # load_txn_rows, /api/transactions) must never observe a half-written file.
+    var final = txns_path()
+    var tmp = final + ".tmp"
+    with open(tmp, "w") as f:
         f.write(txn_rows_to_tsv(rows))
+    # libc rename(2) — atomic on the same filesystem (String buffers are NUL-terminated,
+    # so `.unsafe_ptr()` is a valid C string).
+    _ = external_call["rename", Int32](tmp.unsafe_ptr(), final.unsafe_ptr())
 
 
 # ── registry (categories.txt is the source of truth) ──────────────────────────

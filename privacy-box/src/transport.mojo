@@ -386,7 +386,7 @@ struct RemoteClient(Movable):
         # If there's no text at all, surface the API error message (bad model id, no
         # access, rate limit) instead of a key error.
         var raw = String("")
-        var nblocks = 0
+        var nblocks: Int
         try:
             nblocks = v["content"].array_count()
         except:
@@ -399,7 +399,7 @@ struct RemoteClient(Movable):
             except:
                 continue
         if raw.byte_length() == 0:
-            var apierr = String("")
+            var apierr: String
             try:
                 apierr = v["error"]["message"].string_value()
             except:
