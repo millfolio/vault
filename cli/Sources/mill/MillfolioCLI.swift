@@ -15,7 +15,7 @@ struct Millfolio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mill",
         abstract: "The millfolio personal data vault — install, start, stop, index, and ask.",
-        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self, Doctor.self]
+        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self, Get.self, SetCmd.self, Doctor.self]
     )
 }
 
@@ -134,6 +134,64 @@ struct Status: AsyncParsableCommand {
         } else {
             print("inference:  ✗ not responding on :8000 (run `mill start`)")
         }
+    }
+}
+
+// ── mill get / set (config: amount-password) ──────────────────────────────────
+struct Get: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Read a millfolio setting — currently `mill get amount-password`.",
+        discussion: """
+        amount-password is the passphrase that unlocks on-screen amounts in the web \
+        app (Vault → Records → Show amounts). A random 3-word one is generated on \
+        first use; change it with `mill set amount-password <words>`.
+        """)
+    @Argument(help: "The setting to read (amount-password).")
+    var key: String
+
+    @MainActor func run() async throws {
+        guard key == "amount-password" else {
+            FileHandle.standardError.write(Data(
+                "mill get: unknown setting '\(key)' (try: amount-password)\n".utf8))
+            throw ExitCode.failure
+        }
+        let r = Bootstrapper().runVaultConfig(["amount-password", "get"])
+        guard r.code == 0 else {
+            FileHandle.standardError.write(Data(
+                "mill get: \(r.out.isEmpty ? "failed — is millfolio installed? (mill install)" : r.out)\n".utf8))
+            throw ExitCode.failure
+        }
+        print(r.out)
+    }
+}
+
+struct SetCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "set",
+        abstract: "Change a millfolio setting — currently `mill set amount-password <words>`.")
+    @Argument(help: "The setting to write (amount-password).")
+    var key: String
+    @Argument(help: "The value — for amount-password, a memorable phrase (multiple words ok).")
+    var value: [String]
+
+    @MainActor func run() async throws {
+        guard key == "amount-password" else {
+            FileHandle.standardError.write(Data(
+                "mill set: unknown setting '\(key)' (try: amount-password)\n".utf8))
+            throw ExitCode.failure
+        }
+        guard !value.isEmpty else {
+            FileHandle.standardError.write(Data(
+                "mill set amount-password: give a phrase, e.g. `mill set amount-password river copper lantern`\n".utf8))
+            throw ExitCode.failure
+        }
+        let r = Bootstrapper().runVaultConfig(["amount-password", "set"] + value)
+        guard r.code == 0 else {
+            FileHandle.standardError.write(Data(
+                "mill set: \(r.out.isEmpty ? "failed" : r.out)\n".utf8))
+            throw ExitCode.failure
+        }
+        print(r.out)  // the stored phrase, echoed back as confirmation
     }
 }
 

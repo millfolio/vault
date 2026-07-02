@@ -853,6 +853,220 @@ def tags_report() raises -> List[TagInfo]:
     return out^
 
 
+# ── amount-reveal password ────────────────────────────────────────────────────
+# A local privacy screen: on-screen amounts (and totals) stay masked until the
+# owner enters a passphrase. The server holds the secret and only releases amounts
+# on a match, so it's genuinely server-enforced. Plaintext in the data dir is the
+# right trade here — anyone with local file access already has the transactions, and
+# storing it in the clear is what lets `mill get amount-password` look it up. NOT a
+# hard boundary against a determined local attacker; it's a shoulder-surf screen.
+
+
+def amount_password_path() raises -> String:
+    return config_dir() + "/amount_password"
+
+
+def _pw_wordlist() -> List[String]:
+    """A small curated list of short, unambiguous words (no homophones / look-alikes)
+    for memorable 3-word passphrases. 128 words → 3 picks ≈ 21 bits — ample for a
+    local screen."""
+    return [
+        String("amber"),
+        "anchor",
+        "apple",
+        "arrow",
+        "autumn",
+        "bacon",
+        "badge",
+        "bamboo",
+        "banjo",
+        "basil",
+        "beacon",
+        "bison",
+        "blossom",
+        "bramble",
+        "branch",
+        "bronze",
+        "bubble",
+        "cabin",
+        "cactus",
+        "canyon",
+        "cedar",
+        "cherry",
+        "clover",
+        "cobalt",
+        "comet",
+        "copper",
+        "coral",
+        "cotton",
+        "cricket",
+        "crimson",
+        "crystal",
+        "dahlia",
+        "daisy",
+        "dolphin",
+        "domino",
+        "dragon",
+        "ember",
+        "emerald",
+        "falcon",
+        "feather",
+        "fennel",
+        "ferry",
+        "fjord",
+        "flint",
+        "forest",
+        "fossil",
+        "garnet",
+        "ginger",
+        "glacier",
+        "granite",
+        "harbor",
+        "hazel",
+        "helmet",
+        "hollow",
+        "indigo",
+        "island",
+        "ivory",
+        "jasmine",
+        "jersey",
+        "jungle",
+        "kettle",
+        "lagoon",
+        "lantern",
+        "lemon",
+        "lilac",
+        "linen",
+        "lotus",
+        "lumber",
+        "magnet",
+        "maple",
+        "marble",
+        "meadow",
+        "mellow",
+        "mint",
+        "monsoon",
+        "mulberry",
+        "nectar",
+        "nickel",
+        "nutmeg",
+        "oasis",
+        "olive",
+        "orchid",
+        "otter",
+        "oxide",
+        "paddle",
+        "pastel",
+        "pebble",
+        "pepper",
+        "pewter",
+        "pigeon",
+        "pillow",
+        "pine",
+        "pistol",
+        "pixel",
+        "plaza",
+        "pocket",
+        "pollen",
+        "poppy",
+        "prairie",
+        "pretzel",
+        "pumpkin",
+        "quartz",
+        "quiver",
+        "raccoon",
+        "radish",
+        "ribbon",
+        "river",
+        "rocket",
+        "rustic",
+        "saffron",
+        "salmon",
+        "sapling",
+        "sequoia",
+        "shadow",
+        "silver",
+        "sparrow",
+        "spruce",
+        "sunset",
+        "thistle",
+        "timber",
+        "tulip",
+        "velvet",
+        "walnut",
+        "willow",
+        "yarrow",
+        "zephyr",
+    ]
+
+
+def _rand_below(n: Int) -> Int:
+    """A uniform random index in [0, n) via libc `arc4random_uniform` (no modulo
+    bias, no /dev/urandom bookkeeping)."""
+    return Int(external_call["arc4random_uniform", UInt32](UInt32(n)))
+
+
+def _gen_amount_password() -> String:
+    var words = _pw_wordlist()
+    var out = String("")
+    for i in range(3):
+        if i > 0:
+            out += "-"
+        out += words[_rand_below(len(words))]
+    return out^
+
+
+def _norm_pw(s: String) -> String:
+    """Normalize for comparison: lowercase, spaces → hyphens, trimmed — so
+    "River Copper Lantern" and "river-copper-lantern" match."""
+    var t = String(s.strip())
+    var out = String("")
+    var p = t.unsafe_ptr()
+    for i in range(t.byte_length()):
+        var c = Int(p[i])
+        if c == 32:  # space → hyphen
+            out += "-"
+        elif c >= 65 and c <= 90:  # A-Z → a-z
+            out += chr(c + 32)
+        else:
+            out += chr(c)
+    return out^
+
+
+def get_amount_password() raises -> String:
+    """The reveal passphrase. Generates + persists a random 3-word one on first use,
+    so there is always something to enter (and to look up via `mill get`)."""
+    ensure_data_dir()
+    var p = amount_password_path()
+    if exists(p):
+        var text: String
+        with open(p, "r") as f:
+            text = f.read()
+        var pw = String(text.strip())
+        if pw.byte_length() > 0:
+            return pw^
+    var fresh = _gen_amount_password()
+    with open(p, "w") as f:
+        f.write(fresh)
+    return fresh^
+
+
+def set_amount_password(words: String) raises:
+    """Overwrite the reveal passphrase with the user's own (trimmed as stored; the
+    verifier normalizes case/spacing on comparison)."""
+    ensure_data_dir()
+    with open(amount_password_path(), "w") as f:
+        f.write(String(words.strip()))
+
+
+def verify_amount_password(candidate: String) raises -> Bool:
+    """True iff `candidate` matches the stored passphrase (case/spacing-insensitive).
+    An empty candidate never matches."""
+    if String(candidate.strip()).byte_length() == 0:
+        return False
+    return _norm_pw(candidate) == _norm_pw(get_amount_password())
+
+
 def _json_str(s: String) -> String:
     """`s` as a JSON string literal (quoted + escaped)."""
     var out = String('"')

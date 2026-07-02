@@ -1773,6 +1773,15 @@ public final class Bootstrapper: ObservableObject {
         return try runLoggedScript(script.path, args, label: "index")
     }
 
+    /// Run the millfolio binary and CAPTURE its stdout — for the config get/set
+    /// commands (`mill get/set amount-password`), which just read/write a small file
+    /// in the data dir (no server, no streaming). Returns (trimmed stdout, exit code).
+    public func runVaultConfig(_ args: [String]) -> (out: String, code: Int32) {
+        ensureVaultShims()
+        guard let script = try? writeMillfolioScript() else { return ("", 127) }
+        return probe(script.path, args)
+    }
+
     /// Dump everything useful for diagnosing a spawn failure: the exact command,
     /// whether each dependency path exists (and is executable), the launcher's
     /// contents (which set PATH/CONDA_PREFIX/MODULAR_HOME), and the inherited PATH.

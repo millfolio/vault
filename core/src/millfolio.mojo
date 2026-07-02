@@ -27,6 +27,7 @@ from vault.index import (
     tags_report_json,
 )
 from vault.index.relevance import cosine_from_l2sq, passes_min_sim
+from vault.derive.store import get_amount_password, set_amount_password
 
 
 def _print_manifest(data_dir: String) raises:
@@ -230,10 +231,27 @@ def main() raises:
                 + String(changed)
                 + " transaction(s) updated from the category rules"
             )
+    elif cmd == "amount-password":
+        # The local reveal passphrase for the amount privacy screen.
+        #   amount-password get         → print it (a random 3-word one is generated
+        #                                 + saved on first use)
+        #   amount-password set <words> → overwrite it with your own phrase
+        var sub = String(args[2]) if len(args) >= 3 else String("get")
+        if sub == "set":
+            if len(args) < 4:
+                print("usage: millfolio amount-password set <words>")
+            else:
+                var phrase = String(args[3])
+                for k in range(4, len(args)):
+                    phrase += " " + String(args[k])
+                set_amount_password(phrase)
+                print(get_amount_password())
+        else:
+            print(get_amount_password())
     else:
         print(
-            "usage: millfolio"
-            " <manifest|read|embed|index|search|tags|retag|materialize> ..."
+            "usage: millfolio <manifest|read|embed|index|search|tags|retag"
+            "|materialize|amount-password> ..."
         )
 
 
