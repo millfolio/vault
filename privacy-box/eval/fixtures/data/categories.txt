@@ -8,6 +8,13 @@
 # Format (see vault.derive.categorize.parse_rules):
 #   <tag> (scope note) = <keyword>, <keyword>, ...   deterministic (substring)
 #   <tag> (scope note) : <yes/no question>           ML (on-device model)
-phone (phone or mobile carrier bills) = at&t, verizon, t-mobile, mint mobile
-groceries (supermarkets and grocery stores) = safeway, whole foods, trader joe, kroger
-dining (restaurants, cafes, coffee shops) = starbucks, chipotle, doordash, ubereats
+#
+# These mirror the product's built-in default tags (vault.derive.categorize
+# default_registry) so the eval exercises the SAME tag surface codegen sees in prod.
+# Note `health`'s "NOT gyms/fitness" scope — that's what makes the gym→SUGGEST_TAG case
+# meaningful (health is the tempting-but-wrong near-match the model must decline).
+phone (mobile phone carriers - your monthly cell-phone bill) = verizon, at&t, t-mobile, mint mobile, google fi
+travel (flights, hotels, car rental, trains - trips away from home) = delta air, united air, marriott, hilton, airbnb, hertz, amtrak
+restaurant (restaurants, cafes, coffee, and food delivery - dining out) = restaurant, starbucks, chipotle, doordash, uber eats, pizza, cafe
+groceries (supermarkets & grocery stores - food shopping, not dining out) = grocery, whole foods, trader joe, safeway, kroger, costco
+health (pharmacies, doctors, hospitals, dental - medical care; NOT gyms or fitness) = pharmacy, cvs, walgreens, clinic, hospital, dental
