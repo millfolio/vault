@@ -135,3 +135,60 @@ def classify_batch(
             out.append(verdict[k])
         start = end
     return out^
+
+
+@fieldwise_init
+struct DedupMap(Movable):
+    """The result of deduplicating a per-row description list to its DISTINCT set.
+    """
+
+    var unique: List[String]  # distinct descriptions, first-seen order
+    var per_row: List[Int]  # input index -> its position in `unique`
+
+
+def dedup_descs(descs: List[String]) raises -> DedupMap:
+    """Collapse a per-row description list to its EXACT-distinct set. Pure (no model
+    call) so it's unit-testable. Returns the distinct descriptions plus, for each input
+    row, the index of its description in that distinct list — so a caller can classify
+    the distinct set once and fan each verdict back to every row that shares it.
+    """
+    var unique = List[String]()
+    var idx_of = Dict[String, Int]()  # desc -> position in `unique`
+    var per_row = List[Int]()
+    for i in range(len(descs)):
+        if descs[i] in idx_of:
+            per_row.append(idx_of[descs[i]])
+        else:
+            var p = len(unique)
+            idx_of[descs[i].copy()] = p
+            unique.append(descs[i].copy())
+            per_row.append(p)
+    return DedupMap(unique^, per_row^)
+
+
+@fieldwise_init
+struct DedupClassify(Movable):
+    """Per-row verdicts + dedup savings counts (surfaced on the Backfill stats page).
+    """
+
+    var verdicts: List[Bool]  # aligned to the input `descs`
+    var seen: Int  # total rows classified (input count)
+    var unique: Int  # DISTINCT descriptions actually sent to the model
+
+
+def classify_batch_dedup(
+    base_url: String, question: String, descs: List[String]
+) raises -> DedupClassify:
+    """`classify_batch` over EXACT-distinct descriptions only, fanning each verdict
+    back to every row that shares that description. Identical merchant strings
+    (recurring charges — same subscription/ACH each month) collapse to a single model
+    call: correct by construction, since identical input ⇒ identical classification.
+    Returns per-row verdicts aligned to `descs` + (rows seen, distinct classified).
+    """
+    var m = dedup_descs(descs)
+    var uv = classify_batch(base_url, question, m.unique)
+    var out = List[Bool]()
+    for i in range(len(m.per_row)):
+        var p = m.per_row[i]
+        out.append(uv[p] if p < len(uv) else False)
+    return DedupClassify(out^, len(descs), len(m.unique))

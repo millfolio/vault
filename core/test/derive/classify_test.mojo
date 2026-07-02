@@ -1,0 +1,64 @@
+"""Classify_test — the EXACT-dedup mapping for ML backfill (pure).
+
+Builds + runs with only `-I core/src` (no FFI/engine): `pixi run test-classify`.
+Pins `dedup_descs`: distinct descriptions in first-seen order + a per-row index
+into that distinct list, so the backfill can classify each unique merchant string
+once and fan the verdict back to every row that shares it (recurring charges).
+"""
+
+from vault.derive.classify import dedup_descs, DedupMap
+
+
+def expect(cond: Bool, what: String) raises:
+    if not cond:
+        raise Error("FAIL: " + what)
+
+
+def main() raises:
+    # ── empty input ────────────────────────────────────────────────────────────
+    var m0 = dedup_descs(List[String]())
+    expect(len(m0.unique) == 0, "empty → no unique")
+    expect(len(m0.per_row) == 0, "empty → no per_row")
+
+    # ── all distinct → 1:1, no collapse ─────────────────────────────────────────
+    var distinct: List[String] = ["a", "b", "c"]
+    var md = dedup_descs(distinct)
+    expect(len(md.unique) == 3, "3 distinct → 3 unique")
+    expect(len(md.per_row) == 3, "per_row aligned to input")
+    expect(
+        md.per_row[0] == 0 and md.per_row[1] == 1 and md.per_row[2] == 2,
+        "identity map",
+    )
+
+    # ── duplicates collapse, first-seen order, correct fan-out ──────────────────
+    # rows:      0:NFLX 1:AMZN 2:NFLX 3:RENT 4:AMZN 5:NFLX
+    var descs: List[String] = ["NFLX", "AMZN", "NFLX", "RENT", "AMZN", "NFLX"]
+    var m = dedup_descs(descs)
+    expect(len(m.unique) == 3, "3 distinct merchants (NFLX/AMZN/RENT)")
+    expect(m.unique[0] == "NFLX", "first-seen order: NFLX")
+    expect(m.unique[1] == "AMZN", "first-seen order: AMZN")
+    expect(m.unique[2] == "RENT", "first-seen order: RENT")
+    expect(len(m.per_row) == 6, "per_row has one entry per input row")
+    # every row maps to its merchant's unique slot
+    expect(m.per_row[0] == 0, "row0 NFLX -> 0")
+    expect(m.per_row[1] == 1, "row1 AMZN -> 1")
+    expect(m.per_row[2] == 0, "row2 NFLX -> 0 (dup)")
+    expect(m.per_row[3] == 2, "row3 RENT -> 2")
+    expect(m.per_row[4] == 1, "row4 AMZN -> 1 (dup)")
+    expect(m.per_row[5] == 0, "row5 NFLX -> 0 (dup)")
+    # rows sharing a description map to the SAME slot → same verdict on fan-out
+    expect(
+        m.per_row[0] == m.per_row[2] and m.per_row[2] == m.per_row[5],
+        "identical descriptions share one classification",
+    )
+
+    # ── exact match only: a differing suffix is NOT collapsed ────────────────────
+    var near: List[String] = ["ACME #1", "ACME #2", "ACME #1"]
+    var mn = dedup_descs(near)
+    expect(len(mn.unique) == 2, "exact dedup keeps #1 and #2 distinct")
+    expect(mn.per_row[0] == mn.per_row[2], "the two identical #1 rows collapse")
+    expect(
+        mn.per_row[0] != mn.per_row[1], "#1 and #2 stay separate (exact match)"
+    )
+
+    print("classify_test: all assertions passed")

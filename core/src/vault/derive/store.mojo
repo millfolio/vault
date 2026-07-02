@@ -28,7 +28,11 @@ from vault.derive.categorize import (
     rules_canon,
     registry_to_text,
 )
-from vault.derive.classify import classify_batch, ML_BATCH
+from vault.derive.classify import (
+    classify_batch,
+    classify_batch_dedup,
+    ML_BATCH,
+)
 from vault.derive.ledger import (
     RuleMarker,
     qhash,
@@ -220,9 +224,9 @@ def ml_backfill_rows(
             descs.append(rows[t].desc.copy())
         if len(descs) == 0:
             continue
-        var verdicts = classify_batch(base_url, r.ml_prompt, descs)
+        var dc = classify_batch_dedup(base_url, r.ml_prompt, descs)
         for k in range(len(idxs)):
-            if k < len(verdicts) and verdicts[k]:
+            if k < len(dc.verdicts) and dc.verdicts[k]:
                 var row = rows[idxs[k]].copy()
                 row.tags.append(r.tag.copy())
                 rows[idxs[k]] = row^
@@ -437,9 +441,9 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
             if len(descs) > 0:
                 # The slow part — no lock is meant to span it (the CLI holds the
                 # lock for the whole drain; the worker's slice is bounded).
-                var verdicts = classify_batch(base_url, r.ml_prompt, descs)
+                var dc = classify_batch_dedup(base_url, r.ml_prompt, descs)
                 for k in range(len(idxs)):
-                    if k < len(verdicts) and verdicts[k]:
+                    if k < len(dc.verdicts) and dc.verdicts[k]:
                         var row = rows[idxs[k]].copy()
                         row.tags.append(r.tag.copy())
                         rows[idxs[k]] = row^

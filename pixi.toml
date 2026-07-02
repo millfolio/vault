@@ -74,6 +74,7 @@ test-categorize = { cmd = "mkdir -p build && mojo build core/test/derive/categor
 # predicates (pending/ready), the qhash question hash, versioned TSV parse/serialize
 # (skip-malformed, wrong-header→discard), marker upsert/drop. Pure, no FFI/network.
 test-ledger = { cmd = "mkdir -p build && mojo build core/test/derive/ledger_test.mojo -I core/src -o build/ledger-test && ./build/ledger-test" }
+test-classify = { cmd = "mkdir -p build && mojo build core/test/derive/classify_test.mojo -I core/src -o build/classify-test && ./build/classify-test" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
@@ -102,4 +103,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }
