@@ -25,7 +25,15 @@
 
   // Cumulative ML-tag backfill dedup savings: identical transaction descriptions
   // (recurring charges) are classified once, not per row. saved = seen - classified.
-  type Backfill = { rows_seen: number; rows_classified: number; saved: number };
+  // saved = exact-dedup savings; saved_norm = the EXTRA that stripping trailing IDs
+  // (order/store #s) would fold on top — a projection, not applied to classification.
+  type Backfill = {
+    rows_seen: number;
+    rows_classified: number;
+    rows_norm: number;
+    saved: number;
+    saved_norm: number;
+  };
 
   let model = $state("");
   let records = $state<Rec[]>([]);
@@ -48,7 +56,15 @@
         model = typeof d?.model === "string" ? d.model : "";
         records = Array.isArray(d?.records) ? d.records : [];
         backfill =
-          d?.backfill && typeof d.backfill.rows_seen === "number" ? d.backfill : null;
+          d?.backfill && typeof d.backfill.rows_seen === "number"
+            ? {
+                rows_seen: d.backfill.rows_seen ?? 0,
+                rows_classified: d.backfill.rows_classified ?? 0,
+                rows_norm: d.backfill.rows_norm ?? 0,
+                saved: d.backfill.saved ?? 0,
+                saved_norm: d.backfill.saved_norm ?? 0,
+              }
+            : null;
         loaded = true;
       })
       .catch(() => {
@@ -175,6 +191,10 @@
           <div class="card">
             <div class="num">{backfill.rows_classified.toLocaleString()}</div>
             <div class="cap">distinct descriptions classified</div>
+          </div>
+          <div class="card">
+            <div class="num">+{backfill.saved_norm.toLocaleString()}</div>
+            <div class="cap">more if trailing IDs were normalized (projected)</div>
           </div>
         </section>
       {/if}
