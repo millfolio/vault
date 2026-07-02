@@ -78,7 +78,7 @@ def load_config() -> Config:
     var local_url = String("http://127.0.0.1:8000/v1")
     var local_model = String("local")
     var remote_base_url = String("https://api.anthropic.com/v1")
-    var remote_model = String("claude-sonnet-4-6")
+    var remote_model = String("claude-sonnet-5")
     var token_budget = -1
     var api_key = String("")
     var mock = False

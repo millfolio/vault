@@ -118,7 +118,7 @@ keys are optional; see [`config.example.json`](config.example.json):
 | `local_url`           | `http://127.0.0.1:8000/v1`     | `PRIVACY_BOX_LOCAL_URL`                              |
 | `local_model`         | `local`                        | `PRIVACY_BOX_LOCAL_MODEL`                            |
 | `remote_base_url`     | `https://api.anthropic.com/v1` | `ANTHROPIC_BASE_URL`                              |
-| `remote_model`        | `claude-sonnet-4-6`            | `PRIVACY_BOX_MODEL`                                  |
+| `remote_model`        | `claude-sonnet-5`            | `PRIVACY_BOX_MODEL`                                  |
 | `remote_token_budget` | `-1` (unlimited)               | `PRIVACY_BOX_REMOTE_TOKEN_BUDGET`                    |
 | `anthropic_api_key`   | `""`                           | `ANTHROPIC_API_KEY` _(env preferred for secrets)_ |
 | `mock`                | `false`                        | `PRIVACY_BOX_MOCK` (set = true)                      |
