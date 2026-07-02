@@ -166,12 +166,12 @@
 
       <label class="fld">
         <span>{mode === "ai" ? "Yes/no question" : "Keywords (comma-separated)"}</span>
-        <input
-          type="text"
-          placeholder={mode === "ai" ? "is this a gym or fitness membership?" : "planet fitness, equinox, gym"}
+        <textarea
+          rows={mode === "ai" ? 4 : 3}
+          placeholder={mode === "ai" ? "e.g. Is this purchase at a coffee shop or café (not a restaurant)?" : "planet fitness, equinox, gym, crunch fitness, gold's gym"}
           bind:value={value}
           oninput={() => (preview = null)}
-        />
+        ></textarea>
       </label>
 
       <div class="row">
@@ -232,7 +232,7 @@
   }
   .modal {
     width: 100%;
-    max-width: 440px;
+    max-width: 560px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -279,7 +279,8 @@
     color: var(--text-dim);
     margin-bottom: 5px;
   }
-  .fld input {
+  .fld input,
+  .fld textarea {
     width: 100%;
     padding: 8px 12px;
     border-radius: var(--radius);
@@ -287,8 +288,15 @@
     background: var(--bg);
     color: var(--text);
     font: inherit;
+    box-sizing: border-box;
   }
-  .fld input:focus {
+  .fld textarea {
+    resize: vertical;
+    min-height: 2.4em;
+    line-height: 1.4;
+  }
+  .fld input:focus,
+  .fld textarea:focus {
     outline: none;
     border-color: var(--accent);
   }
