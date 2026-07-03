@@ -96,11 +96,17 @@
   // The on-device model the server serves (bottom status bar). Empty under the
   // in-browser mock (:5173, no backend) — the bar just omits it then.
   let modelName = $state("");
-  // On-device model selector: the switchable (cached) models + the current
-  // selection + a "switching…" flag while the engine reloads.
-  let models = $state<{ id: string; label: string }[]>([]);
+  // On-device model CATALOG: every supported chat model, each flagged
+  // downloaded/not. A downloaded model is selectable (Use → switch); a
+  // not-downloaded one shows a Download action (→ background fetch + poll).
+  let models = $state<{ id: string; label: string; gb?: number; downloaded?: boolean }[]>([]);
   let currentModel = $state("");
   let switching = $state(false);
+  let catalogOpen = $state(false);
+  // The in-flight download (from /api/models/download/status): which model +
+  // running|done|error + the latest progress line. Null when idle.
+  let dl = $state<{ model: string; state: string; detail: string } | null>(null);
+  let dlTimer: ReturnType<typeof setTimeout> | undefined;
   // Build stamp: the app SHA with the build date stripped. When the server reports a
   // real release version (a `mill` install — not the demo's "<sha> · <date>" deploy
   // stamp, nor "dev"), append it: "<sha> · v0.4.39-rc.2".
@@ -221,14 +227,19 @@
         }
       })
       .catch(() => {});
-    // The switchable on-device models + the current selection. Real install only —
-    // the demo/mock can't restart the shared engine.
+    // The model catalog + the current selection. Real install only — the demo/mock
+    // can't restart the shared engine or download weights.
     if (!isDemo) {
-      fetch("/api/models")
+      refreshModels();
+      // Reflect any in-flight download (a user's, or the startup provisioner's) so
+      // the catalog opens onto live progress rather than a stale "Download".
+      fetch("/api/models/download/status")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d && Array.isArray(d.available)) models = d.available;
-          if (d && typeof d.current === "string") currentModel = d.current;
+          if (d && d.state === "running") {
+            dl = d;
+            pollDownload();
+          }
         })
         .catch(() => {});
     }
@@ -284,6 +295,65 @@
       switching = false;
     }
   }
+
+  // ── model catalog (Use / Download) ─────────────────────────────────────────
+  async function refreshModels() {
+    try {
+      const m = await fetch("/api/models").then((r) => (r.ok ? r.json() : null));
+      if (m && Array.isArray(m.available)) models = m.available;
+      if (m && typeof m.current === "string") currentModel = m.current;
+    } catch {}
+  }
+  // Is `id` the model the engine is currently serving? The loaded id differs from a
+  // catalog id by org prefix + an `-int4` suffix, so match on the short, stripped form.
+  function isCurrent(id: string): boolean {
+    return !!currentModel && shortId(id) === shortId(currentModel);
+  }
+  // The catalog label for a model id (falls back to the last path segment).
+  function labelFor(id: string): string {
+    const m = models.find((x) => shortId(x.id) === shortId(id));
+    return m ? m.label : id.slice(id.lastIndexOf("/") + 1);
+  }
+  // Start a background download of a not-yet-present model, then poll its progress
+  // until it lands (or errors) — on completion the catalog row flips to "Use".
+  async function downloadModel(id: string) {
+    if (dl && dl.state === "running") return; // one at a time (server also guards)
+    try {
+      const r = await fetch("/api/models/download", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: id }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        dl = { model: id, state: "error", detail: e.error ?? "download failed" };
+        return;
+      }
+      dl = { model: id, state: "running", detail: "starting…" };
+      pollDownload();
+    } catch {
+      dl = { model: id, state: "error", detail: "download failed" };
+    }
+  }
+  function pollDownload() {
+    clearTimeout(dlTimer);
+    dlTimer = setTimeout(async () => {
+      try {
+        const d = await fetch("/api/models/download/status").then((r) => (r.ok ? r.json() : null));
+        if (d) {
+          dl = d;
+          if (d.state === "done") {
+            await refreshModels(); // the row flips to Use (downloaded:true)
+            setTimeout(() => { if (dl && dl.state === "done") dl = null; }, 2500);
+            return;
+          }
+          if (d.state === "error") return; // leave the error visible
+        }
+      } catch {}
+      pollDownload();
+    }, 1500);
+  }
+
   function dismissIntro() {
     showIntro = false;
     try {
@@ -461,7 +531,17 @@
 </script>
 
 <!-- Escape closes the intro only when the human-check gate isn't active (don't let it be bypassed). -->
-<svelte:window onkeydown={(e) => { if (showIntro && !turnstileSitekey && e.key === "Escape") dismissIntro(); }} />
+<svelte:window onkeydown={(e) => {
+  if (showIntro && !turnstileSitekey && e.key === "Escape") dismissIntro();
+  else if (catalogOpen && e.key === "Escape") catalogOpen = false;
+}} />
+
+{#if catalogOpen}
+  <!-- Click-away backdrop for the model catalog popover. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="catalog-backdrop" onclick={() => (catalogOpen = false)}></div>
+{/if}
 
 {#if showIntro}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -548,21 +628,58 @@
     {/if}
   </div>
   <footer class="statusbar">
-    {#if !isDemo && models.length > 1}
-      <span class="model" title="on-device model — switching reloads the engine">
+    {#if !isDemo && models.length > 0}
+      <span class="model catalog">
         <span class="dot" aria-hidden="true"></span>
-        <select
-          class="modelsel"
-          value={currentModel}
+        <button
+          class="modelbtn"
+          onclick={() => (catalogOpen = !catalogOpen)}
           disabled={switching}
-          onchange={(e) => selectModel((e.currentTarget as HTMLSelectElement).value)}
-          aria-label="on-device model"
+          aria-haspopup="menu"
+          aria-expanded={catalogOpen}
+          title="on-device model — Use a downloaded model or download another"
         >
-          {#each models as m (m.id)}
-            <option value={m.id}>{m.label}</option>
-          {/each}
-        </select>
-        {#if switching}<span class="switching">· switching…</span>{/if}
+          {labelFor(currentModel)}{#if switching}<span class="switching"> · switching…</span>{/if} ▾
+        </button>
+        {#if catalogOpen}
+          <div class="catalog-pop" role="menu">
+            <div class="catalog-head">On-device models</div>
+            {#each models as m (m.id)}
+              <div class="catalog-row" role="menuitem">
+                <span class="cm-label">
+                  {m.label}
+                  {#if m.gb}<span class="cm-gb">~{m.gb} GB</span>{/if}
+                </span>
+                {#if isCurrent(m.id)}
+                  <span class="cm-badge">In use</span>
+                {:else if m.downloaded}
+                  <button
+                    class="cm-use"
+                    disabled={switching}
+                    onclick={() => { selectModel(m.id); catalogOpen = false; }}
+                  >Use</button>
+                {:else if dl && dl.model === m.id && dl.state === "running"}
+                  <span class="cm-prog" title={dl.detail}>Downloading…</span>
+                {:else if dl && dl.model === m.id && dl.state === "error"}
+                  <button class="cm-dl" onclick={() => downloadModel(m.id)}>Retry</button>
+                {:else}
+                  <button
+                    class="cm-dl"
+                    disabled={!!(dl && dl.state === "running")}
+                    onclick={() => downloadModel(m.id)}
+                  >Download</button>
+                {/if}
+              </div>
+            {/each}
+            {#if dl && dl.state === "running"}
+              <div class="catalog-foot" title={dl.detail}>
+                Downloading {labelFor(dl.model)}… <span class="cf-detail">{dl.detail}</span>
+              </div>
+            {:else if dl && dl.state === "error"}
+              <div class="catalog-foot err">Download failed: {dl.detail}</div>
+            {/if}
+          </div>
+        {/if}
       </span>
     {:else if modelName}
       <span class="model" title="on-device model answering your questions">
@@ -798,8 +915,11 @@
     background: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
   }
-  /* Inline model picker — looks like the label text, not a boxed form control. */
-  .statusbar .modelsel {
+  /* Inline model catalog trigger — looks like the label text, not a boxed control. */
+  .statusbar .model.catalog {
+    position: relative;
+  }
+  .statusbar .modelbtn {
     appearance: none;
     background: transparent;
     border: none;
@@ -808,18 +928,123 @@
     font-weight: 600;
     cursor: pointer;
     padding: 0 2px;
-    max-width: 22ch;
+    max-width: 26ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .statusbar .modelsel:hover {
+  .statusbar .modelbtn:hover {
     color: var(--accent);
   }
-  .statusbar .modelsel:disabled {
+  .statusbar .modelbtn:disabled {
     cursor: progress;
     opacity: 0.7;
   }
   .statusbar .switching {
     color: var(--muted, #888);
     font-weight: 400;
+  }
+  .catalog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+  }
+  /* The popover opens UPWARD from the footer chip. */
+  .statusbar .catalog-pop {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 46;
+    min-width: 260px;
+    max-width: 340px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    padding: 6px;
+    font-weight: 400;
+  }
+  .catalog-head {
+    padding: 4px 8px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+  }
+  .catalog-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: 6px;
+  }
+  .catalog-row:hover {
+    background: var(--surface-2);
+  }
+  .cm-label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .cm-gb {
+    color: var(--text-dim);
+    font-weight: 400;
+    font-size: 11px;
+  }
+  .cm-badge {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .cm-prog {
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+  .cm-use,
+  .cm-dl {
+    appearance: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  .cm-dl {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .cm-use:hover,
+  .cm-dl:hover:not(:disabled) {
+    filter: brightness(1.1);
+    background: var(--surface);
+  }
+  .cm-use:disabled,
+  .cm-dl:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .catalog-foot {
+    padding: 6px 8px 2px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .catalog-foot.err {
+    color: var(--warn, #e5484d);
+  }
+  .cf-detail {
+    opacity: 0.75;
   }
   .statusbar .metric {
     display: inline-flex;

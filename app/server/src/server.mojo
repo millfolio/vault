@@ -101,6 +101,9 @@ from json import loads
 
 comptime DEFAULT_PORT = 10000
 comptime EMBED_DIM = 1024  # Qwen3-Embedding-0.6B — mirrors vault/core embed.mojo
+# Weight provisioning (downloads moved OUT of the installer, INTO this server).
+comptime DEFAULT_CHAT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+comptime EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 
 
 def _port() raises -> Int:
@@ -794,6 +797,12 @@ struct Api(Copyable, Handler, Movable):
             )
         if req.method == Method.POST and path == "/api/models/select":
             return self.handle_model_select(req)
+        # Model catalog downloads: start a background fetch of a supported model's
+        # weights, and poll its progress.
+        if req.method == Method.POST and path == "/api/models/download":
+            return self.handle_model_download(req)
+        if path == "/api/models/download/status":
+            return _cors(ok_json(_download_status_json()))
         # Demo bot gate: validate a Turnstile token → mint a demo-access token the
         # client echoes on WS chat frames. No-op (empty token) when Turnstile is off.
         if req.method == Method.POST and path == "/api/demo/verify":
@@ -1184,15 +1193,62 @@ struct Api(Copyable, Handler, Movable):
             return _cors(bad_request('{"error":"expected {model}"}'))
         if id == "":
             return _cors(bad_request('{"error":"empty model"}'))
-        # Only allow a model that is actually cached, so we never restart the engine
-        # into a checkpoint it will fail to load.
+        # Only allow a model that (a) appears in the catalog/available list AND (b) is
+        # actually DOWNLOADED, so we never restart the engine into a checkpoint that's
+        # missing (the available list now includes not-yet-downloaded catalog models).
         if _available_models_json().find(json_escape(id)) == -1:
-            return _cors(bad_request('{"error":"unknown or uncached model"}'))
+            return _cors(bad_request('{"error":"unknown model"}'))
+        if not _model_downloaded(id):
+            return _cors(
+                bad_request('{"error":"that model isn\'t downloaded yet"}')
+            )
         if not _config_set_model(id):
             return _cors(
                 bad_request('{"error":"could not update engine config"}')
             )
         _restart_engine()
+        return _cors(ok_json('{"ok":true,"model":' + json_escape(id) + "}"))
+
+    def handle_model_download(self, req: Request) raises -> Response:
+        """POST /api/models/download {"model": "<hf-id>"} → start a background download
+        of a SUPPORTED chat model's weights via the native downloader. Rejects unknown
+        ids, a second concurrent download, and the public demo (no downloads there).
+        Returns {"ok":true,"model"}; the client polls /api/models/download/status.
+        """
+        if _is_demo():
+            return _cors(
+                unauthorized('{"error":"downloads are disabled in the demo"}')
+            )
+        var id: String
+        try:
+            id = String(loads(req.text())["model"].string_value())
+        except:
+            return _cors(bad_request('{"error":"expected {model}"}'))
+        if id == "":
+            return _cors(bad_request('{"error":"empty model"}'))
+        if not _is_supported(id):
+            return _cors(
+                bad_request('{"error":"unknown or unsupported model"}')
+            )
+        if _model_downloaded(id):
+            return _cors(
+                ok_json(
+                    '{"ok":true,"downloaded":true,"model":'
+                    + json_escape(id)
+                    + "}"
+                )
+            )
+        if _download_running():
+            return _cors(
+                bad_request('{"error":"a download is already in progress"}')
+            )
+        if not _start_download_detached(id):
+            return _cors(
+                bad_request(
+                    '{"error":"downloads unavailable (downloader not'
+                    ' configured)"}'
+                )
+            )
         return _cors(ok_json('{"ok":true,"model":' + json_escape(id) + "}"))
 
     def handle_tags_add(self, req: Request) raises -> Response:
@@ -1575,13 +1631,95 @@ def _model_short(id: String) -> String:
     return String(id[byte = sl + 1 :])
 
 
+def _id_to_slug(id: String) -> String:
+    """`Qwen/Qwen2.5-3B-Instruct` -> `Qwen--Qwen2.5-3B-Instruct` (the HF cache dir
+    name; inverse of `_slug_to_id`). Mirrors engine/src/download.mojo `slug()`.
+    """
+    var out = String("")
+    var b = id.as_bytes()
+    for i in range(len(b)):
+        if b[i] == 47:  # '/'
+            out += "--"
+        else:
+            out += chr(Int(b[i]))
+    return out^
+
+
+def _model_downloaded(id: String) -> Bool:
+    """A checkpoint is fully materialized when its `refs/main` ref (the downloader's
+    last write) is present under the HF hub cache."""
+    return exists(_hf_hub_dir() + "/models--" + _id_to_slug(id) + "/refs/main")
+
+
+def _catalog() -> List[List[String]]:
+    """The supported chat models offered in the UI catalog: each `[id, label, GB]`.
+    The FIRST entry is the default. Ids are PUBLIC HF repos the native downloader can
+    fetch with no auth token (the gated google/* repos would 401); the engine loads
+    every one (Qwen2.5 / Qwen3 / gemma-4 families). The demo is filtered to Qwen.
+    """
+    var out = List[List[String]]()
+    out.append(
+        [String("Qwen/Qwen2.5-3B-Instruct"), String("Qwen2.5-3B"), String("6")]
+    )
+    out.append(
+        [
+            String("mlx-community/gemma-4-e2b-it-bf16"),
+            String("Gemma-4 E2B"),
+            String("5"),
+        ]
+    )
+    out.append(
+        [
+            String("mlx-community/gemma-4-12b-it-bf16"),
+            String("Gemma-4 12B"),
+            String("24"),
+        ]
+    )
+    return out^
+
+
+def _is_supported(id: String) -> Bool:
+    """Is `id` one of the catalog's downloadable chat models?"""
+    var cat = _catalog()
+    for i in range(len(cat)):
+        if cat[i][0] == id:
+            return True
+    return False
+
+
 def _available_models_json() raises -> String:
-    """JSON array [{"id","label"}] of fully-downloaded chat checkpoints in the HF
-    cache (a `refs/main` ref present), excluding the embedding model — the models a
-    user can switch to without a download."""
-    var hub = _hf_hub_dir()
+    """JSON array [{"id","label","gb","downloaded"}] — the CATALOG of supported chat
+    models each flagged downloaded/not (a `refs/main` ref present), PLUS any other
+    fully-cached chat checkpoint the user fetched manually (offered as Use). The
+    embedding model is excluded (it's a required dependency, not a chat choice). The
+    public demo is Qwen-only."""
+    var demo = _is_demo()
     var out = String("[")
     var n = 0
+    var emitted = List[String]()
+    var cat = _catalog()
+    for i in range(len(cat)):
+        var id = cat[i][0].copy()
+        if demo and id.find("Qwen") == -1:
+            continue
+        var dl = _model_downloaded(id)
+        if n > 0:
+            out += ","
+        out += (
+            '{"id":'
+            + json_escape(id)
+            + ',"label":'
+            + json_escape(cat[i][1])
+            + ',"gb":'
+            + cat[i][2]
+            + ',"downloaded":'
+            + ("true" if dl else "false")
+            + "}"
+        )
+        emitted.append(id^)
+        n += 1
+    # Any OTHER fully-cached chat model not in the catalog → offer it as Use.
+    var hub = _hf_hub_dir()
     if exists(hub):
         var entries = listdir(hub)
         for i in range(len(entries)):
@@ -1589,12 +1727,10 @@ def _available_models_json() raises -> String:
             if not name.startswith("models--"):
                 continue
             if not exists(hub + "/" + name + "/refs/main"):
-                continue  # only fully-materialized snapshots
+                continue
             var id = _slug_to_id(name)
             if id.find("Embedding") != -1 or id.find("embedding") != -1:
-                continue  # the embeddings model isn't a chat model
-            # Only families the engine can actually load — offering a checkpoint it
-            # can't serve would break the engine on the switch-restart.
+                continue
             if not (
                 id.find("Qwen2.5") != -1
                 or id.find("Qwen3") != -1
@@ -1602,8 +1738,14 @@ def _available_models_json() raises -> String:
                 or id.find("Gemma-4") != -1
             ):
                 continue
-            # The public demo is Qwen-only — never offer (or let it switch to) Gemma.
-            if _is_demo() and id.find("Qwen") == -1:
+            if demo and id.find("Qwen") == -1:
+                continue
+            var seen = False
+            for j in range(len(emitted)):
+                if emitted[j] == id:
+                    seen = True
+                    break
+            if seen:
                 continue
             if n > 0:
                 out += ","
@@ -1612,11 +1754,231 @@ def _available_models_json() raises -> String:
                 + json_escape(id)
                 + ',"label":'
                 + json_escape(_model_short(id))
-                + "}"
+                + ',"gb":0,"downloaded":true}'
             )
+            emitted.append(id^)
             n += 1
     out += "]"
     return out^
+
+
+# ── weight downloads (native-Mojo downloader, run as a detached subprocess) ────
+# Downloads moved out of the `mill` installer into this server: it runs the built
+# `build/download` binary (MILLFOLIO_DOWNLOAD_BIN) — the SAME native-Mojo HF fetcher
+# the CLI used to run — as a DETACHED process, tracking one download at a time via
+# small state files in the config dir so a status endpoint can report progress.
+
+
+def _download_bin() -> String:
+    """Absolute path to the native-Mojo weights downloader (`build/download`), set by
+    the CLI in the app-server LaunchAgent. Empty in dev / unmanaged runs → downloads
+    are unavailable (the endpoints say so; the provisioner no-ops)."""
+    return String(getenv("MILLFOLIO_DOWNLOAD_BIN", "").strip())
+
+
+def _dl_state_path() -> String:
+    return (
+        _config_dir() + "/.model_download.state"
+    )  # one word: running|done|error
+
+
+def _dl_model_path() -> String:
+    return _config_dir() + "/.model_download.model"  # the in-flight model id
+
+
+def _dl_log_path() -> String:
+    return _config_dir() + "/.model_download.log"  # captured stdout+stderr
+
+
+def _write_small(path: String, text: String):
+    """Best-effort single-file write (never raises)."""
+    try:
+        with open(path, "w") as f:
+            f.write(text)
+    except:
+        pass
+
+
+def _dl_progress() -> String:
+    """The last non-empty line of the downloader's captured output — a human-readable
+    progress detail (e.g. `wrote model-00001-of-00002.safetensors ( … bytes )`).
+    """
+    try:
+        var s: String
+        with open(_dl_log_path(), "r") as f:
+            s = f.read()
+        var lines = s.split("\n")
+        var last = String("")
+        for i in range(len(lines)):
+            var ln = String(lines[i].strip())
+            if ln != "":
+                last = ln^
+        return last^
+    except:
+        return String("")
+
+
+def _dl_read_model() -> String:
+    try:
+        var m: String
+        with open(_dl_model_path(), "r") as f:
+            m = f.read()
+        return String(m.strip())
+    except:
+        return String("")
+
+
+def _download_status_json() raises -> String:
+    """{"model","state","detail"} for the in-flight (or last) download. `state` is
+    idle|running|done|error; `detail` is the latest downloader progress line. Self-
+    heals to `done` when `refs/main` appears (the fetch's final write)."""
+    var model = _dl_read_model()
+    var state = String("idle")
+    if model != "":
+        try:
+            var s: String
+            with open(_dl_state_path(), "r") as f:
+                s = f.read()
+            state = String(s.strip())
+        except:
+            state = String("running")
+        if _model_downloaded(model):
+            state = String("done")
+    return (
+        '{"model":'
+        + json_escape(model)
+        + ',"state":'
+        + json_escape(state)
+        + ',"detail":'
+        + json_escape(_dl_progress())
+        + "}"
+    )
+
+
+def _download_running() raises -> Bool:
+    """True iff a download is genuinely in flight (state==running AND not yet on
+    disk) — the guard against starting a second concurrent download."""
+    var model = _dl_read_model()
+    if model == "" or _model_downloaded(model):
+        return False
+    try:
+        var s: String
+        with open(_dl_state_path(), "r") as f:
+            s = f.read()
+        return String(s.strip()) == "running"
+    except:
+        return False
+
+
+def _dl_core_cmd(id: String) -> String:
+    """The shell command that runs the downloader for `id`, appending output to the
+    capture log. Runs from the runner dir (two levels up from build/download) with
+    CONDA_PREFIX/MODULAR_HOME cleared — matching the CLI's runtimeEnv so flare loads
+    its own libflare_tls.so next to the binary, not from the toolchain prefix. HF_HOME
+    + SSL_CERT_FILE are inherited from this server's environment."""
+    var bin = _download_bin()
+    return (
+        "d=\"$(dirname '"
+        + bin
+        + '\')/.."; cd "$d" && env -u CONDA_PREFIX -u MODULAR_HOME \''
+        + bin
+        + "' '"
+        + id
+        + "' >> '"
+        + _dl_log_path()
+        + "' 2>&1"
+    )
+
+
+def _begin_download_state(id: String):
+    """Mark `id` as the in-flight download (running) and truncate the capture log.
+    """
+    _write_small(_dl_model_path(), id)
+    _write_small(_dl_state_path(), "running")
+    _write_small(_dl_log_path(), "")
+
+
+def _start_download_detached(id: String) -> Bool:
+    """Start a DETACHED download of `id` (returns immediately). Wraps the core command
+    so the shell flips the state file to done/error on completion; backgrounded +
+    </dev/null so it outlives the request and never becomes our zombie. False when the
+    downloader isn't configured."""
+    if _download_bin() == "":
+        return False
+    _begin_download_state(id)
+    var state = _dl_state_path()
+    var cmd = (
+        "( "
+        + _dl_core_cmd(id)
+        + " && printf done > '"
+        + state
+        + "' || printf error > '"
+        + state
+        + "' ) </dev/null &"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    return True
+
+
+def _provision_fetch(id: String) -> Bool:
+    """BLOCKING fetch of `id` to completion (called on the provisioner thread, so it
+    doesn't block the reactor). No-op True when already present; False when the
+    downloader isn't available. Updates the SAME state files as the endpoint, so the
+    catalog reflects provisioning progress + the concurrency guard holds."""
+    if _model_downloaded(id):
+        return True
+    if _download_bin() == "":
+        return False
+    _begin_download_state(id)
+    var cc = _cstr(_dl_core_cmd(id))
+    _ = external_call["system", Int32](cc)  # waits (no trailing &)
+    cc.free()
+    var ok = _model_downloaded(id)  # refs/main appears only on full success
+    _write_small(_dl_state_path(), "done" if ok else "error")
+    return ok
+
+
+def _autofetch_default() -> Bool:
+    """Whether to auto-fetch the DEFAULT chat model on startup. On by default; set
+    MILLFOLIO_AUTOFETCH_DEFAULT_MODEL=0 to "start empty" and let the user pick from
+    the catalog. (The embedding model is always fetched — it's a hard dependency.)
+    """
+    return (
+        String(getenv("MILLFOLIO_AUTOFETCH_DEFAULT_MODEL", "1").strip()) != "0"
+    )
+
+
+def _provision_worker(arg: _OpaquePtr) -> _OpaquePtr:
+    """Detached startup thread: ensure the REQUIRED embedding model is present (the
+    engine 503s /v1/embeddings without it → indexing + search break), then — unless
+    disabled — a DEFAULT chat model so the app works out of the box after a weights-
+    free install. Both are no-ops when already cached. Once a servable model is on
+    disk but the engine isn't serving (it exited earlier when weights were missing),
+    kickstart it. This routine is non-raising by signature (every helper it calls is),
+    so a pthread start routine can never raise out of it."""
+    if _download_bin() == "":
+        return arg  # no downloader configured → nothing to provision
+    # 1. Embedding model — a hard dependency, always fetched (not in the catalog).
+    _ = _provision_fetch(String(EMBED_MODEL))
+    # 2. Default chat model — toggleable (start-empty deploys flip it off).
+    if _autofetch_default() and not _model_downloaded(
+        String(DEFAULT_CHAT_MODEL)
+    ):
+        _ = _provision_fetch(String(DEFAULT_CHAT_MODEL))
+    # 3. Make the engine serve a downloaded model. If its configured model isn't on
+    #    disk but the default now is, repoint config at the default; then, if a
+    #    servable model is present but the engine isn't serving, kickstart it.
+    var want = _current_model_id()
+    if not _model_downloaded(want) and _model_downloaded(
+        String(DEFAULT_CHAT_MODEL)
+    ):
+        _ = _config_set_model(String(DEFAULT_CHAT_MODEL))
+        want = String(DEFAULT_CHAT_MODEL)
+    if _model_downloaded(want) and _engine_loaded_model() == "":
+        _restart_engine()
+    return arg
 
 
 def _current_model_id() -> String:
@@ -2473,6 +2835,21 @@ def main() raises:
         print(
             "  background backfiller: could not start (index-time still works)"
         )
+    # Background weight provisioner: ensure the required embedding model + a default
+    # chat model are present (both no-ops when cached), so indexing/search + chat work
+    # out of the box after a weights-free install; then kickstart the engine to serve
+    # the default model. Detached — never blocks startup. Skipped in the demo (shared
+    # replay engine, synthetic data). No-op when the downloader isn't configured.
+    if not _is_demo():
+        try:
+            var pth = ThreadHandle.spawn[_provision_worker](_null_ptr())
+            pth.detach()
+            print(
+                "  weight provisioner: on (embedding + default chat model,"
+                " background)"
+            )
+        except:
+            print("  weight provisioner: could not start")
     # num_workers=1 (default) → single-threaded reactor (real product). >1 → N pthread
     # workers via the multicore Handler-serve; Api is Copyable (shares the state
     # pointer) and config.ws_handler propagates to each worker.
