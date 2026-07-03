@@ -526,6 +526,7 @@
           bind:this={inputEl}
           disabled={busy}
           onfocus={() => (showHistory = recent.length > 0)}
+          oninput={() => (showHistory = false)}
           onkeydown={(e) => { if (e.key === "Escape") showHistory = false; }}
         />
         <button type="submit" disabled={busy || !draft.trim()}>Send</button>
