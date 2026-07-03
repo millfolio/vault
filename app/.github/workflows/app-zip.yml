@@ -92,7 +92,9 @@ jobs:
 
       - name: Package millfolio-app.zip
         working-directory: app
-        run: bash scripts/package-app.sh "$GITHUB_WORKSPACE/millfolio-app.zip"
+        # Run under pixi so `mojo` is on PATH — package-app.sh now compiles the
+        # server + precompiles the vault pkgs (precompile_pkgs.sh calls $MOJO).
+        run: pixi run --manifest-path server/pixi.toml bash scripts/package-app.sh "$GITHUB_WORKSPACE/millfolio-app.zip"
 
       - uses: actions/upload-artifact@v7
         with:
