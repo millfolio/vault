@@ -503,7 +503,7 @@ public final class Bootstrapper: ObservableObject {
                         args: ["-I", "../jinja2.mojo/src", "-I", "../flare"], out: "build/server")
         signServerIdentity()
 
-        if !weightsPresent || !embedWeightsPresent {
+        if !weightsPresent || !embedWeightsPresent || !e2bWeightsPresent {
             set("Building downloader…")
             try buildBinary(python: python, source: "src/download.mojo",
                             args: ["-I", "../flare"], out: "build/download")
@@ -1596,22 +1596,19 @@ public final class Bootstrapper: ObservableObject {
         }
         let serverLog = millfolioLogDir.appendingPathComponent("server.log").path
         // Run the server through a millfolio-NAMED wrapper script rather than a bare
-        // `/bin/sh -c …`. Two reasons:
-        //  1. Naming — macOS's "… can run in the background" notification (and the
-        //     Login Items list) names the item after ProgramArguments[0]'s basename.
-        //     A bare interpreter shows the generic "sh"; pointing it at a script named
-        //     `millfolio-appserver` brands it as ours.
-        //  2. Timestamps — launchd's StandardOutPath redirect writes the fd verbatim
-        //     (no timestamps), so the wrapper pipes the server through a perl strftime
-        //     filter that prefixes each line with a local "YYYY-MM-DD HH:MM:SS ". It
-        //     catches BOTH the server's own output and the inherited privacy_box
-        //     progress ("• …") lines, unbuffered ($|=1) so lines land as they arrive.
-        //     StandardErrorPath still captures the wrapper's own failures (missing perl).
+        // `/bin/sh -c …` purely for NAMING: macOS's "… can run in the background"
+        // notification (and the Login Items list) names the item after
+        // ProgramArguments[0]'s basename, so a script named `millfolio-appserver`
+        // brands it as ours (a bare interpreter shows the generic "sh"). The server's
+        // own logger (logging.mojo) stamps every line with a full local
+        // `[YYYY-MM-DD HH:MM:SS.mmm]` at the moment it is written, so there is no
+        // post-hoc timestamping filter — the wrapper just execs the server with its
+        // output appended to the log (exec so signals reach the server directly).
         let wrapper = support.appendingPathComponent("millfolio-appserver")
         let wrapperBody = """
         #!/bin/sh
-        # millfolio app server (launchd background item). Timestamps every log line.
-        "\(appServerBin.path)" 2>&1 | /usr/bin/perl -pe 'BEGIN{$|=1} use POSIX qw(strftime); print strftime("%Y-%m-%d %H:%M:%S ", localtime)' >> "\(serverLog)"
+        # millfolio app server (launchd background item).
+        exec "\(appServerBin.path)" >> "\(serverLog)" 2>&1
         """
         try wrapperBody.write(to: wrapper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
@@ -1620,7 +1617,7 @@ public final class Bootstrapper: ObservableObject {
             "ProgramArguments": [wrapper.path],
             "WorkingDirectory": privacy_boxDir.path,   // sandbox/*.sb.template resolve here
             "EnvironmentVariables": env,
-            "StandardErrorPath": serverLog,            // wrapper (sh/perl) errors only
+            "StandardErrorPath": serverLog,            // pre-exec wrapper (sh) errors only
             "RunAtLoad": true,
             "ProcessType": "Interactive",
         ]
