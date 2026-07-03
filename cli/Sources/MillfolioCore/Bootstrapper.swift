@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Darwin  // execv for the re-exec-after-self-upgrade hardening
+import CryptoKit  // SHA256 verification of the downloaded source bundle
 
 /// Drives the local engine lifecycle, as three explicit steps:
 ///
@@ -669,15 +670,56 @@ public final class Bootstrapper: ObservableObject {
     }
 
     // ── steps ────────────────────────────────────────────────────────────────
-    private func download(_ url: URL, name: String) async throws -> URL {
+    private func sha256Hex(of file: URL) throws -> String {
+        // mappedIfSafe keeps a multi-hundred-MB bundle off the heap.
+        let data = try Data(contentsOf: file, options: .mappedIfSafe)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Download `url` to `cacheDir/name`. When `expectedSHA256` is non-nil the
+    /// bytes are verified BEFORE they are moved into place / used — a mismatch
+    /// (tampered or corrupted download) throws and nothing is installed.
+    private func download(_ url: URL, name: String, expectedSHA256: String? = nil) async throws -> URL {
         let dest = cacheDir.appendingPathComponent(name)
         let (tmp, resp) = try await URLSession.shared.download(from: url)
         guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false else {
             throw BootstrapError.step("download \(name)", "HTTP error fetching \(url.absoluteString)")
         }
+        if let want = expectedSHA256?.lowercased(), !want.isEmpty {
+            let got = (try sha256Hex(of: tmp)).lowercased()
+            guard got == want else {
+                try? FileManager.default.removeItem(at: tmp)
+                throw BootstrapError.step(
+                    "verify \(name)",
+                    "sha256 mismatch (expected \(want), got \(got)). Refusing to install a "
+                        + "tampered or corrupted download.")
+            }
+        }
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tmp, to: dest)
         return dest
+    }
+
+    /// The expected sha256 of `millfolio.zip` for `version`, fetched from the
+    /// Homebrew TAP (`millfolio/homebrew-tap`) over HTTPS — deliberately NOT from
+    /// the release that serves the zip. The tap is the same trust root `brew`
+    /// already uses to verify the CLI tarball's own sha256, and it's a *different*
+    /// repository from the GitHub release assets, so an attacker who can swap a
+    /// release asset cannot also forge this hash. Returns nil when no checksum is
+    /// published for `version` (releases cut before this landed, or a source /
+    /// unmanaged install with no brew version) — `ensureBundle` decides whether
+    /// that is allowed to proceed.
+    private func expectedBundleSHA256(for version: String) async -> String? {
+        guard !version.isEmpty, let url = URL(string:
+            "https://raw.githubusercontent.com/millfolio/homebrew-tap/HEAD/checksums/millfolio-\(version).sha256")
+        else { return nil }
+        guard let (data, resp) = try? await URLSession.shared.data(from: url),
+              (resp as? HTTPURLResponse).map({ $0.statusCode == 200 }) ?? false,
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        // Accept a bare hex digest or `shasum`/`sha256sum` output (`<hex>  file`).
+        let tok = text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+            .first.map(String.init)?.lowercased() ?? ""
+        return tok.count == 64 && tok.allSatisfy { $0.isHexDigit } ? tok : nil
     }
 
     /// Download + unpack the one source bundle (millfolio.zip) once. Each component
@@ -702,8 +744,24 @@ public final class Bootstrapper: ObservableObject {
         if contentPresent && (want.isEmpty || have == want) { return }
         set(contentPresent && have != want
             ? "Refreshing millfolio sources for \(want)…" : "Downloading millfolio sources…")
-        let zip = try await download(bundleURL, name: "millfolio.zip")
-        set("Unpacking sources…")
+        // Verify the bundle's sha256 against the tap-published checksum before we
+        // unpack + COMPILE its contents (a tampered zip = arbitrary code execution
+        // at build time). Fail closed when the release publishes a checksum; for
+        // versions with none yet (pre-checksum releases) or a source install, warn
+        // and proceed unless MILLFOLIO_REQUIRE_BUNDLE_CHECKSUM=1 demands strictness.
+        let expected = await expectedBundleSHA256(for: want)
+        if expected == nil && !want.isEmpty {
+            if ProcessInfo.processInfo.environment["MILLFOLIO_REQUIRE_BUNDLE_CHECKSUM"] == "1" {
+                throw BootstrapError.step(
+                    "verify millfolio.zip",
+                    "no published checksum for \(want) in the tap, and "
+                        + "MILLFOLIO_REQUIRE_BUNDLE_CHECKSUM=1")
+            }
+            set("Warning: no published checksum for \(want) — installing unverified sources.")
+        }
+        let zip = try await download(bundleURL, name: "millfolio.zip", expectedSHA256: expected)
+        if expected != nil { set("Sources verified (sha256 ✓). Unpacking…") }
+        else { set("Unpacking sources…") }
         // Wipe the old tree first so a version change can't leave stale files behind
         // (unzip -o only overwrites; it never deletes files dropped from the new bundle).
         try? fm.removeItem(at: bundleRoot)
@@ -1157,10 +1215,20 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
-    /// A fresh per-ask transcript path: /tmp/millfolio/sessions/<timestamp>-<slug>.log.
+    /// A fresh per-ask transcript path under the owner-only app-support tree:
+    /// ~/Library/Application Support/Millfolio/sessions/<timestamp>-<slug>.log.
+    /// These transcripts contain the REAL de-aliased answer (amounts, document
+    /// facts), so they must not live in world-readable /tmp. The dir is created
+    /// 0700 (owner-only), which blocks other local users from traversing to the
+    /// logs regardless of each file's own mode.
     public func newSessionLog(for question: String) -> URL {
-        let dir = URL(fileURLWithPath: "/tmp/millfolio/sessions", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = support.appendingPathComponent("sessions", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        // Tighten even if the directory already existed at a looser mode.
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: dir.path)
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
         let stamp = f.string(from: Date())
         var slug = ""
@@ -1488,8 +1556,11 @@ public final class Bootstrapper: ObservableObject {
         // model WRITING programs (it sees only the aliased manifest, never data), so
         // forward the key (+ optional base-url / budget overrides) when present.
         // NOTE: this persists the key in the launch-agent plist (plaintext, under
-        // ~/Library/LaunchAgents, user-only perms). To avoid that, put the key in
-        // ~/.config/privacy_box/config.json instead — settings reads either.
+        // ~/Library/LaunchAgents). We chmod the plist 0600 below so it is
+        // owner-only on disk (PropertyListSerialization.write would otherwise
+        // leave it group/other-readable at the umask default). To avoid the
+        // on-disk key entirely, put it in ~/.config/privacy_box/config.json
+        // (0600) instead — settings reads either.
         for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "PRIVACY_BOX_REMOTE_TOKEN_BUDGET"] {
             if let v = ProcessInfo.processInfo.environment[key], !v.isEmpty {
                 env[key] = v
@@ -1527,6 +1598,10 @@ public final class Bootstrapper: ObservableObject {
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: appServerLaunchAgentURL)
+        // The plist embeds ANTHROPIC_API_KEY in cleartext; keep it owner-only so
+        // it isn't exposed to other local users, Spotlight, or a home-dir perm slip.
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: appServerLaunchAgentURL.path)
         return appServerLaunchAgentURL
     }
 

@@ -80,7 +80,7 @@ jobs:
       # On a version tag (e.g. v0.1.0), publish a Release with the CLI tarball.
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           files: mill-macos.tar.gz
           # Pre-release tag = DEV channel → keep it off /releases/latest (see bundle.yml).

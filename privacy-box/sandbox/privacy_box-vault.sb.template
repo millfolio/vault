@@ -62,10 +62,14 @@
 ;; is the single control that lets the vault tools work while still making
 ;; exfiltration impossible (last match wins).
 (allow network-outbound (remote ip "localhost:*"))
-;; Unix-domain sockets stay available (local IPC: DNS resolver handoff, etc. —
-;; this does NOT widen the off-box egress surface, which `(deny network*)` above
-;; still covers for every non-localhost destination).
-(allow network-outbound (remote unix-socket))
+;; Unix-domain sockets: allow ONLY the system DNS-resolver handoff socket
+;; (mDNSResponder), not every UDS on the box. A blanket `(remote unix-socket)`
+;; would let the generated program connect to privileged local daemons — most
+;; dangerously /var/run/docker.sock (root container w/ host bind-mount = full
+;; escape) — which `(deny network*)` does NOT cover (it bounds IP egress, not
+;; UDS). The loopback inference servers are reached over numeric-IP TCP above,
+;; so this one path is all the vault tools actually need.
+(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
 
 ;; No writes anywhere except scratch (the rendered profile + the run capture).
 (deny file-write*)
