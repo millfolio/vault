@@ -96,6 +96,11 @@
   // The on-device model the server serves (bottom status bar). Empty under the
   // in-browser mock (:5173, no backend) — the bar just omits it then.
   let modelName = $state("");
+  // On-device model selector: the switchable (cached) models + the current
+  // selection + a "switching…" flag while the engine reloads.
+  let models = $state<{ id: string; label: string }[]>([]);
+  let currentModel = $state("");
+  let switching = $state(false);
   // Build stamp: the app SHA with the build date stripped. When the server reports a
   // real release version (a `mill` install — not the demo's "<sha> · <date>" deploy
   // stamp, nor "dev"), append it: "<sha> · v0.4.39-rc.2".
@@ -216,6 +221,17 @@
         }
       })
       .catch(() => {});
+    // The switchable on-device models + the current selection. Real install only —
+    // the demo/mock can't restart the shared engine.
+    if (!isDemo) {
+      fetch("/api/models")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d && Array.isArray(d.available)) models = d.available;
+          if (d && typeof d.current === "string") currentModel = d.current;
+        })
+        .catch(() => {});
+    }
     // Bottom-bar backfill + GPU telemetry — only on a real install (the demo has no
     // System tab and shares a replay GPU). The mock (:5173) has no backend → fetch
     // fails quietly and the indicators just stay hidden.
@@ -224,6 +240,50 @@
       setInterval(pollTelemetry, 2000);
     }
   });
+  // The engine's live id (e.g. `Qwen/Qwen2.5-3B-Instruct-int4`) vs a selectable id
+  // differ by org prefix + an `-int4` suffix, so match on the short, stripped form.
+  function shortId(id: string): string {
+    return id
+      .slice(id.lastIndexOf("/") + 1)
+      .toLowerCase()
+      .replace(/-int4$/, "");
+  }
+  // Switch the on-device model: POST the choice (the server rewrites the engine
+  // config + restarts the engine), then poll until the engine is back serving it.
+  async function selectModel(id: string) {
+    if (!id || id === currentModel || switching) return;
+    const prev = currentModel;
+    switching = true;
+    currentModel = id;
+    try {
+      const r = await fetch("/api/models/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: id }),
+      });
+      if (!r.ok) {
+        currentModel = prev; // revert the dropdown if the server refused
+        return;
+      }
+      const want = shortId(id);
+      // The engine restarts (a brief down window), so poll its live `loaded` id.
+      for (let i = 0; i < 40; i++) {
+        await new Promise((res) => setTimeout(res, 1500));
+        try {
+          const m = await fetch("/api/models").then((x) => (x.ok ? x.json() : null));
+          const loaded = m && typeof m.loaded === "string" ? m.loaded : "";
+          if (loaded && loaded.toLowerCase().includes(want)) {
+            modelName = m.loaded;
+            break;
+          }
+        } catch {
+          /* engine mid-restart — keep polling */
+        }
+      }
+    } finally {
+      switching = false;
+    }
+  }
   function dismissIntro() {
     showIntro = false;
     try {
@@ -488,7 +548,23 @@
     {/if}
   </div>
   <footer class="statusbar">
-    {#if modelName}
+    {#if !isDemo && models.length > 1}
+      <span class="model" title="on-device model — switching reloads the engine">
+        <span class="dot" aria-hidden="true"></span>
+        <select
+          class="modelsel"
+          value={currentModel}
+          disabled={switching}
+          onchange={(e) => selectModel((e.currentTarget as HTMLSelectElement).value)}
+          aria-label="on-device model"
+        >
+          {#each models as m (m.id)}
+            <option value={m.id}>{m.label}</option>
+          {/each}
+        </select>
+        {#if switching}<span class="switching">· switching…</span>{/if}
+      </span>
+    {:else if modelName}
       <span class="model" title="on-device model answering your questions">
         <span class="dot" aria-hidden="true"></span>{modelName}
       </span>
@@ -721,6 +797,29 @@
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  /* Inline model picker — looks like the label text, not a boxed form control. */
+  .statusbar .modelsel {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0 2px;
+    max-width: 22ch;
+  }
+  .statusbar .modelsel:hover {
+    color: var(--accent);
+  }
+  .statusbar .modelsel:disabled {
+    cursor: progress;
+    opacity: 0.7;
+  }
+  .statusbar .switching {
+    color: var(--muted, #888);
+    font-weight: 400;
   }
   .statusbar .metric {
     display: inline-flex;

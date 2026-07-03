@@ -772,6 +772,22 @@ struct Api(Copyable, Handler, Movable):
                     + "}"
                 )
             )
+        # On-device model selector: the list of switchable (cached) models + the
+        # current selection; POST /api/models/select switches it (restarts engine).
+        if path == "/api/models":
+            return _cors(
+                ok_json(
+                    '{"current":'
+                    + json_escape(_current_model_id())
+                    + ',"loaded":'
+                    + json_escape(_engine_loaded_model())
+                    + ',"available":'
+                    + _available_models_json()
+                    + "}"
+                )
+            )
+        if req.method == Method.POST and path == "/api/models/select":
+            return self.handle_model_select(req)
         # Demo bot gate: validate a Turnstile token → mint a demo-access token the
         # client echoes on WS chat frames. No-op (empty token) when Turnstile is off.
         if req.method == Method.POST and path == "/api/demo/verify":
@@ -1143,6 +1159,36 @@ struct Api(Copyable, Handler, Movable):
                 )
             )
 
+    def handle_model_select(self, req: Request) raises -> Response:
+        """POST /api/models/select {"model": "<hf-id>"} → switch the on-device model.
+        Rewrites the engine config's `model` and restarts the engine LaunchAgent (a
+        few seconds of reload). Only cached models are accepted, and never in the
+        public demo (it would restart the shared engine). Returns {"ok":true,"model"}.
+        """
+        if _is_demo():
+            return _cors(
+                unauthorized(
+                    '{"error":"model switching is disabled in the demo"}'
+                )
+            )
+        var id: String
+        try:
+            id = String(loads(req.text())["model"].string_value())
+        except:
+            return _cors(bad_request('{"error":"expected {model}"}'))
+        if id == "":
+            return _cors(bad_request('{"error":"empty model"}'))
+        # Only allow a model that is actually cached, so we never restart the engine
+        # into a checkpoint it will fail to load.
+        if _available_models_json().find(json_escape(id)) == -1:
+            return _cors(bad_request('{"error":"unknown or uncached model"}'))
+        if not _config_set_model(id):
+            return _cors(
+                bad_request('{"error":"could not update engine config"}')
+            )
+        _restart_engine()
+        return _cors(ok_json('{"ok":true,"model":' + json_escape(id) + "}"))
+
     def handle_tags_add(self, req: Request) raises -> Response:
         """POST /api/tags/add {"name":…, "prompt"?:…, "keywords"?:…} → append a new
         category rule (AI rule when `prompt` is set, else a keyword rule) to
@@ -1476,6 +1522,193 @@ def _model_label() -> String:
     record. MILLFOLIO_MODEL_LABEL (set by run-demo.sh from the engine's /v1/models)
     overrides; defaults to the Qwen the demo ships."""
     return String(getenv("MILLFOLIO_MODEL_LABEL", "Qwen2.5-3B-Instruct"))
+
+
+# ── Model selection (on-device engine model) ────────────────────────────────
+# The engine serves ONE model per process (chosen at launch); the selector below
+# switches it by rewriting the engine config's `model` and restarting the engine
+# LaunchAgent. The config is the single source of truth (the launch agent no longer
+# hard-codes the model arg — see cli/Bootstrapper writeLaunchAgent).
+
+
+def _hf_hub_dir() -> String:
+    """The HuggingFace cache `hub/` dir (holds `models--<slug>` snapshots)."""
+    var h = String(getenv("HF_HOME", "").strip())
+    if h == "":
+        h = getenv("HOME", ".") + "/Library/Application Support/Millfolio/hf"
+    return h + "/hub"
+
+
+def _engine_config_path() -> String:
+    """The engine's config.json — the single source of truth for the served model.
+    """
+    var o = String(getenv("MILLFOLIO_CONFIG", "").strip())
+    if o != "":
+        return o^
+    return getenv("HOME", ".") + "/.config/millfolio/config.json"
+
+
+def _slug_to_id(slug: String) -> String:
+    """`models--Qwen--Qwen2.5-3B-Instruct` -> `Qwen/Qwen2.5-3B-Instruct`
+    (HF uses `--` between org and name; the name itself has no `--`)."""
+    var s = slug
+    if s.startswith("models--"):
+        s = String(s[byte=8:])
+    var i = s.find("--")
+    if i == -1:
+        return s^
+    return String(s[byte=:i]) + "/" + String(s[byte = i + 2 :])
+
+
+def _model_short(id: String) -> String:
+    """The label after the last `/` (`Qwen/Qwen2.5-3B-Instruct` -> `Qwen2.5-3B-Instruct`).
+    """
+    var sl = id.find("/")
+    if sl == -1:
+        return id
+    return String(id[byte = sl + 1 :])
+
+
+def _available_models_json() raises -> String:
+    """JSON array [{"id","label"}] of fully-downloaded chat checkpoints in the HF
+    cache (a `refs/main` ref present), excluding the embedding model — the models a
+    user can switch to without a download."""
+    var hub = _hf_hub_dir()
+    var out = String("[")
+    var n = 0
+    if exists(hub):
+        var entries = listdir(hub)
+        for i in range(len(entries)):
+            var name = String(entries[i])
+            if not name.startswith("models--"):
+                continue
+            if not exists(hub + "/" + name + "/refs/main"):
+                continue  # only fully-materialized snapshots
+            var id = _slug_to_id(name)
+            if id.find("Embedding") != -1 or id.find("embedding") != -1:
+                continue  # the embeddings model isn't a chat model
+            # Only families the engine can actually load — offering a checkpoint it
+            # can't serve would break the engine on the switch-restart.
+            if not (
+                id.find("Qwen2.5") != -1
+                or id.find("Qwen3") != -1
+                or id.find("gemma-4") != -1
+                or id.find("Gemma-4") != -1
+            ):
+                continue
+            # The public demo is Qwen-only — never offer (or let it switch to) Gemma.
+            if _is_demo() and id.find("Qwen") == -1:
+                continue
+            if n > 0:
+                out += ","
+            out += (
+                '{"id":'
+                + json_escape(id)
+                + ',"label":'
+                + json_escape(_model_short(id))
+                + "}"
+            )
+            n += 1
+    out += "]"
+    return out^
+
+
+def _current_model_id() -> String:
+    """The engine's selected model id, read from its config.json (falls back to the
+    label env / the Qwen default)."""
+    try:
+        var text: String
+        with open(_engine_config_path(), "r") as f:
+            text = f.read()
+        var m = String(loads(text)["model"].string_value())
+        if m != "":
+            return m^
+    except:
+        pass
+    return String(getenv("MILLFOLIO_MODEL_LABEL", "Qwen/Qwen2.5-3B-Instruct"))
+
+
+def _config_set_model(id: String) -> Bool:
+    """Rewrite the engine config's `model` field to `id`, preserving port/q4/
+    kv_budget_mb. Returns True on success."""
+    var path = _engine_config_path()
+    var port = Int64(8000)
+    var q4 = False
+    var kv = Int64(8192)
+    try:
+        var text: String
+        with open(path, "r") as f:
+            text = f.read()
+        var j = loads(text)
+        try:
+            port = j["port"].int_value()
+        except:
+            pass
+        try:
+            q4 = j["q4"].bool_value()
+        except:
+            pass
+        try:
+            kv = j["kv_budget_mb"].int_value()
+        except:
+            pass
+    except:
+        pass
+    if String(getenv("MILLFOLIO_CONFIG", "").strip()) == "":
+        try:
+            makedirs(getenv("HOME", ".") + "/.config/millfolio", exist_ok=True)
+        except:
+            pass
+    var body = (
+        '{\n  "port": '
+        + String(port)
+        + ',\n  "model": '
+        + json_escape(id)
+        + ',\n  "q4": '
+        + ("true" if q4 else "false")
+        + ',\n  "kv_budget_mb": '
+        + String(kv)
+        + "\n}\n"
+    )
+    try:
+        with open(path, "w") as f:
+            f.write(body)
+        return True
+    except:
+        return False
+
+
+def _restart_engine():
+    """Kick the engine LaunchAgent (me.millfolio.server) so it reloads with the
+    newly-selected model. `-k` stops the running instance first."""
+    var uid = Int(external_call["getuid", UInt32]())
+    var cmd = (
+        "launchctl kickstart -k gui/"
+        + String(uid)
+        + "/me.millfolio.server >/dev/null 2>&1"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+
+
+def _engine_loaded_model() -> String:
+    """The chat model the engine is ACTUALLY serving right now, from its
+    /v1/models — the readiness signal the UI polls during a switch. Empty when the
+    engine is down (e.g. mid-restart) or unreachable; best-effort, fails fast.
+    """
+    try:
+        var req = Request(method="GET", url=_engine_url() + "/models")
+        var client = HttpClient()
+        var v = client.send(req).json()
+        var arr = v["data"]
+        for i in range(arr.array_count()):
+            var mid = String(arr[i]["id"].string_value())
+            if mid.find("Embedding") == -1 and mid.find("embedding") == -1:
+                return mid^  # the chat model (skip the embeddings model)
+    except:
+        pass
+    return String("")
 
 
 def _app_version() -> String:
