@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { StepState } from "$lib/protocol";
+  import type { StepState, ResultSpec } from "$lib/protocol";
+  import ResultView from "$lib/components/ResultView.svelte";
 
   // One inline timeline: chat bubbles (user/assistant), plus the workflow events
   // rendered in place — status/debug small, approval at regular font. Mirrors the
@@ -24,6 +25,7 @@
     resolved?: "approved" | "rejected";
     source?: string;       // assistant: filename of the doc used to answer
     sourceAlias?: string;  // …its alias → /api/doc?alias=<sourceAlias>
+    result?: ResultSpec;   // assistant: optional rich result → presenter below the bubble
   }
 
   let {
@@ -412,6 +414,9 @@
         <div class="msg {it.kind}">
           <span class="who">{it.kind === "user" ? "you" : "millfolio"}</span>
           <p>{it.text}</p>
+          {#if it.kind === "assistant" && it.result}
+            <ResultView result={it.result} />
+          {/if}
           {#if it.kind === "assistant" && it.source && it.sourceAlias}
             <p class="source" title="the top document behind this answer — your vault may hold more">
               📄 1st source:

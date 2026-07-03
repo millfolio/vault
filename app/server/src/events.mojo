@@ -115,7 +115,10 @@ def approval(step: String, label: String, body: String) -> String:
 
 
 def message(
-    text: String, source: String = String(""), source_alias: String = String("")
+    text: String,
+    source: String = String(""),
+    source_alias: String = String(""),
+    result_json: String = String(""),
 ) -> String:
     # `source`/`source_alias` (optional) — the filename + alias of the first document
     # used to answer. The UI renders the filename as a link to /api/doc?alias=<alias>
@@ -128,10 +131,19 @@ def message(
             + ',"sourceAlias":'
             + json_escape(source_alias)
         )
+    # `result_json` (optional) — the generated program's declarative RESULT SPEC
+    # (COMPUTE_VS_RENDER.md, Phase 1): an ALREADY-serialized, versioned `v:1` JSON
+    # object captured off the sandbox's RESULT_SENTINEL channel. Embedded RAW (it is
+    # itself JSON), NOT re-escaped. It stays plain-text-escaped DATA end to end — the
+    # client re-escapes every string, so there is no markup path out of the sandbox.
+    var res = String("")
+    if result_json.byte_length() > 0:
+        res = ',"result":' + result_json
     return (
         '{"type":"message","id":"msg","role":"assistant","text":'
         + json_escape(text)
         + src
+        + res
         + "}"
     )
 

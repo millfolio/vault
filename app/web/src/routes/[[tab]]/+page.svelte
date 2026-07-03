@@ -7,12 +7,12 @@
   import SystemPanel from "$lib/components/SystemPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
-  import type { ServerEvent, Session, MillfolioClient, StepState } from "$lib/protocol";
+  import type { ServerEvent, Session, MillfolioClient, StepState, ResultSpec } from "$lib/protocol";
 
   // One inline timeline: chat bubbles + the workflow events (status/debug/approval)
   // rendered in place, instead of a separate workflow pane.
   type ChatItem =
-    | { kind: "user" | "assistant"; id: string; text: string; source?: string; sourceAlias?: string }
+    | { kind: "user" | "assistant"; id: string; text: string; source?: string; sourceAlias?: string; result?: ResultSpec }
     | { kind: "status"; id: string; stepId: string; label: string; state: StepState; detail?: string }
     | { kind: "debug"; id: string; title: string; body: string; language?: string }
     | { kind: "tags"; id: string; tags: string }
@@ -416,7 +416,7 @@
         // identical answers (same cached program → same reply) would collide on the
         // {#each items (it.id)} key and Svelte would silently drop the 2nd — the
         // classic "2nd question hangs". Key on a fresh unique id, not the server's.
-        items.push({ kind: "assistant", id: uid(), text: e.text, source: e.source, sourceAlias: e.sourceAlias });
+        items.push({ kind: "assistant", id: uid(), text: e.text, source: e.source, sourceAlias: e.sourceAlias, result: e.result });
         busy = false;
         queueMsg = null;
         break;

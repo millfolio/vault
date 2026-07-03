@@ -40,6 +40,14 @@ def main() raises:
         '{"type":"message","id":"msg","role":"assistant","text":"hi"}',
         "message encoding",
     )
+    # message with a declarative RESULT SPEC (COMPUTE_VS_RENDER Phase 1): the already-
+    # serialized v:1 JSON is embedded RAW under "result" (it is itself JSON), while the
+    # text stays escaped. Empty result_json (the default) omits the field — the case above.
+    expect_eq(
+        message("hi", String(""), String(""), '{"v":1,"text":"hi","data":[]}'),
+        '{"type":"message","id":"msg","role":"assistant","text":"hi","result":{"v":1,"text":"hi","data":[]}}',
+        "message with result spec (raw-embedded)",
+    )
     expect_eq(
         error_event("boom"),
         '{"type":"error","message":"boom"}',

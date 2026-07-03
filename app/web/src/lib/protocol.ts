@@ -37,6 +37,42 @@ export interface DebugEvent {
   language?: string;
 }
 
+// ── declarative result spec (COMPUTE_VS_RENDER.md, Phase 1) ──────────────────
+// The generated program COMPUTES typed data and emits this versioned spec; a
+// deterministic presenter in the client picks the view from the data's shape.
+// Money crosses the seam as {raw, text} (the typed-money invariant): `raw` drives
+// axes/aggregation, `text` is the exact money() display — never a bare float.
+
+/** A typed value — a KPI value or a table cell. `type` tags it so the client never
+ *  guesses a type from a formatted string. */
+export type ResultValue =
+  | { type: "money"; raw: number; text: string }
+  | { type: "count"; raw: number; text: string }
+  | { type: "date"; value: string }
+  | { type: "text"; value: string };
+
+/** One data block. Phase 1 renders kpi + table; series is rendered as a table
+ *  (charts are Phase 2). */
+export type ResultBlock =
+  | { kind: "kpi"; label: string; value: ResultValue }
+  | { kind: "table"; headers: string[]; rows: ResultValue[][] }
+  | {
+      kind: "series";
+      seriesKind: "time" | "category";
+      title: string;
+      hint?: string; // optional presenter nudge ("line"/"bar"/…) — Phase 2
+      x: { type: "date" | "category"; values: string[] };
+      y: { type: "money"; raw: number[]; text: string[] };
+    };
+
+/** The versioned result spec. Clients ignore-with-fallback (render `text` only)
+ *  on an unknown `v`. `data` absent → a plain text answer (unchanged from today). */
+export interface ResultSpec {
+  v: number;
+  text: string;
+  data?: ResultBlock[];
+}
+
 export interface MessageEvent {
   type: "message";
   id: string;
@@ -44,6 +80,7 @@ export interface MessageEvent {
   text: string;
   source?: string;       // filename of the first document used to answer
   sourceAlias?: string;  // its alias → link to /api/doc?alias=<sourceAlias>
+  result?: ResultSpec;   // optional rich result → auto-visualized below the bubble
 }
 
 export interface ErrorEvent {

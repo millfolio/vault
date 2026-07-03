@@ -49,6 +49,7 @@ from orchestrator import (
     STAT_SENTINEL,
     LOCAL_SENTINEL,
     LOCAL_SEP,
+    RESULT_SENTINEL,
 )
 from transport import DeltaSink
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
@@ -2166,6 +2167,9 @@ def on_connect(mut conn: WsConnection) raises:
             ""
         )  # first document a tool read — surfaced as the source
         var src_alias = String("")  # …its alias, for the /api/doc?alias= link
+        var result_spec = String(
+            ""
+        )  # the generated program's declarative RESULT SPEC (v:1 JSON), if any
         var running = True
         var iters = 0
         var timed_out = False
@@ -2242,6 +2246,12 @@ def on_connect(mut conn: WsConnection) raises:
                             "text",
                         )
                     )
+                elif ln.startswith(RESULT_SENTINEL):
+                    # The generated program's declarative RESULT SPEC (v:1 JSON). The
+                    # builders re-emit after every mutation, so keep the LAST (complete)
+                    # line; it's attached to the final message event. Not shown live
+                    # (Phase 1 attaches the presentation at the end, below the words).
+                    result_spec = String(ln.removeprefix(RESULT_SENTINEL))
             # Update the ONE 'working' line in place with the latest progress label
             # + running api/model tallies, whenever a progress or stat line arrived.
             if dirty:
@@ -2336,7 +2346,7 @@ def on_connect(mut conn: WsConnection) raises:
             conn.send_text(
                 status("execute", "Running it locally over your vault", "done")
             )
-            conn.send_text(message(reply, src_file, src_alias))
+            conn.send_text(message(reply, src_file, src_alias, result_spec))
         log("[run] reply sent; releasing queue slot ticket=" + String(ticket))
         # Persist this question's usage (JSONL) for the Stats page — still inside the
         # run slot, so writes across workers are serialized. total = work time only
