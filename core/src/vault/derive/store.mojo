@@ -250,19 +250,80 @@ def save_ledger(markers: List[RuleMarker]) raises:
         f.write(serialize_ledger(markers))
 
 
-def try_lock() -> Bool:
-    """Acquire the backfill lock (atomic POSIX `mkdir`). Returns False if
-    another writer holds it — the app-server worker skips its tick, so a question
-    is never delayed. Best-effort: a lock leaked by a crashed process must be
-    cleared by hand (`rmdir ~/.config/millfolio/ml_ledger.lock`)."""
+# A backfill slice is seconds long; a lock older than this is one a crashed/killed
+# holder leaked (e.g. the app server killed mid-slice by a deploy), so it's safe to
+# reclaim. This makes the lock self-healing — no manual `rmdir` after a crash.
+comptime _LOCK_STALE_S = Int64(300)
+
+
+def _lock_ts_path() raises -> String:
+    return _ledger_lock_dir() + "/ts"
+
+
+def _acquire_raw() -> Bool:
+    """`mkdir` the lock (atomic) and stamp the acquire time. False if it exists.
+    """
     try:
         mkdir(_ledger_lock_dir())
+    except:
+        return False
+    try:  # best-effort staleness timestamp
+        with open(_lock_ts_path(), "w") as f:
+            f.write(String(_epoch_s()))
+    except:
+        pass
+    return True
+
+
+def _reclaim_if_stale() -> Bool:
+    """Remove a LEAKED lock (timestamp older than `_LOCK_STALE_S`, or missing — a
+    lock from before this stamping existed / a crash before the stamp). Returns True
+    iff the lock was cleared (or already gone), so the caller can retry acquisition.
+    Reclaiming only a stale lock keeps a LIVE holder's fresh lock intact."""
+    try:
+        var d = _ledger_lock_dir()
+        if not exists(d):
+            return True
+        var stale = True  # no timestamp ⇒ a pre-stamp / crashed leak
+        if exists(_lock_ts_path()):
+            var raw: String
+            with open(_lock_ts_path(), "r") as f:
+                raw = f.read()
+            stale = (
+                _epoch_s() - Int64(atol(String(raw.strip())))
+            ) > _LOCK_STALE_S
+        if not stale:
+            return False
+        try:
+            remove(_lock_ts_path())
+        except:
+            pass
+        rmdir(d)
         return True
     except:
         return False
 
 
+def try_lock() -> Bool:
+    """Acquire the backfill lock (atomic POSIX `mkdir`). Returns False only if a
+    LIVE writer holds it — the app-server worker then skips its tick, so a question
+    is never delayed. A lock leaked by a crashed/killed holder is auto-reclaimed
+    once stale (see `_LOCK_STALE_S`), so backfill self-heals instead of wedging.
+    """
+    if _acquire_raw():
+        return True
+    if _reclaim_if_stale() and _acquire_raw():
+        return True
+    return False
+
+
 def unlock():
+    # Remove the timestamp file first: rmdir fails on a non-empty dir, so skipping
+    # this would leave the lock permanently held.
+    try:
+        remove(_lock_ts_path())
+    except:
+        pass
     try:
         rmdir(_ledger_lock_dir())
     except:

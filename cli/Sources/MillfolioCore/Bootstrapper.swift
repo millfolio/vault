@@ -71,6 +71,13 @@ public final class Bootstrapper: ObservableObject {
     /// same native-Mojo downloader, another HF id. Single-file safetensors (small).
     public static let embedModel = "Qwen/Qwen3-Embedding-0.6B"
     public static let embedModelSlug = "Qwen--Qwen3-Embedding-0.6B"
+    /// A SECOND chat model installed by default so the on-device model selector has
+    /// something to switch to (a single model hides the picker). Gemma-4 E2B is the
+    /// effective-2B (PLE) variant — small (~5 GB bf16, quantized to int4 ~1.4 GB at
+    /// load) and fits ~16 GB. The engine's load_e2b_weights reads the bf16 safetensors.
+    /// The 24 GB Gemma-4-12B stays opt-in (users download it themselves).
+    public static let e2bModel = "mlx-community/gemma-4-e2b-it-bf16"
+    public static let e2bModelSlug = "mlx-community--gemma-4-e2b-it-bf16"
 
     private var mojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.mojoVersion)-release.conda")!
@@ -225,6 +232,11 @@ public final class Bootstrapper: ObservableObject {
     public var embedWeightsPresent: Bool {
         FileManager.default.fileExists(
             atPath: hfHome.appendingPathComponent("hub/models--\(Self.embedModelSlug)/refs/main").path)
+    }
+    /// The second (E2B) chat model's weights are fully downloaded.
+    public var e2bWeightsPresent: Bool {
+        FileManager.default.fileExists(
+            atPath: hfHome.appendingPathComponent("hub/models--\(Self.e2bModelSlug)/refs/main").path)
     }
     /// Ready to launch: engine built and (chat) weights downloaded. The embedding
     /// weights are not required to start the chat server, so they don't gate this.
@@ -459,7 +471,7 @@ public final class Bootstrapper: ObservableObject {
         // skip what's already done (toolchain, weights), so a partial install
         // resumes (e.g. just the missing embedding weights).
         if stepCurrent(".engine-step", [serverBin]) && weightsPresent && embedWeightsPresent
-            && !mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
+            && e2bWeightsPresent && !mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
             set("engine already installed — skipping")
             return
         }
@@ -506,6 +518,18 @@ public final class Bootstrapper: ObservableObject {
         if !embedWeightsPresent {
             set("Downloading embedding model weights (\(Self.embedModel))…")
             try downloadWeights(Self.embedModel)
+        }
+        // A second chat model so the on-device model selector has something to
+        // switch to. Best-effort: a failure here must NOT break the install (the
+        // product works fine on the default model alone), so warn and continue.
+        if !e2bWeightsPresent {
+            set("Downloading Gemma-4 E2B weights (~5 GB, enables the model selector)…")
+            do { try downloadWeights(Self.e2bModel) }
+            catch {
+                set(
+                    "Note: E2B download failed (\(humanError(error))); the model"
+                    + " selector will show only \(Self.model) until it's present.")
+            }
         }
 
         ensureConfig(at: engineConfigURL, Self.engineConfigDefault)
