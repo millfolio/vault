@@ -244,8 +244,13 @@ def _gpu_util_pct() -> Int:
     hide the indicator. The 30-second rolling average is kept CLIENT-side (the
     bottom bar polls this), so a sample stays cheap + stateless."""
     var out_path = _config_dir() + "/.gpu_util"
+    # `cd /` first: if a deploy wiped the process's working dir (the bundle tree is
+    # re-unpacked on `mill install`), the spawned shell would otherwise spam
+    # "shell-init: getcwd: cannot access parent directories" on every poll.
     var cmd = (
-        String("ioreg -r -d 1 -c IOAccelerator 2>/dev/null | ")
+        String(
+            "cd / 2>/dev/null; ioreg -r -d 1 -c IOAccelerator 2>/dev/null | "
+        )
         + "sed -n 's/.*\"Device Utilization %\"=\\([0-9][0-9]*\\).*/\\1/p' | "
         + "head -1 > '"
         + out_path

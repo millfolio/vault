@@ -93,6 +93,7 @@
     if (running) return;
     running = true;
     stop = false;
+    let lastPending = Infinity;
     try {
       for (let i = 0; i < 1000; i++) {
         if (stop) break;
@@ -100,10 +101,16 @@
         if (!r.ok) break;
         const body = await r.json();
         st = body.status as Status;
-        if (st) noteProgress(st.pendingTotal);
-        if (!st || st.pendingTotal <= 0) break;
-        if ((body.changed ?? 0) === 0 && st.status !== "paused") break; // no progress → stop
-        if (st.status === "paused") break;
+        if (!st) break;
+        noteProgress(st.pendingTotal);
+        if (st.pendingTotal <= 0) break; // drained
+        if (st.status === "paused") break; // paused → stop
+        // Progress = pendingTotal DECREASING, not rows changed. A slice that
+        // classifies a generation to all-"no" advances the ledger marker (pending
+        // drops) while returning changed:0 — stopping on changed==0 would quit
+        // mid-drain. Stop only when pending stops falling (engine down / stuck).
+        if (st.pendingTotal >= lastPending) break;
+        lastPending = st.pendingTotal;
       }
     } finally {
       running = false;
