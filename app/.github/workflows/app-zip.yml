@@ -44,6 +44,30 @@ jobs:
         with:
           repository: millfolio/logging.mojo
           path: logging.mojo
+      # The app-server now COMPILES in the packager (millfolio-server), which
+      # precompiles the vault package set — that pulls in vault's deps. Check them
+      # out too (mirrors bundle.yml), else precompile_pkgs.sh fails on a missing
+      # sibling (e.g. `cp … zlib.mojo/src/zlib.mojo: No such file or directory`).
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/zlib.mojo
+          path: zlib.mojo
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/lancedb.mojo
+          path: lancedb.mojo
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/pdftotext.mojo
+          path: pdftotext.mojo
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/csv.mojo
+          path: csv.mojo
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/docx.mojo
+          path: docx.mojo
 
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
