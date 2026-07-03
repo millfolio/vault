@@ -583,7 +583,11 @@ public final class Bootstrapper: ObservableObject {
         }
         let plist: [String: Any] = [
             "Label": Self.serverLabel,
-            "ProgramArguments": [serverBin.path, Self.model],
+            // No model arg: the engine reads its model from config.json (engineConfigURL,
+            // default Self.model), making that file the single source of truth. The UI's
+            // on-device model selector switches models by rewriting config.model and
+            // kicking this agent — which only works if the model isn't pinned here as argv[1].
+            "ProgramArguments": [serverBin.path],
             "WorkingDirectory": backendDir.path,   // hardcoded relative data paths resolve here
             "EnvironmentVariables": env,
             "StandardOutPath": logFileURL.path,
