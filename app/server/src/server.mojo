@@ -226,6 +226,16 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     return p
 
 
+def _chmod(path: String, mode: Int):
+    """Best-effort `chmod(path, mode)` via libc. Mojo's `open(...)` and
+    `makedirs` create with the process umask (typically 0644/0755); the data dir
+    and JSONL stores hold personal financial data (questions, answers, extracted
+    transactions), so we tighten them to owner-only after creation."""
+    var cp = _cstr(path)
+    _ = external_call["chmod", c_int](cp, c_int(mode))
+    cp.free()
+
+
 def _gpu_util_pct() -> Int:
     """Instantaneous GPU utilization (%), read WITHOUT root from IOKit's
     IOAccelerator `PerformanceStatistics` via `ioreg`. A shell pipeline extracts
@@ -560,14 +570,69 @@ def _serve_file(path: String, content_type: String) raises -> Response:
 
 
 def _cors(var resp: Response) -> Response:
-    """Allow the local web app (a different origin/port) to call this API."""
+    """CORS scaffolding for the local web app (a different origin/port in dev).
+
+    Deliberately does NOT set `Access-Control-Allow-Origin` — that is added by
+    `Api.serve` *after* the origin has been allow-listed, so it echoes the
+    specific caller origin instead of a wildcard `*`. A wildcard here would let
+    ANY website the user visits read this API's responses (vault filenames,
+    transactions, history) cross-origin; see `_host_allowed`."""
     try:
-        resp.headers.set("Access-Control-Allow-Origin", "*")
         resp.headers.set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         resp.headers.set("Access-Control-Allow-Headers", "Content-Type")
     except:
         pass
     return resp^
+
+
+def _forbidden(msg: String = "Forbidden") -> Response:
+    """A 403 with NO CORS headers, so a cross-origin caller can't read the body.
+    """
+    var resp = Response(
+        status=403, reason="Forbidden", body=List[UInt8](msg.as_bytes())
+    )
+    try:
+        resp.headers.set("Content-Type", "text/plain")
+    except:
+        pass
+    return resp^
+
+
+def _extract_host(raw: String) -> String:
+    """The bare host of a `Host`/`Origin` header value: strip the scheme, any
+    path, IPv6 brackets, and the `:port`. `http://localhost:5173` → `localhost`,
+    `[::1]:10000` → `::1`, `127.0.0.1:10000` → `127.0.0.1`."""
+    var s = raw
+    var sch = s.find("://")
+    if sch != -1:
+        s = String(s[byte = sch + 3 :])
+    var slash = s.find("/")
+    if slash != -1:
+        s = String(s[byte=:slash])
+    if s.startswith("["):
+        var rb = s.find("]")
+        if rb != -1:
+            return String(s[byte=1:rb])
+    var colon = s.find(":")
+    if colon != -1:
+        s = String(s[byte=:colon])
+    return s^
+
+
+def _host_allowed(h: String) raises -> Bool:
+    """Is this host a loopback name we serve on? Empty (HTTP/1.0 / no header) is
+    allowed — it isn't a browser DNS-rebinding vector. Extra hostnames (e.g. a
+    Tailscale MagicDNS name for `mill start`'s `tailscale serve`) can be opted in
+    via `MILLFOLIO_ALLOWED_HOSTS` (comma-separated)."""
+    if h == "" or h == "localhost" or h == "127.0.0.1" or h == "::1":
+        return True
+    var extra = String(getenv("MILLFOLIO_ALLOWED_HOSTS", "").strip())
+    if extra != "":
+        var parts = extra.split(",")
+        for i in range(len(parts)):
+            if String(parts[i].strip()) == h:
+                return True
+    return False
 
 
 def _tags_in_program(code: String) raises -> String:
@@ -637,6 +702,42 @@ struct Api(Copyable, Handler, Movable):
     var st: UnsafePointer[MillfolioState, MutUntrackedOrigin]
 
     def serve(self, req: Request) raises -> Response:
+        """Anti-CSRF / anti-DNS-rebinding gate in front of `_route`.
+
+        This server holds personal financial data on a loopback port that ANY
+        browser tab or local process on the machine can reach. Two checks close
+        that off before any handler runs:
+          • `Host` must be a loopback name — defeats DNS rebinding (attacker.com
+            rebound to 127.0.0.1 arrives with `Host: attacker.com`).
+          • `Origin`, when present, must be loopback — defeats a malicious site
+            issuing cross-origin `fetch`/WebSocket reads or CSRF POSTs.
+        A rejected request gets a 403 with no CORS headers, so its body is
+        unreadable cross-origin either way. Allowed origins are echoed back
+        (not `*`) so the browser only shares responses with local callers.
+
+        SKIPPED in demo mode: the public demo (port 10010, behind a Cloudflare
+        Tunnel) is served under a real hostname, not loopback, and holds only
+        SYNTHETIC data behind a Turnstile bot gate — the personal-vault threat
+        this guard defends against doesn't exist there."""
+        var origin_raw = String(req.headers.get("origin"))
+        if not _is_demo():
+            var host = _extract_host(String(req.headers.get("host")))
+            if not _host_allowed(host):
+                return _forbidden("host not allowed")
+            if origin_raw != "" and not _host_allowed(
+                _extract_host(origin_raw)
+            ):
+                return _forbidden("origin not allowed")
+        var resp = self._route(req)
+        if origin_raw != "":
+            try:
+                resp.headers.set("Access-Control-Allow-Origin", origin_raw)
+                resp.headers.set("Vary", "Origin")
+            except:
+                pass
+        return resp^
+
+    def _route(self, req: Request) raises -> Response:
         var path = req.url
         # CORS preflight (compare the raw method string — no Method.OPTIONS dep).
         if req.method == "OPTIONS":
@@ -1455,6 +1556,9 @@ def _append_stats(
     try:
         with open(_stats_path(), "a") as f:
             f.write(line)
+        _chmod(
+            _stats_path(), 0o600
+        )  # owner-only: records the full question text
     except:
         log("[stats] append failed (non-fatal)")
 
@@ -1485,6 +1589,7 @@ def _append_ask(
     try:
         with open(_asks_path(), "a") as f:
             f.write(line + "\n")  # JSONL — one record per line
+        _chmod(_asks_path(), 0o600)  # owner-only: holds questions + answers
     except:
         log("[asks] append failed (non-fatal)")
 
@@ -1579,6 +1684,21 @@ def on_connect(mut conn: WsConnection) raises:
     flare's WS handler is THIN (non-capturing), so it builds the orchestrator per
     connection — fine for a local single-user server. Events are ServerEvent JSON,
     one per text frame (see ../../protocol/events.ts / events.mojo)."""
+    # Same-origin gate. Browsers don't apply the same-origin policy to ws://
+    # connects, so without this any website the user visits could open this
+    # socket, ask, auto-approve, and read the streamed vault answer. Empty
+    # Origin (a non-browser client) is allowed; a non-loopback Origin is not.
+    # Skipped in demo mode (served under a real hostname; synthetic data behind
+    # the Turnstile token gate below — same rationale as Api.serve).
+    var _ws_origin = String(conn.origin)
+    if (
+        not _is_demo()
+        and _ws_origin != ""
+        and not _host_allowed(_extract_host(_ws_origin))
+    ):
+        conn.send_text(error_event("cross-origin websocket rejected"))
+        conn.close(WsCloseCode.NORMAL)
+        return
     var frame = conn.recv()
     if frame.opcode == WsOpcode.CLOSE:
         return
@@ -2038,6 +2158,9 @@ def main() raises:
     # first stats/asks/controller write doesn't race a missing directory.
     try:
         makedirs(_config_dir(), exist_ok=True)
+        _chmod(
+            _config_dir(), 0o700
+        )  # owner-only: holds stats/asks/history + demo tokens
     except:
         pass
 
