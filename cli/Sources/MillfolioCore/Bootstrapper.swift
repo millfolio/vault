@@ -71,13 +71,11 @@ public final class Bootstrapper: ObservableObject {
     /// same native-Mojo downloader, another HF id. Single-file safetensors (small).
     public static let embedModel = "Qwen/Qwen3-Embedding-0.6B"
     public static let embedModelSlug = "Qwen--Qwen3-Embedding-0.6B"
-    /// A SECOND chat model installed by default so the on-device model selector has
-    /// something to switch to (a single model hides the picker). Gemma-4 E2B is the
-    /// effective-2B (PLE) variant — small (~5 GB bf16, quantized to int4 ~1.4 GB at
-    /// load) and fits ~16 GB. The engine's load_e2b_weights reads the bf16 safetensors.
-    /// The 24 GB Gemma-4-12B stays opt-in (users download it themselves).
-    public static let e2bModel = "mlx-community/gemma-4-e2b-it-bf16"
-    public static let e2bModelSlug = "mlx-community--gemma-4-e2b-it-bf16"
+    // NOTE: model weights are NO LONGER downloaded at install time. The app server
+    // provisions the embedding model + a default chat model in the background on
+    // first start, and the UI catalog downloads any other model on demand (both via
+    // `build/download`, whose path we hand the app server as MILLFOLIO_DOWNLOAD_BIN).
+    // This keeps install fast and unable to fail on a multi-GB fetch.
 
     private var mojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.mojoVersion)-release.conda")!
@@ -211,6 +209,10 @@ public final class Bootstrapper: ObservableObject {
     /// inference-server checkout inside the unpacked engine zip.
     private var backendDir: URL { engineRoot.appendingPathComponent("inference-server", isDirectory: true) }
     private var serverBin: URL { backendDir.appendingPathComponent("build/server") }
+    /// The native-Mojo HF weights downloader, built at install time and RUN AT
+    /// RUNTIME by the app server (not the installer). Its absolute path is handed to
+    /// the app-server LaunchAgent as MILLFOLIO_DOWNLOAD_BIN.
+    private var downloadBin: URL { backendDir.appendingPathComponent("build/download") }
     /// All subprocess output (mojo build, weights download, the running server)
     /// is appended here so errors that flash by in the menu can be read in full.
     public var logFileURL: URL { support.appendingPathComponent("Millfolio.log") }
@@ -232,11 +234,6 @@ public final class Bootstrapper: ObservableObject {
     public var embedWeightsPresent: Bool {
         FileManager.default.fileExists(
             atPath: hfHome.appendingPathComponent("hub/models--\(Self.embedModelSlug)/refs/main").path)
-    }
-    /// The second (E2B) chat model's weights are fully downloaded.
-    public var e2bWeightsPresent: Bool {
-        FileManager.default.fileExists(
-            atPath: hfHome.appendingPathComponent("hub/models--\(Self.e2bModelSlug)/refs/main").path)
     }
     /// Ready to launch: engine built and (chat) weights downloaded. The embedding
     /// weights are not required to start the chat server, so they don't gate this.
@@ -466,12 +463,12 @@ public final class Bootstrapper: ObservableObject {
     /// the first failure (the CLI surfaces it; the menu wrapper maps it to `phase`).
     public func installServer() async throws {
         migrateLegacyLayout()   // upgrade an older millrace-layout install in place
-        // Idempotent fast-path: everything (engine + both models' weights) already
-        // present → nothing to do. Otherwise fall through; the steps below each
-        // skip what's already done (toolchain, weights), so a partial install
-        // resumes (e.g. just the missing embedding weights).
-        if stepCurrent(".engine-step", [serverBin]) && weightsPresent && embedWeightsPresent
-            && e2bWeightsPresent && !mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
+        // Idempotent fast-path: the engine server + the weights downloader are built
+        // and the toolchain is current → nothing to do. Weights are NOT part of the
+        // install anymore (the app server provisions them at runtime), so they don't
+        // gate this.
+        if stepCurrent(".engine-step", [serverBin, downloadBin])
+            && !mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
             set("engine already installed — skipping")
             return
         }
@@ -503,33 +500,15 @@ public final class Bootstrapper: ObservableObject {
                         args: ["-I", "../jinja2.mojo/src", "-I", "../flare"], out: "build/server")
         signServerIdentity()
 
-        if !weightsPresent || !embedWeightsPresent || !e2bWeightsPresent {
-            set("Building downloader…")
+        // Build the native-Mojo weights downloader — NOT to download here, but so the
+        // app server can run it at runtime (MILLFOLIO_DOWNLOAD_BIN) to provision the
+        // embedding + default chat model in the background and to fulfil the UI
+        // catalog's on-demand downloads. Install ships binaries + toolchain only, so
+        // it stays fast and can't fail on a multi-GB fetch.
+        if !FileManager.default.isExecutableFile(atPath: downloadBin.path) {
+            set("Building weights downloader…")
             try buildBinary(python: python, source: "src/download.mojo",
                             args: ["-I", "../flare"], out: "build/download")
-        }
-        if !weightsPresent {
-            set("Downloading model weights (\(Self.model), several GB)…")
-            try downloadWeights(Self.model)
-        }
-        // The combined server resolves the embedding model from the HF cache to
-        // serve /v1/embeddings (millfolio's indexer + vault search use it). Fetch its
-        // weights with the same native downloader so the vault works out of the box.
-        if !embedWeightsPresent {
-            set("Downloading embedding model weights (\(Self.embedModel))…")
-            try downloadWeights(Self.embedModel)
-        }
-        // A second chat model so the on-device model selector has something to
-        // switch to. Best-effort: a failure here must NOT break the install (the
-        // product works fine on the default model alone), so warn and continue.
-        if !e2bWeightsPresent {
-            set("Downloading Gemma-4 E2B weights (~5 GB, enables the model selector)…")
-            do { try downloadWeights(Self.e2bModel) }
-            catch {
-                set(
-                    "Note: E2B download failed (\(humanError(error))); the model"
-                    + " selector will show only \(Self.model) until it's present.")
-            }
         }
 
         ensureConfig(at: engineConfigURL, Self.engineConfigDefault)
@@ -559,8 +538,13 @@ public final class Bootstrapper: ObservableObject {
 
     /// Start the server LaunchAgent. Idempotent: re-bootstraps a fresh plist.
     public func startServer() throws {
-        guard isServerInstalled, weightsPresent else {
-            throw BootstrapError.step("start server", "engine not installed or weights missing — run install first")
+        // Weights are provisioned at runtime by the app server (not at install), so
+        // this no longer gates on them: we bootstrap the engine agent even with no
+        // weights yet, so the app server's provisioner can `launchctl kickstart` it
+        // the moment the default model finishes downloading. The engine reads its
+        // model from config.json (single source of truth).
+        guard isServerInstalled else {
+            throw BootstrapError.step("start server", "engine not installed — run install first")
         }
         try writeLaunchAgent()
         logHeader("Start server: \(Self.model)")
@@ -919,13 +903,6 @@ public final class Bootstrapper: ObservableObject {
         } catch {
             appendLog("could not re-sign server identity (cosmetic): \(humanError(error))\n")
         }
-    }
-
-    private func downloadWeights(_ modelID: String) throws {
-        let dl = backendDir.appendingPathComponent("build/download").path
-        var env = runtimeEnv()
-        env["HF_HOME"] = hfHome.path
-        try run(dl, [modelID], cwd: backendDir, env: env)
     }
 
     // ── privacy_box: install ──────────────────────────────────────────────────────
@@ -1547,6 +1524,13 @@ public final class Bootstrapper: ObservableObject {
             // The vault tools (search/ask_local) hit the inference server over loopback.
             "MILLFOLIO_EMBED_URL": "http://127.0.0.1:8000/v1",
             "MILLFOLIO_LOCAL_URL": "http://127.0.0.1:8000/v1",
+            // Weight provisioning at RUNTIME (moved out of the installer): the app
+            // server runs this native-Mojo downloader to fetch the embedding model +
+            // a default chat model in the background, and to fulfil the UI catalog's
+            // on-demand downloads. HF_HOME is where they land (the self-contained
+            // cache the engine reads); set it explicitly now that downloads run here.
+            "MILLFOLIO_DOWNLOAD_BIN": downloadBin.path,
+            "HF_HOME": hfHome.path,
             // The chat WS compiles the generated program against the millfolio sources.
             "PRIVACY_BOX_MILLFOLIO": millfolioDir.path,
             // The privacy_box install dir — so it resolves its sandbox/*.sb.template
@@ -1717,12 +1701,21 @@ public final class Bootstrapper: ObservableObject {
     /// isn't installed yet — the caller surfaces that downstream. Without this,
     /// `ask`/the vault loop blocks on a dead model endpoint with no clue why.
     public func ensureInferenceServer() throws {
-        guard isServerInstalled && weightsPresent else { return }
+        guard isServerInstalled else { return }
         // Probe the PORT, not just launchd state — a "loaded" agent can be dead or
         // still loading weights. If it's already serving, we're done.
         if inferenceListening() { serverRunning = true; return }
-        set("Starting the inference server (loading model weights can take a bit)…")
         killStaleOnPort(8000)        // reap a half-dead instance holding the port
+        // No chat weights yet (fresh install, before the app server's background
+        // provisioner has fetched the default model)? Bootstrap the engine agent so
+        // it's loaded + kickstartable — but DON'T wait for readiness (it can't serve
+        // until the weights land; the provisioner kickstarts it then).
+        guard weightsPresent else {
+            set("Model weights aren't present yet — the app will download them in the background, then start the engine…")
+            try? startServer()       // bootstrap the (config-authoritative) agent
+            return
+        }
+        set("Starting the inference server (loading model weights can take a bit)…")
         try startServer()            // bootout + bootstrap (RunAtLoad)
         // WAIT until it actually answers, so callers (mill start / ask / index)
         // never race the ~10s weight load and hit ConnectionRefused.
