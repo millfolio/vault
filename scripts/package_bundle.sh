@@ -30,18 +30,28 @@ export LOGGING="$UMBRELLA/logging.mojo"   # privacy_box + app server: `from logg
 export LANCEDB="$UMBRELLA/lancedb.mojo" PDFTOTEXT="$UMBRELLA/pdftotext.mojo"
 export ZLIB="$UMBRELLA/zlib.mojo" CSV="$UMBRELLA/csv.mojo" DOCX="$UMBRELLA/docx.mojo"
 
-echo "==> [1/4] engine → runner.zip" >&2
+# The vault package set (vault.mojoc etc.) is now needed by THREE packagers:
+# privacy_box + app compile against it (`-I $PKGS`), and millfolio ships it.
+# Precompile it ONCE here and share via PKGS so a full bundle build doesn't repeat
+# the (slow) precompile three times. Each packager self-builds a throwaway set when
+# run standalone (PKGS unset).
+echo "==> [0/4] precompiling the vault package set (shared)" >&2
+export PKGS="$WORK/pkgs"
+( cd "$VAULT" && pixi run bash core/scripts/precompile_pkgs.sh "$PKGS" )
+[[ -f "$PKGS/vault.mojoc" ]] || { echo "error: precompile_pkgs produced no vault.mojoc" >&2; exit 1; }
+
+echo "==> [1/4] engine → runner.zip (prebuilt server + download)" >&2
 ( cd "$ENGINE" && pixi run flare-tls && pixi run bash scripts/package_engine.sh "$ZIPS/runner.zip" )
 
-echo "==> [2/4] privacy_box → privacy_box.zip" >&2
+echo "==> [2/4] privacy_box → privacy_box.zip (prebuilt privacy_box)" >&2
 ( cd "$VAULT" && pixi run ffi && pixi run bash privacy-box/scripts/package_privacy_box.sh "$ZIPS/privacy_box.zip" )
 
-echo "==> [3/4] vault engine → millfolio.zip" >&2
+echo "==> [3/4] vault engine → millfolio.zip (prebuilt millfolio, reuses PKGS)" >&2
 ( cd "$VAULT" && pixi run bash core/scripts/package_millfolio.sh "$ZIPS/millfolio.zip" )
 
-echo "==> [4/4] app server → millfolio-app.zip" >&2
+echo "==> [4/4] app server → millfolio-app.zip (prebuilt millfolio-server)" >&2
 ( cd "$APP/web" && npm ci && npm run build ) >&2
-( cd "$APP" && bash scripts/package-app.sh "$ZIPS/millfolio-app.zip" )
+( cd "$APP/server" && pixi run bash "$APP/scripts/package-app.sh" "$ZIPS/millfolio-app.zip" )
 
 echo "==> combining into one bundle" >&2
 unzip -q "$ZIPS/runner.zip"        -d "$STAGE/runner"

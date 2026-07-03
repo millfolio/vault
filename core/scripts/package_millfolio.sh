@@ -39,10 +39,18 @@ STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 D="$STAGE/millfolio"
 mkdir -p "$D/build" "$D/pkgs"
 
-echo "==> precompiling the vault tool surface + libs into pkgs/" >&2
-# scripts/precompile_pkgs.sh inherits the lib path overrides (FLARE/JSON/…) that
-# package_bundle.sh exports; standalone it defaults to the umbrella sibling layout.
-MOJO="$MOJO" bash "$ROOT/scripts/precompile_pkgs.sh" "$D/pkgs"
+echo "==> assembling the vault tool surface + libs into pkgs/" >&2
+# Reuse a caller-built set (package_bundle precompiles it ONCE and shares it via
+# PKGS — privacy_box + app compile against it too) to avoid a 3rd slow precompile;
+# else build it here. scripts/precompile_pkgs.sh inherits the lib path overrides
+# (FLARE/JSON/…) that package_bundle.sh exports; standalone it defaults to the
+# umbrella sibling layout.
+if [[ -n "${PKGS:-}" && -f "${PKGS:-}/vault.mojoc" ]]; then
+    echo "    reusing shared PKGS=$PKGS" >&2
+    cp -R "$PKGS/." "$D/pkgs/"
+else
+    MOJO="$MOJO" bash "$ROOT/scripts/precompile_pkgs.sh" "$D/pkgs"
+fi
 
 echo "==> building the prebuilt millfolio binary against the .mojoc set" >&2
 "$MOJO" build "$ROOT/src/millfolio.mojo" -I "$D/pkgs" -o "$D/build/millfolio"

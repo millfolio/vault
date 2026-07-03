@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
 #
-# Build privacy_box.zip — the privacy_box source bundle the Millfolio menu app downloads,
-# then `mojo build`s on-device against a separately-fetched Mojo compiler (see
-# millfolio/app Bootstrapper). Mirrors inference-server/scripts/package_engine.sh.
+# Build privacy_box.zip — the privacy_box bundle the Millfolio app downloads. The
+# privacy_box binary is now shipped PREBUILT (built here in CI, not `mojo build`d
+# on-device — mirrors vault/core/scripts/package_millfolio.sh).
 #
-# The bundle unzips to four siblings:
+# The bundle unzips to one dir:
 #
-#   privacy_box/    src + sandbox/ (Seatbelt profiles) + scripts/ + pixi.toml +
+#   privacy_box/    build/privacy_box                     (prebuilt orchestrator binary)
+#                sandbox/ (Seatbelt profiles) + scripts/ + resources/ + web/dist +
 #                build/{libflare_{tls,zlib,brotli,fs}.so + their OpenSSL/zlib/brotli
 #                deps, all rpath-fixed to @loader_path}
-#   flare/flare/ vendored flare package (HTTP client + TLS)
-#   json/json/   vendored json package (response parsing)
-#   jinja2.mojo/src/  vendored jinja2.mojo (JSON for config)
 #
-# so the app can run:
-#   (cd privacy_box && mojo build src/privacy_box.mojo -I ../flare -I ../json -I ../jinja2.mojo/src -o build/privacy_box)
+# so the app runs build/privacy_box directly — no on-device source build, no
+# `.mojo` source shipped for the orchestrator. (The per-query codegen still shells
+# `mojo build` at runtime, but against the millfolio pkgs/*.mojoc — see the app's
+# vault include paths — not privacy_box's own source.)
+#
+# The binary is built here with the SAME `mojo build` invocation the installer
+# used, its rpath relocated to a device-relative @loader_path (the CI machine's
+# $CONDA_PREFIX/lib is absent on the user's box), and ad-hoc signed. privacy_box
+# runs WITH CONDA_PREFIX set and dlopens its flare shims from $CONDA_PREFIX/lib
+# (installPrivacyBoxShims puts them there), so the shims need no rpath; only the
+# Mojo runtime dylibs (linked via @rpath) resolve from the toolchain's mojo/lib.
 #
 # We ship the prebuilt flare FFI shims (building them needs clang + OpenSSL/zlib/
-# brotli) + their dylib deps, made relocatable via @loader_path so the binary finds
-# them at runtime with NO pixi. Run via pixi (needs CONDA_PREFIX) AFTER `pixi run
-# flare-ffi`. Usage: scripts/package_privacy_box.sh [out.zip]
+# brotli) + their dylib deps, made relocatable via @loader_path. Run via pixi
+# (needs CONDA_PREFIX) AFTER `pixi run flare-ffi`. The build needs the vault
+# pkgs/*.mojoc on its include path (in-process tag reads) — pass PKGS=<dir>, else
+# it precompiles a throwaway set. Usage: scripts/package_privacy_box.sh [out.zip]
 #
 set -euo pipefail
 
@@ -31,19 +39,47 @@ LOGGING="${LOGGING:-$ROOT/../logging.mojo}"   # `from logging import log` (orche
 OUT="${1:-$ROOT/privacy_box.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac   # zip runs from a temp dir — need absolute
 PREFIX="${CONDA_PREFIX:?run via pixi — need CONDA_PREFIX for the flare FFI shims + their deps}"
+MOJO="${MOJO:-mojo}"
 [[ -f "$PREFIX/lib/libflare_tls.so" ]] || { echo "error: flare FFI shims missing — run 'pixi run flare-ffi' first" >&2; exit 1; }
 
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 H="$STAGE/privacy_box"
 
-echo "==> staging privacy_box source" >&2
+# The precompiled vault package set (vault.mojoc etc.) — needed on the build's
+# include path for the orchestrator's in-process tag reads. Reuse a caller-built
+# set (package_bundle passes PKGS) or precompile a throwaway one for standalone runs.
+PKGS="${PKGS:-}"
+if [[ -z "$PKGS" ]]; then
+    echo "==> PKGS unset — precompiling the vault package set" >&2
+    PKGS="$STAGE/pkgs"
+    MOJO="$MOJO" bash "$ROOT/../core/scripts/precompile_pkgs.sh" "$PKGS"
+fi
+[[ -f "$PKGS/vault.mojoc" ]] || { echo "error: PKGS=$PKGS has no vault.mojoc" >&2; exit 1; }
+
+echo "==> staging privacy_box runtime files (no .mojo source)" >&2
 mkdir -p "$H/build"
-cp -R "$ROOT/src" "$H/src"
 cp -R "$ROOT/sandbox" "$H/sandbox"
 cp -R "$ROOT/scripts" "$H/scripts"
 [[ -d "$ROOT/resources" ]] && cp -R "$ROOT/resources" "$H/resources"   # runtime-loaded system prompt
 cp "$ROOT/../pixi.toml" "$H/pixi.toml"
 [[ -f "$ROOT/config.example.json" ]] && cp "$ROOT/config.example.json" "$H/"
+
+echo "==> building prebuilt privacy_box binary" >&2
+# The SAME invocation the on-device installer used (Bootstrapper.installPrivacyBoxEngine):
+# flare/json/jinja2/logging SOURCE + the vault pkgs (in-process tag reads).
+"$MOJO" build "$ROOT/src/privacy_box.mojo" \
+    -I "$FLARE" -I "$JSON" -I "$JINJA2/src" -I "$LOGGING/src" -I "$PKGS" \
+    -o "$H/build/privacy_box"
+
+# Relocate the rpath: drop the CI $CONDA_PREFIX/lib (absent on the user's box), add
+# a device-relative @loader_path to the toolchain's mojo/lib. The on-device layout
+# is fixed — the binary lands at <support>/bundle/privacy_box/privacy_box/build/
+# privacy_box and the toolchain at <support>/mojo/lib, so 4 dirs up to <support>
+# then mojo/lib. Only the Mojo runtime dylibs resolve here; the flare shims are
+# dlopen'd from $CONDA_PREFIX/lib at runtime. Ad-hoc sign (matches package_millfolio).
+install_name_tool -delete_rpath "$PREFIX/lib" "$H/build/privacy_box" 2>/dev/null || true
+install_name_tool -add_rpath "@loader_path/../../../../mojo/lib" "$H/build/privacy_box" 2>/dev/null || true
+codesign --force --sign - "$H/build/privacy_box" 2>/dev/null || true
 
 # Build + bundle the web UI (web/dist) so the privacy_box server can serve it at
 # http://localhost:10000 with no Node at runtime. Needs npm at PACKAGE time.
@@ -77,15 +113,12 @@ for f in "$H"/build/*.so "$H"/build/*.dylib; do
     codesign --force --sign - "$f" 2>/dev/null || true
 done
 
-echo "==> staging flare + json + jinja2.mojo + logging.mojo" >&2
-mkdir -p "$STAGE/flare" "$STAGE/json" "$STAGE/jinja2.mojo" "$STAGE/logging.mojo"
-cp -R "$FLARE/flare" "$STAGE/flare/flare"
-cp -R "$JSON/json" "$STAGE/json/json"
-cp -R "$JINJA2/src" "$STAGE/jinja2.mojo/src"
-cp -R "$LOGGING/src" "$STAGE/logging.mojo/src"   # orchestrator/sandbox: `from logging import log`
+# flare/json/jinja2.mojo/logging.mojo are no longer shipped: they were only on
+# the include path for the on-device build, which now happens here. The runtime
+# per-query codegen builds against the millfolio pkgs/*.mojoc, not this source.
 
 echo "==> zipping -> $OUT" >&2
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr -X "$OUT" privacy_box flare json jinja2.mojo logging.mojo )
-echo "==> done" >&2
+( cd "$STAGE" && zip -qr -X "$OUT" privacy_box )
+echo "==> done — bundle contains ONLY the prebuilt binary + runtime files + FFI shims (no .mojo)" >&2
 ls -lh "$OUT" >&2
