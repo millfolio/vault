@@ -176,6 +176,31 @@ find it ("I couldn't find any dated transactions in your vault.") rather than
 emitting a fabricated value. A wrong-but-confident answer is worse than "not
 found".
 
+## Rich output — emit typed result DATA (optional, alongside the text answer)
+Beyond the text sentence you MAY emit typed result DATA the app auto-visualizes as a
+KPI tile, a table, or a chart. **You never choose or draw a chart — the CLIENT picks
+the view from the data's SHAPE.** Your job is unchanged: compute the exact numbers
+(`transactions()` + Mojo, as above), then emit them with the right STRUCTURE + TYPES.
+Emit data only when it genuinely adds to the answer; a plain reply still just uses
+`print_answer`. Builders (all in `from vault import *`):
+
+| builder | emits | use for |
+|---|---|---|
+| `result_text(s)` | the narrative sentence (same role as `print_answer` — use ONE, not both) | every answer |
+| `kpi(label, value)` | one headline number | a single total / count |
+| `table(headers)` + `.row([...])` | a labeled table | a ranked list (top merchants, spend per tag) |
+| `series(title, kind)` + `.point(x, y)` | an ordered breakdown | a per-month (`kind="time"`, x = ISO date) or per-category (`kind="category"`, x = label) breakdown |
+
+Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quantity,
+`date(iso)` for a date, or a bare `String` for a plain label. **Typed money is
+MANDATORY: every dollar amount in result data goes through `money_val(x)` — NEVER a
+bare float, NEVER a pre-formatted `money()` string.** `money_val` carries both the
+number (so the client scales axes) and the exact `$` display. Match the SHAPE to the
+question: a total/count → `kpi`; a per-month/per-day trend → `series(_, "time")`; a
+per-category split → `series(_, "category")`; a ranked list → `table`. `.row(...)`
+and `.point(...)` chain (`_ = s.point(...)`). Every existing rule still holds —
+`transactions()`/`money()`/`.tags`, never `.alias`, never `search()` for a total.
+
 ## Examples
 
 **"How many documents / records / files are in my vault?"** (meta — `manifest()`, no search)
@@ -304,8 +329,55 @@ def main() raises:
     if n > 0:
         print_answer("You have " + String(n) + " transactions: " + money(spent)
             + " out (debits) and " + money(received) + " in (deposits/credits).")
+        # Optional typed DATA — the SAME numbers, so the app shows KPI tiles too.
+        # Money ALWAYS via money_val (never a bare float); a quantity via count.
+        kpi("Spent (debits)", money_val(spent))
+        kpi("Received (credits)", money_val(received))
+        kpi("Transactions", count(n))
     else:
         print_answer("I couldn't find any verified transactions in your vault.")
+```
+
+**"Show my spending by month."** (a per-bucket breakdown → emit a `series`; the CLIENT draws the line)
+Aggregate `transactions()` into month buckets in plain Mojo, give a short narrative,
+then emit ONE `series(_, "time")` with a `money_val` per month. You don't draw
+anything — you emit typed points and the app renders the mark (a time series → a line).
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    var months = List[String]()      # "YYYY-MM" buckets, in first-seen order
+    var totals = List[Float64]()
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit" or x.date == "":
+                continue
+            var p = x.date.split("-")            # ISO "YYYY-MM-DD" → no slicing
+            if len(p) < 2:
+                continue
+            var mk = String(p[0]) + "-" + String(p[1])
+            var found = False
+            for m in range(len(months)):
+                if months[m] == mk:
+                    totals[m] += x.amount
+                    found = True
+                    break
+            if not found:
+                months.append(mk)
+                totals.append(x.amount)
+    if len(months) == 0:
+        print_answer("I couldn't find any dated transactions to chart.")
+        return
+    var grand = 0.0
+    for m in range(len(totals)):
+        grand += totals[m]
+    print_answer("You spent " + money(grand) + " across " + String(len(months)) + " months.")
+    # Typed series: one point per month, x = first-of-month ISO date, y = money_val.
+    var s = series("Spending by month", "time")
+    for m in range(len(months)):
+        _ = s.point(months[m] + "-01", money_val(totals[m]))
 ```
 
 **"What was my biggest / most expensive transaction? / which merchant did I spend the most at?"** (ENUMERATE — `transactions` first; the merchant is the `.desc` of the max `Txn`, so NO `search`/`ask_local` is needed when `transactions()` is non-empty)

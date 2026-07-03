@@ -131,6 +131,20 @@ while IFS=$'\t' read -r q must mustnot manifest; do
       reasons="$reasons present:[$t]"
     fi
   done
+  # SPEC TYPED-MONEY guard (COMPUTE_VS_RENDER Phase 2). Applies to every case, not a
+  # golden row: money in result DATA must be TYPED via money_val(). A BARE FLOAT can't
+  # even reach a builder — Cell has no Float64 constructor, so `kpi("x", 12.5)` is a
+  # COMPILE error caught by vault_build (the type system enforces that half). The
+  # COMPILABLE violation is handing a builder value a pre-formatted `money()` STRING,
+  # which sneaks in as an untyped TEXT cell (no raw number → the client can't scale an
+  # axis or re-aggregate). Flag `money(` (NOT `money_val(` — needs '(' right after
+  # "money") appearing as a builder VALUE, i.e. after the first comma of a kpi()/
+  # .row()/.point() call on the same line — so a money() in the narrative
+  # print_answer/result_text, or in a builder's leading LABEL, never trips it.
+  if printf '%s' "$prog" | grep -qE '(kpi\(|\.row\(|\.point\()[^,]*,.*money\('; then
+    ok=0
+    reasons="$reasons spec-money:[money() string as a builder value — use money_val()]"
+  fi
   if [ "$ok" = 1 ]; then
     echo "PASS  $q"
     pass=$((pass + 1))

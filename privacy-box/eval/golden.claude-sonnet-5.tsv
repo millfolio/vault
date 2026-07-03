@@ -19,6 +19,11 @@
 #                      `files[i].id` won't compile — the phone-bill regression)
 #     search(        — wrong for exact transaction aggregates / meta questions
 #     $" +           — manual dollar concat = the raw-float formatting bug
+#     kpi( / table( / series( — RICH OUTPUT (Phase 2): emit typed result data. A
+#                      total/count → kpi; a per-month/day breakdown → series; a
+#                      ranked list → table. The CLIENT picks the chart, not the model.
+#     money_val(     — typed money in result data (raw + $ display); the spec-money
+#                      lint FAILS a bare float or a money() string handed to a builder.
 #
 # The fixture tags (eval/fixtures/data/categories.txt) are the product defaults:
 # phone, travel, restaurant, groceries, health. gym is deliberately NOT one → SUGGEST.
@@ -32,3 +37,6 @@ what is the total of my transactions	transactions(,money(	].id,search(,$" +	stat
 what was my biggest transaction	transactions(,money(	].id,search(	statements.txt
 how many documents are in my vault	manifest(	search(,ask_local	statements.txt
 when does my car insurance renew	ask_local	transactions(	statements.txt
+show my spending by month	transactions(,series(,money_val(	].id,search(	statements.txt
+give me a dashboard of my total spending and income	transactions(,kpi(,money_val(	].id,search(	statements.txt
+list my top merchants by total spending	transactions(,table(,money_val(	].id,search(	statements.txt

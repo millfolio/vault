@@ -19,6 +19,18 @@ guards that fix.
    (a compile error — the field is `.id`), `search(` for exact aggregates, or
    `"$" +`/`String(total)` money formatting. The model picking the right shape is far
    less flaky than it getting the arithmetic perfect, so this is the durable signal.
+   - **Spec typed-money guard** (COMPUTE_VS_RENDER Phase 2, applied to every case —
+     not a golden row). Money in result DATA must be TYPED through `money_val(`. A
+     *bare float* can't even reach a builder — `Cell` has no `Float64` constructor, so
+     `kpi("x", 12.5)` is a COMPILE error the build loop already rejects (the type
+     system enforces that half). The COMPILABLE violation is handing a builder VALUE a
+     pre-formatted `money()` STRING, which slips in as an untyped text cell (no raw
+     number → the client can't scale an axis or re-aggregate); the guard flags a
+     `money(` (not `money_val(`) after the first comma of a `kpi(`/`.row(`/`.point(`
+     call. A `money()` in the narrative `print_answer`/`result_text` or in a builder's
+     leading LABEL is unaffected. The Phase-2 golden rows ("show my spending by month"
+     → `series`, "…dashboard…" → `kpi`, "top merchants" → `table`) exercise the
+     builders on real generated programs so the guard runs against live output.
 2. **Answer accuracy (not yet automated).** Run the program end-to-end against a
    fixture vault with known totals and check the number. This needs an indexed
    fixture + a live engine, and is model-nondeterministic, so it belongs in a

@@ -16,6 +16,12 @@ and must match privacy_box/resources/privacy_box-system.md exactly.
 # VaultFile view + the PROGRESS/STAT sentinels).
 from vault.tools import *
 
+# The declarative RESULT SPEC builders (COMPUTE_VS_RENDER.md, Phase 1): the
+# narrative `result_text` + typed data builders `kpi`/`table`/`series` and the
+# typed-value constructors `money_val`/`count`/`date` (+ optional `hint`). A
+# program that only calls `print_answer` emits no spec and renders as today.
+from vault.result import *
+
 # Public types a generated program names through tool return values:
 #   search(...) -> List[Chunk]      (Chunk.file_alias / .text / .score)
 #   manifest()  -> List[VaultFile]  (re-exported transitively by `tools`, but

@@ -65,6 +65,16 @@ test-sha256 = { cmd = "mkdir -p build && mojo build core/test/index/sha256_test.
 # Gate: UI search distance→cosine mapping + the relevance floor (the fix that stops
 # search returning the k nearest chunks for a term absent from the vault). Pure math.
 test-relevance = { cmd = "mkdir -p build && mojo build core/test/index/relevance_test.mojo -I core/src -o build/relevance-test && ./build/relevance-test" }
+# Gate: the declarative RESULT SPEC serializer (vault.result) — the v:1 wire
+# contract the web presenter consumes: text-only parity (no `data`), the typed-
+# money invariant ({type,raw,text}, never a bare float), typed count/date, and the
+# kpi/table/series blocks + optional hint. Builds like a generated program (the
+# vault include set); pure at runtime (no FFI). Guards COMPUTE_VS_RENDER Phase 1.
+test-result = { cmd = "mkdir -p build && mojo build core/test/result_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/result-test && ./build/result-test" }
+# Gate: `_strip_progress` drops the RESULT-SPEC line (and every other sentinel line)
+# from the captured answer, leaving only the real reply text. Guards the seam that
+# keeps the serialized spec out of the message TEXT (it rides the message.result field).
+test-strip = { cmd = "mkdir -p build && mojo build privacy-box/test/strip_test.mojo -I privacy-box/src -I core/src -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/strip-test && ./build/strip-test" }
 # Gate: the deterministic tag matcher (vault.derive.categorize) — seed taxonomy
 # tags phone/travel/restaurant/groceries/health, multi-valued, and a credit-card/
 # transfer line with a digit run gets NO tag (guards the on-device classifier's
@@ -109,4 +119,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-dates", "test-amounts", "test-transactions", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }

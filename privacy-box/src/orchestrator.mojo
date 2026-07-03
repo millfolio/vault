@@ -46,6 +46,13 @@ comptime STAT_SENTINEL = "\x1f@@stat@@\x1f"
 # copy in vault tools.mojo — the server streams these as collapsible debug items.
 comptime LOCAL_SENTINEL = "\x1f@@local@@\x1f"
 comptime LOCAL_SEP = "\x1f=>\x1f"  # separates <sent> from <got> in a LOCAL line
+# The declarative RESULT SPEC line (COMPUTE_VS_RENDER.md, Phase 1). A program that
+# uses the `result_text`/`kpi`/`table`/`series` builders emits its serialized `v:1`
+# spec on a `RESULT_SENTINEL + <json>` line. MUST match `vault.result.RESULT_SENTINEL`
+# (only on the *generated* program's include path, not here). `_strip_progress` drops
+# it from the captured answer text; the WS server captures it separately (from the
+# poll stream) and attaches it to the message event.
+comptime RESULT_SENTINEL = "\x1f@@result@@\x1f"
 
 
 def _strip_progress(out_text: String) raises -> String:
@@ -62,6 +69,7 @@ def _strip_progress(out_text: String) raises -> String:
             ln.startswith(String(PROGRESS_SENTINEL))
             or ln.startswith(String(STAT_SENTINEL))
             or ln.startswith(String(LOCAL_SENTINEL))
+            or ln.startswith(String(RESULT_SENTINEL))
         ):
             continue
         if not first:
