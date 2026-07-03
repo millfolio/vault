@@ -7,13 +7,10 @@ import CryptoKit  // SHA256 verification of the downloaded source bundle
 ///
 ///   1. **Install server** — fetch the official Mojo compiler+runtime from
 ///      Modular's conda channel (so the *user* accepts Modular's license — we
-///      never redistribute it), unpack our engine bundle (the PREBUILT server +
-///      download binaries + a prebuilt libflare_tls.so; no `.mojo` source), and
-///      place the binaries. The binaries are built + rpath-relocated + ad-hoc
-///      signed in CI (engine/scripts/package_engine.sh) — no on-device `mojo
-///      build`. The toolchain still installs: the binaries link the Mojo runtime
-///      dylibs from mojo/lib, and the weights download runs the native-Mojo
-///      downloader at runtime (no huggingface_hub).
+///      never redistribute it), unpack our engine source zip (inference-server +
+///      jinja2.mojo + flare + a prebuilt libflare_tls.so), build the server with
+///      `mojo build`, then download the default model's weights with the engine's
+///      own native-Mojo downloader (no huggingface_hub).
 ///   2. **Start server** — launch the built server (via a launchd LaunchAgent, so
 ///      the CLI and the menu app share one managed process).
 ///   3. **Start opencode** — point opencode at the running server (new Terminal).
@@ -496,23 +493,28 @@ public final class Bootstrapper: ObservableObject {
 
         try await ensureBundle()
 
-        // The engine binaries are shipped PREBUILT in the bundle (built + rpath-
-        // relocated + ad-hoc signed in CI by engine/scripts/package_engine.sh —
-        // mirrors the vault `millfolio` binary). No on-device `mojo build`: just
-        // ensure they're present + executable. The toolchain still installs above
-        // because the prebuilt binaries link the Mojo runtime dylibs from mojo/lib
-        // via their relocated @loader_path rpath. The `download` binary is not run
-        // here — the app server runs it at runtime (MILLFOLIO_DOWNLOAD_BIN) to
-        // provision the embedding + chat model in the background.
-        guard fm.fileExists(atPath: serverBin.path) else {
-            throw BootstrapError.step("unpack", "runner bundle missing prebuilt inference-server/build/server")
+        // The engine ships as SOURCE and is compiled ON-DEVICE (unlike privacy_box +
+        // the app server, which now ship prebuilt): its AOT GPU/Metal kernels can't
+        // be built on the GPU-less GitHub CI runner ("Unknown GPU architecture
+        // detected"), so the compile must happen on the user's Mac. That's the same
+        // reason GPU gates only ever run in local preflight, never in CI.
+        let python = try findPython()
+
+        set("Building engine (first run, ~1 min)…")
+        try buildBinary(python: python, source: "src/server.mojo",
+                        args: ["-I", "../jinja2.mojo/src", "-I", "../flare"], out: "build/server")
+        signServerIdentity()
+
+        // Build the native-Mojo weights downloader — NOT to download here, but so the
+        // app server can run it at runtime (MILLFOLIO_DOWNLOAD_BIN) to provision the
+        // embedding + default chat model in the background and to fulfil the UI
+        // catalog's on-demand downloads. Install ships binaries + toolchain only, so
+        // it stays fast and can't fail on a multi-GB fetch.
+        if !FileManager.default.isExecutableFile(atPath: downloadBin.path) {
+            set("Building weights downloader…")
+            try buildBinary(python: python, source: "src/download.mojo",
+                            args: ["-I", "../flare"], out: "build/download")
         }
-        guard fm.fileExists(atPath: downloadBin.path) else {
-            throw BootstrapError.step("unpack", "runner bundle missing prebuilt inference-server/build/download")
-        }
-        set("Installing engine…")
-        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: serverBin.path)
-        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: downloadBin.path)
 
         ensureConfig(at: engineConfigURL, Self.engineConfigDefault)
         recordStep(".engine-step")
@@ -746,9 +748,8 @@ public final class Bootstrapper: ObservableObject {
     private func ensureBundle() async throws {
         let fm = FileManager.default
         let stampURL = bundleRoot.appendingPathComponent(".bundle-version")
-        // Gate on the prebuilt engine binary (the runner subtree no longer ships
-        // `.mojo` source — the binaries are built in CI).
-        let contentPresent = fm.fileExists(atPath: serverBin.path)
+        let contentPresent = fm.fileExists(
+            atPath: backendDir.appendingPathComponent("src/server.mojo").path)
         // The release this CLI belongs to (from Homebrew). The bundle is `releases/latest`,
         // so after `brew upgrade mill` this changes and the on-disk bundle is stale even
         // though its content is still "present" — re-fetch instead of forcing the user to
@@ -810,8 +811,8 @@ public final class Bootstrapper: ObservableObject {
 
     private func unpackZip(_ zip: URL, into dir: URL) throws {
         try run("/usr/bin/unzip", ["-o", "-q", zip.path, "-d", dir.path])
-        guard FileManager.default.fileExists(atPath: serverBin.path) else {
-            throw BootstrapError.step("unpack", "engine zip missing prebuilt inference-server/build/server")
+        guard FileManager.default.fileExists(atPath: backendDir.appendingPathComponent("src/server.mojo").path) else {
+            throw BootstrapError.step("unpack", "engine zip missing inference-server/src/server.mojo")
         }
     }
 
@@ -840,6 +841,17 @@ public final class Bootstrapper: ObservableObject {
         ] + (ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map { String($0) + "/opencode" } ?? [])
         for path in candidates where FileManager.default.isExecutableFile(atPath: path) { return path }
         throw BootstrapError.step("opencode", "opencode not found — install it (https://opencode.ai) or add it to PATH")
+    }
+
+    /// Env for invoking `mojo build`. What conda's activation script exports — the
+    /// compiler reads $MODULAR_HOME/modular.cfg for its stdlib import path + libs.
+    private func mojoEnv(python: URL) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let extraPath = "\(python.deletingLastPathComponent().path):\(mojoPrefix.appendingPathComponent("bin").path)"
+        env["PATH"] = extraPath + ":" + (env["PATH"] ?? "/usr/bin:/bin")
+        env["CONDA_PREFIX"] = mojoPrefix.path
+        env["MODULAR_HOME"] = mojoPrefix.appendingPathComponent("share/max").path
+        return env
     }
 
     /// Env for *running* the compiled Mojo binaries (download) — the opposite of
@@ -878,13 +890,31 @@ public final class Bootstrapper: ObservableObject {
         appendLog("relocated mojo prefix: \(placeholder) -> \(prefix.path)\n")
     }
 
-    // Note: the engine/privacy_box/app binaries are no longer `mojo build`d
-    // on-device — they ship prebuilt (rpath-relocated + ad-hoc signed as
-    // "millfolio" for the server) by their CI packagers. The former on-device
-    // build helpers (buildBinary, mojoEnv, signServerIdentity) were removed.
-    // The toolchain still installs: the prebuilt binaries link the Mojo runtime
-    // dylibs from mojo/lib, and privacy_box's per-query codegen still `mojo build`s
-    // the generated program at runtime (see primeVaultCompile).
+    private func buildBinary(python: URL, source: String, args: [String], out: String) throws {
+        let mojo = mojoPrefix.appendingPathComponent("bin/mojo").path
+        // flare's libflare_tls.so ships at inference-server/build/ relative to cwd.
+        try run(mojo, ["build", source] + args + ["-o", out], cwd: backendDir, env: mojoEnv(python: python))
+    }
+
+    /// `mojo build` ad-hoc "linker-signs" the server with the identifier "server".
+    /// macOS's "<name> can run in the background" notification + Login Items entry
+    /// for the LaunchAgent take that signing identifier as the name, so re-sign it
+    /// (still ad-hoc) as "millfolio". Best-effort — purely cosmetic, so a failure
+    /// never blocks the install.
+    private func signServerIdentity() {
+        do {
+            try run("/usr/bin/codesign",
+                    ["--force", "--sign", "-", "--identifier", "millfolio", serverBin.path])
+        } catch {
+            appendLog("could not re-sign server identity (cosmetic): \(humanError(error))\n")
+        }
+    }
+
+    // Note: privacy_box + the app server are no longer `mojo build`d on-device —
+    // they ship prebuilt (rpath-relocated + ad-hoc signed) by their CI packagers,
+    // so install just verifies + chmods them. Only the engine still builds
+    // on-device (its GPU/Metal kernels can't compile on the GPU-less CI runner),
+    // which is why buildBinary/mojoEnv/signServerIdentity above are retained.
 
     // ── privacy_box: install ──────────────────────────────────────────────────────
     /// Menu-app entry point: fire-and-forget, drives `phase`.

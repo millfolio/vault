@@ -40,7 +40,7 @@ export PKGS="$WORK/pkgs"
 ( cd "$VAULT" && pixi run bash core/scripts/precompile_pkgs.sh "$PKGS" )
 [[ -f "$PKGS/vault.mojoc" ]] || { echo "error: precompile_pkgs produced no vault.mojoc" >&2; exit 1; }
 
-echo "==> [1/4] engine → runner.zip (prebuilt server + download)" >&2
+echo "==> [1/4] engine → runner.zip (ships SOURCE — compiled on-device; its GPU/Metal kernels can't build on GPU-less CI)" >&2
 ( cd "$ENGINE" && pixi run flare-tls && pixi run bash scripts/package_engine.sh "$ZIPS/runner.zip" )
 
 echo "==> [2/4] privacy_box → privacy_box.zip (prebuilt privacy_box)" >&2
