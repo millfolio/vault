@@ -167,13 +167,17 @@ def retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
     for i in range(len(rows)):
         var new_tags = reg.tags_for(
             rows[i].desc
-        )  # deterministic, registry order
+        )  # deterministic keyword matches, registry order
         # Carry over any ML tag already on the row (it was a model call to compute,
         # cached here — re-backfilled only at index time for new transactions).
         for g in range(len(rows[i].tags)):
             ref t = rows[i].tags[g]
             if contains(ml, t) and not contains(new_tags, t):
                 new_tags.append(t.copy())
+        # Resolve `@tag` references over the FULL seed set (keyword matches ∪
+        # carried-over ML tags) to a monotonic fixpoint — this is where group
+        # categories (`essentials = @groceries, @utilities`) are materialised.
+        reg.derive_ref_tags(rows[i].desc, new_tags)
         if not _tags_equal(rows[i].tags, new_tags):
             var r = rows[i].copy()
             r.tags = new_tags^

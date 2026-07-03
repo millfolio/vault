@@ -35,6 +35,26 @@ def _lower(s: String) -> String:
     return out^
 
 
+def _contains(xs: List[String], s: String) -> Bool:
+    """Membership test for a tag list (local to keep this module stdlib-only).
+    """
+    for i in range(len(xs)):
+        if xs[i] == s:
+            return True
+    return False
+
+
+def _contains_ci(xs: List[String], s: String) -> Bool:
+    """Case-INSENSITIVE membership — used to resolve `@refs` so `@Groceries`
+    matches a stored tag `groceries` (symmetric with case-insensitive keyword
+    matching). Only the COMPARISON is folded; tags stay stored as-authored."""
+    var ls = _lower(s)
+    for i in range(len(xs)):
+        if _lower(xs[i]) == ls:
+            return True
+    return False
+
+
 @fieldwise_init
 struct Rule(Copyable, Movable):
     """One tag and how it's assigned. A rule is ONE of two kinds:
@@ -43,13 +63,25 @@ struct Rule(Copyable, Movable):
       ``excludes`` matched as case-insensitive SUBSTRINGS of the description; it
       matches when ANY keyword is present and NO exclude is. Keep keywords
       specific enough to avoid collisions (``"at&t"`` / ``"att*bill"``, not a
-      bare ``"att"`` that would hit ``"mattress"``).
+      bare ``"att"`` that would hit ``"mattress"``). A deterministic rule may
+      ALSO carry ``refs`` — TAG REFERENCES (`@othertag`) unioned with its
+      keywords: the tag is assigned when any keyword matches the description OR
+      any referenced tag is already present on the row. So a GROUP category
+      (``essentials = @groceries, @utilities, costco``) rolls up its members.
+      Refs are resolved by a monotonic fixpoint over a full tag set (see
+      `Registry.derive_ref_tags`), NOT by `matches`/`tags_for` (which stay
+      description-only) — the ref layer runs where the row's current tags exist
+      (materialisation / `retag`). Because tags are only ever ADDED, reference
+      cycles are harmless (they just stabilise).
     - **ML** (the fuzzy tail): ``ml_prompt`` is a yes/no classification question
       for the on-device model (e.g. ``"is this merchant a gym?"``). ``ml_prompt``
       non-empty marks the rule ML; such a rule never matches by keyword
       (``matches`` returns False) — it's backfilled separately, at index time,
       by `vault.derive.store` calling the engine, and the result is cached in the
-      ``.tags`` column (see QUERY_FLOW). Deterministic rules leave it empty.
+      ``.tags`` column (see QUERY_FLOW). Deterministic rules leave it empty. A
+      deterministic rule MAY reference a tag that happens to be ML (the group
+      re-derives after that member's backfill, since `retag` re-runs then), but a
+      single rule never mixes keywords/refs with an ml_prompt.
 
     ``description`` is an OPTIONAL one-line scope note shown to the codegen model
     alongside the tag NAME (never the keyword rules) — so it picks a tag only when
@@ -59,6 +91,7 @@ struct Rule(Copyable, Movable):
 
     var tag: String
     var keywords: List[String]
+    var refs: List[String]
     var excludes: List[String]
     var ml_prompt: String
     var description: String
@@ -106,13 +139,60 @@ struct Registry(Copyable, Movable):
                 tags.append(self.rules[i].tag.copy())
         return tags^
 
+    def derive_ref_tags(self, desc: String, mut tags: List[String]):
+        """Resolve `@tag` REFERENCES against a full tag set, in place, to a
+        monotonic fixpoint. `tags` is the SEED — the deterministic keyword
+        matches ∪ the row's already-present tags (which includes cached ML tags).
+        Iterate: for each deterministic rule not yet in the set, add its tag when
+        any of its keywords matches `desc` OR any of its `@refs` is already in the
+        set; repeat until the set stops growing. Because tags are only ever ADDED
+        (union), the set is bounded by the number of rules and always converges —
+        so reference cycles (`a = @b`, `b = @a`) are harmless (they just
+        stabilise, no topological sort / cycle rejection). The `len(rules) + 1`
+        cap is a safety backstop (each productive pass adds ≥1 tag).
+
+        Called where a full tag set exists — `retag` (materialisation). ML rules
+        are skipped (an ML tag is only ever added by a model call, then carried
+        over); a deterministic rule MAY reference an ML tag and picks it up once
+        that tag is present."""
+        var d = _lower(desc)
+        var cap = len(self.rules) + 1
+        for _pass in range(cap):
+            var added = False
+            for i in range(len(self.rules)):
+                ref r = self.rules[i]
+                if r.is_ml() or _contains(tags, r.tag):
+                    continue
+                var hit = r.matches(
+                    d
+                )  # keyword + exclude (excludes veto only kw)
+                if not hit:
+                    for k in range(len(r.refs)):
+                        # Case-insensitive so `@Groceries` resolves tag `groceries`
+                        # (symmetric with keyword matching).
+                        if _contains_ci(tags, r.refs[k]):
+                            hit = True
+                            break
+                if hit:
+                    tags.append(r.tag.copy())
+                    added = True
+            if not added:
+                break
+
 
 def _rule(
     var tag: String, var keywords: List[String], var description: String = ""
 ) -> Rule:
-    """A keyword-only deterministic rule (no excludes, no ML), with an optional
-    one-line scope description for the codegen model."""
-    return Rule(tag^, keywords^, List[String](), String(""), description^)
+    """A keyword-only deterministic rule (no refs, no excludes, no ML), with an
+    optional one-line scope description for the codegen model."""
+    return Rule(
+        tag^,
+        keywords^,
+        List[String](),
+        List[String](),
+        String(""),
+        description^,
+    )
 
 
 def _ml_rule(
@@ -120,7 +200,14 @@ def _ml_rule(
 ) -> Rule:
     """An ML rule — `tag` is assigned when the on-device model answers yes to
     `prompt` for a transaction (backfilled at index time, cached)."""
-    return Rule(tag^, List[String](), List[String](), prompt^, description^)
+    return Rule(
+        tag^,
+        List[String](),
+        List[String](),
+        List[String](),
+        prompt^,
+        description^,
+    )
 
 
 def default_registry() -> Registry:
@@ -350,20 +437,40 @@ def parse_rules(text: String) raises -> List[Rule]:
                         tag^,
                         List[String](),
                         List[String](),
+                        List[String](),
                         prompt^,
                         description^,
                     )
                 )
             continue
-        var kw_parts = String(parts[1]).split(",")
+        # Deterministic terms: a comma list where each term is either a substring
+        # keyword or a `@tag` REFERENCE (union-matched at materialisation). Only
+        # the `=` rejoin uses parts[1]; there is exactly one `=` (parts[0]=tag).
+        var terms = String(parts[1]).split(",")
         var kws = List[String]()
-        for k in range(len(kw_parts)):
-            var kw = String(kw_parts[k].strip())
-            if kw.byte_length() > 0:
-                kws.append(kw^)
-        if len(kws) > 0:
+        var refs = List[String]()
+        for k in range(len(terms)):
+            var term = String(terms[k].strip())
+            if term.byte_length() == 0:
+                continue
+            if term.startswith("@"):
+                # `@tag` reference — the referenced tag's NAME must be a valid tag
+                # name (a bad ref would never match any real tag, so drop it).
+                var ref_name = String(term.removeprefix("@").strip())
+                if _valid_tag_name(ref_name):
+                    refs.append(ref_name^)
+            else:
+                kws.append(term^)
+        if len(kws) > 0 or len(refs) > 0:
             out.append(
-                Rule(tag^, kws^, List[String](), String(""), description^)
+                Rule(
+                    tag^,
+                    kws^,
+                    refs^,
+                    List[String](),
+                    String(""),
+                    description^,
+                )
             )
     return out^
 
@@ -385,6 +492,8 @@ def merge_registry(var base: Registry, extra: List[Rule]) raises -> Registry:
             var r = base.rules[found].copy()
             for k in range(len(er.keywords)):
                 r.keywords.append(er.keywords[k].copy())
+            for k in range(len(er.refs)):
+                r.refs.append(er.refs[k].copy())
             if er.is_ml():
                 r.ml_prompt = (
                     er.ml_prompt.copy()
@@ -430,9 +539,19 @@ def rules_canon(reg: Registry) -> String:
             # all-keyword default registry's canon — and its checksum — is unchanged.
             out += ":" + r.ml_prompt
         else:
-            for k in range(len(r.keywords)):
-                if k > 0:
+            # Refs first (as `@name`) then keywords, comma-joined. A ref-less rule
+            # (all built-in defaults) serialises to exactly the keyword list, so
+            # the historical default-registry canon + checksum are unchanged.
+            var first = True
+            for k in range(len(r.refs)):
+                if not first:
                     out += ","
+                first = False
+                out += "@" + r.refs[k]
+            for k in range(len(r.keywords)):
+                if not first:
+                    out += ","
+                first = False
                 out += r.keywords[k]
         # Append the description as a tab-prefixed field ONLY when present, so a
         # description-less rule's canon (and the historical checksum) is unchanged.
@@ -476,9 +595,19 @@ def registry_to_text(reg: Registry, checksum: String) raises -> String:
             out += name + " : " + r.ml_prompt + "\n"
             continue
         out += name + " = "
-        for k in range(len(r.keywords)):
-            if k > 0:
+        # Refs first (`@name`) then keywords — a ref-less rule (all built-in
+        # defaults) writes exactly its keyword list, so the seeded file is
+        # unchanged and round-trips to the same canon.
+        var first = True
+        for k in range(len(r.refs)):
+            if not first:
                 out += ", "
+            first = False
+            out += "@" + r.refs[k]
+        for k in range(len(r.keywords)):
+            if not first:
+                out += ", "
+            first = False
             out += r.keywords[k]
         out += "\n"
     return out^
