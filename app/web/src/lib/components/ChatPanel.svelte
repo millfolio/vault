@@ -49,6 +49,7 @@
   // fetched at runtime so the dropdown stays in sync with the cache without duplicating
   // it here. The inline list is just a fallback when /questions.json can't be fetched.
   let SUGGESTED = $state<string[]>([
+    "Build me a dashboard with spending by merchant for the last 3 months",
     "how many transactions do I have",
     "what is the total of my transactions",
     "what kinds of files are in my vault",

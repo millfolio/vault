@@ -803,6 +803,12 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_model_download(req)
         if path == "/api/models/download/status":
             return _cors(ok_json(_download_status_json()))
+        # First-run onboarding: fetch + index the hosted sample vault so a new user
+        # can try millfolio without pointing it at their own folder. Poll its progress.
+        if req.method == Method.POST and path == "/api/demo/download":
+            return self.handle_demo_download()
+        if path == "/api/demo/status":
+            return _cors(ok_json(_demo_status_json()))
         # Demo bot gate: validate a Turnstile token → mint a demo-access token the
         # client echoes on WS chat frames. No-op (empty token) when Turnstile is off.
         if req.method == Method.POST and path == "/api/demo/verify":
@@ -1250,6 +1256,39 @@ struct Api(Copyable, Handler, Movable):
                 )
             )
         return _cors(ok_json('{"ok":true,"model":' + json_escape(id) + "}"))
+
+    def handle_demo_download(self) raises -> Response:
+        """POST /api/demo/download → download the hosted sample vault
+        (MILLFOLIO_DEMO_URL, default https://millfolio.app/demo-vault.zip), unpack
+        it into `<data>/demo-vault/`, and index it so its docs + transactions become
+        queryable — all as a DETACHED background job the client polls via
+        /api/demo/status. Idempotent: a finished import no-ops to done. Disabled in
+        the public replay demo (its vault is fixed + synthetic). Indexing needs the
+        engine runner (MILLFOLIO_RUN_SCRIPT), so we 400 when it isn't configured.
+        """
+        if _is_demo():
+            return _cors(
+                unauthorized('{"error":"sample data is disabled in the demo"}')
+            )
+        if getenv("MILLFOLIO_RUN_SCRIPT", "") == "":
+            return _cors(
+                bad_request(
+                    '{"error":"sample data unavailable (engine runner not'
+                    ' configured)"}'
+                )
+            )
+        # Already imported → no-op to done (don't re-download a present vault).
+        if _demo_present() and _demo_read_state() == "done":
+            return _cors(ok_json('{"ok":true,"state":"done"}'))
+        if _demo_running():
+            return _cors(
+                bad_request('{"error":"sample data import already running"}')
+            )
+        if not _start_demo_detached():
+            return _cors(
+                bad_request('{"error":"could not start sample data import"}')
+            )
+        return _cors(ok_json('{"ok":true,"state":"downloading"}'))
 
     def handle_tags_add(self, req: Request) raises -> Response:
         """POST /api/tags/add {"name":…, "prompt"?:…, "keywords"?:…} → append a new
@@ -1938,6 +1977,164 @@ def _provision_fetch(id: String) -> Bool:
     var ok = _model_downloaded(id)  # refs/main appears only on full success
     _write_small(_dl_state_path(), "done" if ok else "error")
     return ok
+
+
+# ── sample vault (first-run onboarding) ────────────────────────────────────────
+# A new user with an empty vault can "try it with sample data": we fetch a small
+# hosted zip (MILLFOLIO_DEMO_URL), unpack it into `<data>/demo-vault/`, and index
+# it via the engine run-script — the SAME `millfolio index` path `mill index` uses,
+# so the docs + transactions become queryable. Runs as a DETACHED shell job (like a
+# weight download), tracking state in a small file the status endpoint reports.
+
+
+def _demo_url() -> String:
+    """The hosted sample-vault zip. Overridable via MILLFOLIO_DEMO_URL (e.g. a local
+    file:// or a staging host); defaults to the public millfolio.app asset."""
+    var u = String(getenv("MILLFOLIO_DEMO_URL", "").strip())
+    if u != "":
+        return u
+    return String("https://millfolio.app/demo-vault.zip")
+
+
+def _demo_dir() -> String:
+    """Where the unpacked sample vault lands — `<data>/demo-vault/` (the zip unpacks
+    a `demo-vault/` folder into the data dir)."""
+    return _config_dir() + "/demo-vault"
+
+
+def _demo_zip_path() -> String:
+    return _config_dir() + "/.demo-vault.zip"
+
+
+def _demo_state_path() -> String:
+    return _config_dir() + "/.demo.state"  # downloading|indexing|done|error
+
+
+def _demo_log_path() -> String:
+    return _config_dir() + "/.demo.log"  # captured curl/unzip/index output
+
+
+def _demo_present() -> Bool:
+    """True once the sample vault has been unpacked (the folder exists)."""
+    return isdir(_demo_dir())
+
+
+def _demo_read_state() -> String:
+    try:
+        var s: String
+        with open(_demo_state_path(), "r") as f:
+            s = f.read()
+        return String(s.strip())
+    except:
+        return String("idle")
+
+
+def _demo_running() -> Bool:
+    """True while the import is genuinely in flight (downloading or indexing).
+    """
+    var st = _demo_read_state()
+    return st == "downloading" or st == "indexing"
+
+
+def _demo_progress() -> String:
+    """The last non-empty captured line — a human-readable progress detail."""
+    try:
+        var s: String
+        with open(_demo_log_path(), "r") as f:
+            s = f.read()
+        var lines = s.split("\n")
+        var last = String("")
+        for i in range(len(lines)):
+            var ln = String(lines[i].strip())
+            if ln != "":
+                last = ln^
+        return last^
+    except:
+        return String("")
+
+
+def _demo_status_json() raises -> String:
+    """{"state","detail","present"} for the sample-vault import. `state` is
+    idle|downloading|indexing|done|error; `present` is whether the folder exists.
+    """
+    var state = _demo_read_state()
+    return (
+        '{"state":'
+        + json_escape(state)
+        + ',"detail":'
+        + json_escape(_demo_progress())
+        + ',"present":'
+        + ("true" if _demo_present() else "false")
+        + "}"
+    )
+
+
+def _start_demo_detached() -> Bool:
+    """Start the DETACHED download+unpack+index of the sample vault (returns
+    immediately). A single &&-chain flips the state file through
+    downloading→indexing→done (or error on any failure); output is captured to the
+    log. `</dev/null &` so it outlives the request. False when the run-script isn't
+    configured (indexing would be impossible)."""
+    var run_script = String(getenv("MILLFOLIO_RUN_SCRIPT", "").strip())
+    if run_script == "":
+        return False
+    var data = _config_dir()
+    var dir = _demo_dir()
+    var zip = _demo_zip_path()
+    var state = _demo_state_path()
+    var log = _demo_log_path()
+    var url = _demo_url()
+    # printf/echo always succeed, so the whole pipeline can chain on && and any real
+    # failure short-circuits to the trailing `|| printf error`.
+    var cmd = (
+        "( printf downloading > '"
+        + state
+        + "' && echo 'Downloading sample data…' > '"
+        + log
+        + "'"
+        + " && curl -fsSL '"
+        + url
+        + "' -o '"
+        + zip
+        + "' 2>> '"
+        + log
+        + "'"
+        + " && printf indexing > '"
+        + state
+        + "' && echo 'Unpacking…' >> '"
+        + log
+        + "'"
+        + " && rm -rf '"
+        + dir
+        + "' && unzip -o '"
+        + zip
+        + "' -d '"
+        + data
+        + "' >> '"
+        + log
+        + "' 2>&1"
+        + " && echo 'Indexing sample data (loads the embedding model)…' >> '"
+        + log
+        + "'"
+        + " && /bin/bash '"
+        + run_script
+        + "' index '"
+        + dir
+        + "' --force >> '"
+        + log
+        + "' 2>&1"
+        + " && printf done > '"
+        + state
+        + "' || printf error > '"
+        + state
+        + "' ) </dev/null &"
+    )
+    _write_small(state, "downloading")
+    _write_small(log, "")
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    return True
 
 
 def _autofetch_default() -> Bool:

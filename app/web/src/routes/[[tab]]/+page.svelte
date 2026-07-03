@@ -192,6 +192,66 @@
   // Outside the demo: true when the on-device vault has nothing indexed yet, so we can
   // prompt the user to run `mill index` instead of dropping them into an empty chat.
   let vaultEmpty = $state(false);
+  // First-run onboarding: a new user with an empty vault can fetch + index a hosted
+  // sample vault (POST /api/demo/download, polled via /api/demo/status) so they can try
+  // millfolio without pointing it at their own folder. `demoImport` mirrors the job
+  // state (downloading|indexing|done|error); `demoReady` unlocks the suggested chips.
+  let demoImport = $state<{ state: string; detail: string } | null>(null);
+  let demoReady = $state(false);
+  let demoImportTimer: ReturnType<typeof setTimeout> | undefined;
+  // Suggested first questions — tuned for the sample data, dashboard question first.
+  const DEMO_QUESTIONS = [
+    "Build me a dashboard with spending by merchant for the last 3 months",
+    "How much did I spend on groceries?",
+    "Show my spending by month",
+    "What was my biggest transaction?",
+  ];
+  // The onboarding banner shows only in a real install's empty vault, on the Chat tab,
+  // and only until the first question lands (any chat activity → back to normal chat).
+  const showOnboarding = $derived(
+    !isDemo && vaultEmpty && view === "chat" && items.length === 0,
+  );
+  async function startDemoImport() {
+    if (demoImport && (demoImport.state === "downloading" || demoImport.state === "indexing")) return;
+    demoImport = { state: "downloading", detail: "Starting…" };
+    try {
+      const r = await fetch("/api/demo/download", { method: "POST" });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        demoImport = { state: "error", detail: e.error ?? "could not start" };
+        return;
+      }
+      const d = await r.json().catch(() => ({}));
+      if (d.state === "done") { onDemoDone(); return; }
+      pollDemoImport();
+    } catch {
+      demoImport = { state: "error", detail: "could not start" };
+    }
+  }
+  function pollDemoImport() {
+    clearTimeout(demoImportTimer);
+    demoImportTimer = setTimeout(async () => {
+      try {
+        const d = await fetch("/api/demo/status").then((r) => (r.ok ? r.json() : null));
+        if (d) {
+          demoImport = { state: d.state, detail: d.detail ?? "" };
+          if (d.state === "done") { onDemoDone(); return; }
+          if (d.state === "error") return; // leave the error visible with a Retry
+        }
+      } catch {}
+      pollDemoImport();
+    }, 1500);
+  }
+  function onDemoDone() {
+    demoImport = { state: "done", detail: "" };
+    demoReady = true; // the sample docs are indexed → the suggested chips go live
+  }
+  // Ask one of the suggested questions. send() pushes a chat item, which flips
+  // showOnboarding off (items.length > 0), returning to the normal chat view.
+  function askSuggested(q: string) {
+    vaultEmpty = false;
+    send(q);
+  }
   onMount(() => {
     if (isDemo) {
       try {
@@ -206,6 +266,20 @@
       fetch("/api/vault", { headers: { accept: "application/json" } })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => { if (d) vaultEmpty = !d.indexed || (d.indexedFileCount ?? 0) === 0; })
+        .catch(() => {});
+      // Resume a sample-data import that's still running (or already finished) — e.g.
+      // the page was reloaded mid-import — so the onboarding banner reflects it.
+      fetch("/api/demo/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d) return;
+          if (d.state === "downloading" || d.state === "indexing") {
+            demoImport = { state: d.state, detail: d.detail ?? "" };
+            pollDemoImport();
+          } else if (d.state === "done" && d.present) {
+            onDemoDone();
+          }
+        })
         .catch(() => {});
     }
     // Ask the server which model it's serving (best-effort; mock has no backend).
@@ -597,14 +671,44 @@
     </nav>
     <a class="community" href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener" title="Join the discussion">Community ↗</a>
   </header>
-  {#if vaultEmpty && view === "chat"}
-    <div class="notice" role="status">
-      <strong>No documents in your vault yet.</strong>
-      <span>
-        Index a folder with <code>mill index &lt;dir&gt;</code>, then come back and ask away.
-      </span>
-      <a href="https://millfolio.app/get-started#index" target="_blank" rel="noopener">Getting started →</a>
-    </div>
+  {#if showOnboarding}
+    <section class="onboarding" aria-labelledby="onb-title">
+      <h2 id="onb-title">Welcome to {brandName}</h2>
+      <p class="onb-lead">
+        Your vault is empty. Point {brandName} at a folder of your own statements with
+        <code>mill index &lt;dir&gt;</code>, or try it right now with sample data.
+      </p>
+      <div class="onb-actions">
+        {#if !demoImport}
+          <button class="onb-primary" onclick={startDemoImport}>Download demo data</button>
+          <span class="onb-hint">A few sample bank &amp; card statements (~444 transactions).</span>
+        {:else if demoImport.state === "downloading" || demoImport.state === "indexing"}
+          <span class="onb-progress" role="status" aria-live="polite">
+            <span class="onb-spinner" aria-hidden="true"></span>
+            {demoImport.state === "downloading" ? "Downloading sample data…" : "Indexing sample data (first run loads the embedding model)…"}
+          </span>
+        {:else if demoImport.state === "error"}
+          <span class="onb-error" role="alert">Couldn’t load sample data: {demoImport.detail}</span>
+          <button class="onb-primary" onclick={startDemoImport}>Retry</button>
+        {:else if demoImport.state === "done"}
+          <span class="onb-ready">✓ Sample data ready — ask away.</span>
+        {/if}
+      </div>
+      <div class="onb-suggest">
+        <span class="onb-suggest-label">Try asking:</span>
+        <div class="onb-chips">
+          {#each DEMO_QUESTIONS as q}
+            <button
+              class="onb-chip"
+              disabled={!demoReady}
+              title={demoReady ? "Ask this question" : "Load some data first"}
+              onclick={() => askSuggested(q)}
+            >{q}</button>
+          {/each}
+        </div>
+      </div>
+      <a class="onb-more" href="https://millfolio.app/get-started#index" target="_blank" rel="noopener">Getting started →</a>
+    </section>
   {/if}
   <div class="single">
     {#if view === "chat"}
@@ -770,36 +874,126 @@
     min-height: 0;
     display: grid;
   }
-  .notice {
+  /* ── first-run onboarding (empty-vault welcome + sample-data offer) ───────── */
+  .onboarding {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px 10px;
-    padding: 10px 16px;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--surface-2);
     color: var(--text-dim);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
   }
-  .notice strong {
+  .onboarding h2 {
+    margin: 0;
     color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
   }
-  .notice code {
+  .onb-lead {
+    margin: 0;
+    max-width: 60ch;
+  }
+  .onboarding code {
     padding: 1px 5px;
     border-radius: 4px;
     background: var(--surface);
     border: 1px solid var(--border);
     font-size: 12px;
   }
-  .notice a {
-    margin-left: auto;
+  .onb-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+  }
+  .onb-primary {
+    padding: 8px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .onb-primary:hover {
+    filter: brightness(1.06);
+  }
+  .onb-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .onb-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+  }
+  .onb-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: onb-spin 0.8s linear infinite;
+  }
+  @keyframes onb-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .onb-error {
+    color: var(--danger, #d24545);
+  }
+  .onb-ready {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .onb-suggest {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .onb-suggest-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+  }
+  .onb-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .onb-chip {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .onb-chip:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .onb-chip:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .onb-more {
+    align-self: flex-start;
     color: var(--accent);
     font-weight: 600;
     text-decoration: none;
-    white-space: nowrap;
+    font-size: 13px;
   }
-  .notice a:hover {
+  .onb-more:hover {
     text-decoration: underline;
   }
   .intro-backdrop {
