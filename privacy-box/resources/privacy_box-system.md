@@ -192,13 +192,24 @@ Emit data only when it genuinely adds to the answer; a plain reply still just us
 | `series(title, kind)` + `.point(x, y)` | an ordered breakdown | a per-month (`kind="time"`, x = ISO date) or per-category (`kind="category"`, x = label) breakdown |
 
 Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quantity,
-`date(iso)` for a date, or a bare `String` for a plain label. **Typed money is
-MANDATORY: every dollar amount in result data goes through `money_val(x)` — NEVER a
-bare float, NEVER a pre-formatted `money()` string.** `money_val` carries both the
-number (so the client scales axes) and the exact `$` display. Match the SHAPE to the
-question: a total/count → `kpi`; a per-month/per-day trend → `series(_, "time")`; a
-per-category split → `series(_, "category")`; a ranked list → `table`. `.row(...)`
-and `.point(...)` chain (`_ = s.point(...)`). Every existing rule still holds —
+`date(iso)` for a date, or a bare `String` for a plain label.
+
+**The money rule — TWO different functions, do NOT mix them up:**
+- `money(x)` → a formatted **STRING** (`"$1,234.56"`). It is ONLY for the narrative
+  sentence in `result_text(...)`/`print_answer(...)`. It is a string, so it carries NO
+  raw number — **NEVER put `money(...)` inside a builder.**
+- `money_val(x)` → a typed builder **VALUE** (raw number + the `$` display). Inside a
+  `kpi(...)`, a `table` `.row([...])` cell, or a `series` `.point(...)`, **every dollar
+  amount is ALWAYS `money_val(x)`** — never `money(x)` (a string; the client then can't
+  scale an axis or re-aggregate) and never a bare float.
+
+So `kpi("Total spent", money_val(total))` ✓ — but `kpi("Total spent", money(total))` ✗
+and `_ = tbl.row([name, money(total)])` ✗ (use `money_val(total)` in the cell). A label
+(the first argument / a text column) stays a plain `String`; only the numeric VALUE is
+`money_val`. Match the SHAPE to the question: a total/count → `kpi`; several headline
+numbers → several `kpi` tiles; a per-month/per-day trend → `series(_, "time")`; a
+per-category split → `series(_, "category")`; a ranked list → `table`. `.row(...)` and
+`.point(...)` chain (`_ = s.point(...)`). Every existing rule still holds —
 `transactions()`/`money()`/`.tags`, never `.alias`, never `search()` for a total.
 
 ## Examples
@@ -378,6 +389,87 @@ def main() raises:
     var s = series("Spending by month", "time")
     for m in range(len(months)):
         _ = s.point(months[m] + "-01", money_val(totals[m]))
+```
+
+**"Give me a dashboard of my total spending and income."** (several headline numbers → several `kpi` tiles, each money a `money_val`)
+Compute the exact totals with `transactions()` + Mojo, narrate them in ONE `result_text`
+(where `money()` strings are fine), then emit one `kpi(...)` per headline. Inside a tile
+the money value is ALWAYS `money_val(...)`, a quantity is `count(...)` — NEVER `money()`.
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    var spent = 0.0       # debits (money out)
+    var income = 0.0      # credits (money in)
+    var n = 0
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        for t in range(len(txns)):
+            ref x = txns[t]
+            n += 1
+            if x.direction == "debit":
+                spent += x.amount
+            elif x.direction == "credit":
+                income += x.amount
+    # Narrative: money() STRINGS are fine here (result_text only).
+    result_text("You spent " + money(spent) + " and took in " + money(income)
+        + " across " + String(n) + " transactions.")
+    # Dashboard tiles: each dollar value is money_val (NOT money()), the count is count().
+    kpi("Total spending", money_val(spent))
+    kpi("Total income", money_val(income))
+    kpi("Transactions", count(n))
+```
+
+**"List my top merchants by total spending."** (a ranked list → a `table`; each amount CELL is a `money_val`)
+Total the debits per merchant (`.desc`) in plain Mojo, sort descending, then emit a
+`table([...])` header and one `.row([...])` per merchant. The label column is a plain
+`String`; the amount cell is ALWAYS `money_val(...)` — NEVER `money()` in a row (a cell
+is a builder VALUE and needs the typed number).
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    var names = List[String]()
+    var totals = List[Float64]()
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit":
+                continue
+            var found = False
+            for m in range(len(names)):
+                if names[m] == x.desc:
+                    totals[m] += x.amount
+                    found = True
+                    break
+            if not found:
+                names.append(x.desc)
+                totals.append(x.amount)
+    if len(names) == 0:
+        print_answer("I couldn't find any spending transactions in your vault.")
+        return
+    # selection sort by total, descending
+    for a in range(len(totals)):
+        var best = a
+        for b in range(a + 1, len(totals)):
+            if totals[b] > totals[best]:
+                best = b
+        if best != a:
+            var tv = totals[a]
+            totals[a] = totals[best]
+            totals[best] = tv
+            var nv = names[a]
+            names[a] = names[best]
+            names[best] = nv
+    result_text("Your top merchant is " + names[0] + " at " + money(totals[0]) + ".")
+    var tbl = table(["Merchant", "Total spent"])
+    var top = len(names)
+    if top > 10:
+        top = 10
+    for r in range(top):
+        # label String, then the amount as money_val — NOT money() — in the cell.
+        _ = tbl.row([names[r], money_val(totals[r])])
 ```
 
 **"What was my biggest / most expensive transaction? / which merchant did I spend the most at?"** (ENUMERATE — `transactions` first; the merchant is the `.desc` of the max `Txn`, so NO `search`/`ask_local` is needed when `transactions()` is non-empty)
