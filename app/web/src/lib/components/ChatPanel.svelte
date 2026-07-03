@@ -413,8 +413,8 @@
           <span class="who">{it.kind === "user" ? "you" : "millfolio"}</span>
           <p>{it.text}</p>
           {#if it.kind === "assistant" && it.source && it.sourceAlias}
-            <p class="source">
-              📄 Source:
+            <p class="source" title="the top document behind this answer — your vault may hold more">
+              📄 1st source:
               <a href="/api/doc?alias={it.sourceAlias}" target="_blank" rel="noopener">{it.source}</a>
             </p>
           {/if}
