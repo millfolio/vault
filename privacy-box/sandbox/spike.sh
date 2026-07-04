@@ -11,6 +11,63 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 TEMPLATE="$HERE/privacy_box.sb.template"
+
+# ── --compile: prove the COMPILE profile (compile.sb.template) still builds a
+# real `from vault import *` program WITHOUT granting write to the toolchain
+# prefix (the Issue-#1 hardening). Unlike the stock-tool run-profile checks below,
+# this needs the pixi env (CONDA_PREFIX + the mojo toolchain) and the precompiled
+# `pkgs/` set, so run it via `pixi run bash sandbox/spike.sh --compile` from the
+# vault root. It renders compile.sb.template exactly as src/sandbox.mojo does and
+# runs a COLD sandboxed build, asserting: the profile grants NO prefix write, the
+# build succeeds, the binary is produced, and the Mojo cache still persists.
+if [ "${1:-}" = "--compile" ]; then
+  CTMPL="$HERE/compile.sb.template"
+  : "${CONDA_PREFIX:?run under pixi: pixi run bash sandbox/spike.sh --compile}"
+  PKGS="${PKGS:-$HERE/../../build/pkgs}"
+  [ -f "$PKGS/vault.mojoc" ] || { echo "no pkgs at $PKGS (run: pixi run precompile)"; exit 1; }
+  CROOT="${TMPDIR:-/tmp}/privacy_box_compile_spike.$$"
+  mkdir -p "$CROOT/scratch"
+  CSCRATCH="$(cd "$CROOT/scratch" && pwd -P)"
+  cat > "$CSCRATCH/gen.mojo" <<'PROG'
+from vault import transactions, money
+def main() raises:
+    var txns = transactions("all")
+    var total = 0.0
+    for i in range(len(txns)):
+        total += txns[i].amount
+    print("count:", len(txns), "total:", money(total))
+PROG
+  CHOME="$(cd "$HOME" && pwd -P)"
+  CTMP="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+  CRUNTIME="$(cd "$CONDA_PREFIX" && pwd -P)"
+  CMH="$(cd "${MODULAR_HOME:-$CRUNTIME/share/max}" && pwd -P)"
+  CCACHE="$CMH/cache/.mojo_cache"
+  CPROFILE="$CROOT/compile.sb"
+  sed -e "s#@SCRATCH_DIR@#$CSCRATCH#g" -e "s#@HOME@#$CHOME#g" \
+      -e "s#@TMPDIR@#$CTMP#g" -e "s#@RUNTIME_PREFIX@#$CRUNTIME#g" \
+      -e "s#@MOJO_CACHE_DIR@#$CCACHE#g" "$CTMPL" > "$CPROFILE"
+  cfails=0
+  # SECURITY assertion: no write grant for the bare toolchain prefix.
+  if grep -Eq "allow file-write\* \(subpath \"$CRUNTIME\"\)" "$CPROFILE"; then
+    echo "  [FAIL] compile profile grants write to the toolchain prefix"; cfails=1
+  else echo "  [PASS] compile profile does NOT grant prefix write"; fi
+  rm -rf "$CCACHE"   # force a COLD build (the stringent case for prefix writes)
+  echo "  building (cold, sandboxed) …"
+  if sandbox-exec -f "$CPROFILE" "$CONDA_PREFIX/bin/mojo" build \
+        "$CSCRATCH/gen.mojo" -I "$PKGS" -o "$CSCRATCH/gen" >"$CROOT/b.out" 2>&1 \
+     && [ -x "$CSCRATCH/gen" ]; then
+    echo "  [PASS] cold sandboxed build succeeded + binary produced"
+  else
+    echo "  [FAIL] cold sandboxed build FAILED"; tail -15 "$CROOT/b.out"; cfails=1
+  fi
+  if [ -n "$(find "$CCACHE" -type f 2>/dev/null | head -1)" ]; then
+    echo "  [PASS] Mojo build cache persisted (warm reuse intact)"
+  else echo "  [FAIL] build cache empty — @MOJO_CACHE_DIR@ write denied"; cfails=1; fi
+  rm -rf "$CROOT"
+  if [ "$cfails" -eq 0 ]; then echo "COMPILE SPIKE PASSED"; exit 0
+  else echo "COMPILE SPIKE FAILED"; exit 1; fi
+fi
+
 ROOT="${TMPDIR:-/tmp}/privacy_box_spike.$$"
 
 # Demo layout: in-scope private data, out-of-scope secrets, scratch.

@@ -60,13 +60,14 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     return p
 
 
-def _environ() -> (
+def _raw_environ() -> (
     UnsafePointer[UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
 ):
-    """The process `environ` (`char**`). On macOS the global isn't directly
-    linkable, so go through `_NSGetEnviron()` which returns `char***`; deref
-    once. Passing this (NOT NULL) is MANDATORY: compile() relies on the child
-    inheriting PATH / CONDA_PREFIX to find its toolchain + dylibs."""
+    """The live process `environ` (`char**`). On macOS the global isn't directly
+    linkable, so go through `_NSGetEnviron()` which returns `char***`; deref once.
+    Do NOT pass this straight to posix_spawn — the child is UNTRUSTED (it runs
+    model-generated code), so its env is built by the `_child_envp` allowlist
+    below, never the raw parent environ."""
     var pp = external_call[
         "_NSGetEnviron",
         UnsafePointer[
@@ -77,6 +78,105 @@ def _environ() -> (
         ],
     ]()
     return pp[]
+
+
+def _cstr_to_string(p: UnsafePointer[c_char, MutUntrackedOrigin]) -> String:
+    """Materialize a NUL-terminated C string into an owned Mojo `String`."""
+    return String(
+        StringSlice(
+            unsafe_from_utf8=CStringSlice(unsafe_from_ptr=p.bitcast[Int8]())
+        )
+    )
+
+
+def _env_forward(key: String) -> Bool:
+    """Allowlist predicate for the child env. The compile child (`mojo build`) and
+    the run child (the generated `from vault import *` binary) inherit ONLY the
+    vars named here — everything else is DROPPED. This is a SECURITY control: the
+    generated binary is untrusted and talks only to the local engine on
+    127.0.0.1, so it has no use for the frontier key (ANTHROPIC_API_KEY /
+    ANTHROPIC_*) or any other host secret (HF_TOKEN, cloud creds, …). The run
+    sandbox denies network so the key can't egress, but withholding it from the
+    child env stops it being printed to the UI or written to scratch at all.
+
+    What the children genuinely consume (verified empirically — a real
+    `from vault import *` program compiles AND runs under exactly this reduced
+    env, see sandbox/spike.sh):
+      compile: PATH, HOME, CONDA_PREFIX, MODULAR_HOME, TMPDIR (toolchain + the
+               persistent Mojo build cache under $MODULAR_HOME);
+      run:     PATH, HOME, CONDA_PREFIX (dlopen rpath → $CONDA_PREFIX/lib FFI
+               shims), TMPDIR, + the app's MILLFOLIO_* config (data dir, local
+               engine URLs, model, MILLFOLIO_NOW test clock).
+    The remaining entries are non-secret system/build vars forwarded only to
+    avoid breakage (locale, SDK/TLS roots the linker may want) — never secrets.
+    """
+    # Exact names the toolchain + libc + the run binary need.
+    var exact = [
+        String("PATH"),
+        String("HOME"),
+        String("CONDA_PREFIX"),
+        String("CONDA_DEFAULT_ENV"),
+        String("CONDA_SHLVL"),
+        String("MODULAR_HOME"),
+        String("TMPDIR"),
+        String("SDKROOT"),  # macOS SDK for the link step, if the parent set it
+        String("SSL_CERT_FILE"),  # TLS cacert bundle location, if set
+        String("SSL_CERT_DIR"),
+        String("LANG"),
+        String("USER"),
+        String("LOGNAME"),
+    ]
+    for i in range(len(exact)):
+        if key == exact[i]:
+            return True
+    # Prefixes: MILLFOLIO_* is the app's own (non-secret) runtime config the run
+    # binary reads; DYLD_* comes from the trusted parent and is needed if a
+    # deployment points the dynamic linker at $CONDA_PREFIX/lib; LC_* is locale.
+    var prefixes = [String("MILLFOLIO_"), String("DYLD_"), String("LC_")]
+    for i in range(len(prefixes)):
+        if key.startswith(prefixes[i]):
+            return True
+    return False
+
+
+def _child_envp() -> (
+    UnsafePointer[UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
+):
+    """Build the minimal, allowlisted `char**` envp handed to the sandboxed
+    compile + run children. Iterates the live parent environ and copies ONLY the
+    entries `_env_forward` approves — so ANTHROPIC_API_KEY and every other host
+    secret never reach the untrusted child. Returns a malloc'd, NULL-terminated
+    array of malloc'd C strings; the caller owns it and MUST `_free_envp` it after
+    the spawn (the child holds its own copy once posix_spawn returns)."""
+    var env = _raw_environ()
+    var kept = List[String]()
+    var i = 0
+    while Int(env[i]) != 0:
+        var entry = _cstr_to_string(env[i])
+        var parts = entry.split("=")
+        if _env_forward(String(parts[0])):
+            kept.append(entry)
+        i += 1
+    var n = len(kept)
+    var out = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
+    for j in range(n):
+        (out + j).init_pointee_copy(_cstr(kept[j]))
+    (out + n).init_pointee_copy(_NULL_CHARP)
+    return out
+
+
+def _free_envp(
+    envp: UnsafePointer[
+        UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin
+    ]
+):
+    """Free a `_child_envp` array: each owned C string, then the array itself.
+    """
+    var i = 0
+    while Int(envp[i]) != 0:
+        envp[i].free()
+        i += 1
+    envp.free()
 
 
 def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
@@ -125,19 +225,23 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
             fa.bitcast[NoneType](), c_int(1), c_int(2)
         )
 
+    # Allowlisted child env (NOT the raw parent environ — no ANTHROPIC_API_KEY /
+    # secrets reach the untrusted child). Built up front so teardown always frees it.
+    var cenvp = _child_envp()
+
     var exit_code = -1
     if rc == 0:
         var pid_slot = stack_allocation[1, c_int]()
         pid_slot[0] = 0
         # argv[0] is absolute -> plain posix_spawn (no PATH search). envp is the
-        # inherited process environ (compile() needs PATH/CONDA_PREFIX).
+        # allowlisted child env (compile() needs PATH/CONDA_PREFIX/MODULAR_HOME).
         var src = external_call["posix_spawn", c_int](
             pid_slot.bitcast[NoneType](),
             cargv[0],  # path == argv[0] (absolute)
             fa.bitcast[NoneType](),
             _NULL_VOIDP,  # attrp
             cargv,
-            _environ(),
+            cenvp,
         )
         if src == 0:
             var status_slot = stack_allocation[1, c_int]()
@@ -150,6 +254,7 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
             rc = src
 
     # Tear down C resources unconditionally.
+    _free_envp(cenvp)
     _ = external_call["posix_spawn_file_actions_destroy", c_int](
         fa.bitcast[NoneType]()
     )
@@ -167,7 +272,7 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
     """Like `_spawn_capture` but NON-BLOCKING: posix_spawn the child with stdout +
     stderr redirected to `out_path` and return its PID WITHOUT waitpid'ing. The
     caller drives the run by polling the capture file and reaping with
-    `_reap_nohang(pid)`. The spawn setup (cargv / _cstr / file_actions / _environ)
+    `_reap_nohang(pid)`. The spawn setup (cargv / _cstr / file_actions / _child_envp)
     is IDENTICAL to `_spawn_capture` — only the wait is dropped.
 
     All C resources (argv array + strings, the file_actions) are freed before
@@ -205,6 +310,10 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
             fa.bitcast[NoneType](), c_int(1), c_int(2)
         )
 
+    # Allowlisted child env (NOT the raw parent environ — no ANTHROPIC_API_KEY /
+    # secrets reach the untrusted child). Built up front so teardown always frees it.
+    var cenvp = _child_envp()
+
     var pid: c_int = -1
     if rc == 0:
         var pid_slot = stack_allocation[1, c_int]()
@@ -215,7 +324,7 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
             fa.bitcast[NoneType](),
             _NULL_VOIDP,  # attrp
             cargv,
-            _environ(),
+            cenvp,
         )
         if src == 0:
             pid = pid_slot[
@@ -225,6 +334,7 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
             rc = src
 
     # Tear down C resources — the child holds its own copy of argv/env now.
+    _free_envp(cenvp)
     _ = external_call["posix_spawn_file_actions_destroy", c_int](
         fa.bitcast[NoneType]()
     )
@@ -363,6 +473,10 @@ def _strip_compiler_noise(s: String) raises -> String:
         if (
             ln.find("crashpad") != -1
             or ln.find("Crashpad") != -1
+            or ln.find("crashdb") != -1  # crash-reporter settings.dat write,
+            # DENIED now that compile writes are scoped off the toolchain prefix
+            # (harmless; its "Operation not permitted" line carries a per-run
+            # PID/timestamp that would otherwise pollute the fix + replay key)
             or ln.find("child_port_handshake") != -1
             or ln.find("ReadExactly") != -1
             or ln.find("Crash reporting") != -1

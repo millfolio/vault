@@ -3,15 +3,17 @@
 ;; The generated program is *compiled* here, and Mojo `comptime` executes at
 ;; BUILD time — OUTSIDE the run sandbox. This profile contains that: the primary
 ;; control is NO NETWORK (a hostile `comptime` cannot phone home during the
-;; build), plus writes scoped to the toolchain caches + scratch + temp (no
-;; tampering with the user's files). Reads stay broad — the Mojo compiler needs
+;; build), plus writes scoped to the Mojo build CACHE + scratch + temp — NOT the
+;; executable toolchain prefix (see the writes section: a prefix write would be a
+;; dylib-plant vector the run step could load). Reads stay broad — the Mojo compiler needs
 ;; to read its toolchain, stdlib, and caches, so read-scoping is deferred (the
 ;; run profile, privacy_box.sb.template, IS read-scoped).
 ;;
 ;; Placeholders are substituted with CANONICAL (realpath) paths by src/sandbox.mojo
 ;; — Seatbelt matches the real path, so each must already be resolved:
 ;;   @SCRATCH_DIR@   the build's source + output binary live here
-;;   @RUNTIME_PREFIX@ the pixi env (CONDA_PREFIX) — Mojo toolchain + caches
+;;   @RUNTIME_PREFIX@ the pixi env (CONDA_PREFIX) — Mojo toolchain. Read via the
+;;                    broad file-read* allow above; NOT granted write (see below).
 ;;   @MOJO_CACHE_DIR@ the Mojo build cache ($MODULAR_HOME/cache/.mojo_cache) —
 ;;                    granted EXPLICITLY so the cache PERSISTS across queries even
 ;;                    if MODULAR_HOME resolves outside @RUNTIME_PREFIX@ (warm reuse
@@ -32,13 +34,22 @@
 (deny network*)
 
 ;; ── writes: deny the user's home, re-allow only what the compiler needs ──────
+;; SECURITY: we do NOT grant write to @RUNTIME_PREFIX@ (the whole toolchain/conda
+;; prefix). The RUN profile (privacy_box{,-vault}.sb.template) maps that same prefix
+;; file-read*+file-map-executable, so a build-time `comptime` block writing a dylib
+;; under $CONDA_PREFIX/lib could be dlopen'd by a LATER run — cross-run persistence
+;; / capability escalation. The compiler's ONLY genuine write under the prefix is
+;; its build CACHE, granted narrowly by @MOJO_CACHE_DIR@ below (verified: with just
+;; that grant a real `from vault import *` program compiles cold AND warm, and the
+;; cache still persists — see sandbox/spike.sh --compile). The crash-reporter's
+;; $MODULAR_HOME/crashdb/settings.dat write is now denied; that's harmless (crashpad
+;; already can't grab a mach port under this sandbox), and its stderr line is
+;; stripped by _strip_compiler_noise ("crashdb").
 (deny file-write* (subpath "@HOME@"))
 (allow file-write* (subpath "@SCRATCH_DIR@"))
-(allow file-write* (subpath "@RUNTIME_PREFIX@"))
 ;; The Mojo build cache, granted by its OWN canonical path — the persistence of
 ;; THIS dir across queries is what keeps the per-query compile fast (warm reuse).
-;; Redundant with @RUNTIME_PREFIX@ when the cache lives under it, but a safety net
-;; if MODULAR_HOME resolves elsewhere.
+;; This is the SOLE write allowed under the toolchain prefix (see the note above).
 (allow file-write* (subpath "@MOJO_CACHE_DIR@"))
 (allow file-write* (subpath "@TMPDIR@"))
 (allow file-write* (subpath "@HOME@/.modular"))
