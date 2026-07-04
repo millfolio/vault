@@ -73,6 +73,10 @@
   let draft = $state("");
   let picked = $state("");
   let stream = $state<HTMLDivElement>();
+  // Demo: the suggested-question chips are shown up front, then collapse once the
+  // visitor picks one (they eat vertical space, esp. on a phone) — a small button
+  // brings them back. Start open only when there's no conversation yet.
+  let chipsOpen = $state(true);
 
   // Question history — shown in a left panel when the question box is focused.
   // EVERY ask is kept forever. The durable copy lives in the BACKEND store
@@ -387,6 +391,7 @@
   function askDemo(q: string) {
     if (busy) return;
     onsend(q);
+    chipsOpen = false; // collapse the list after a choice; the toggle brings it back
   }
 </script>
 
@@ -570,12 +575,22 @@
 
   {#if demo}
     <div class="demo-picker">
-      <p class="demo-hint">Try one of these questions:</p>
-      <div class="demo-chips">
-        {#each SUGGESTED as q}
-          <button type="button" class="demo-chip" disabled={busy} onclick={() => askDemo(q)}>{q}</button>
-        {/each}
-      </div>
+      <button
+        type="button"
+        class="demo-toggle"
+        aria-expanded={chipsOpen}
+        onclick={() => (chipsOpen = !chipsOpen)}
+      >
+        <span class="caret" class:open={chipsOpen}>▸</span>
+        {chipsOpen ? "Suggested questions" : "Try a suggested question"}
+      </button>
+      {#if chipsOpen}
+        <div class="demo-chips">
+          {#each SUGGESTED as q}
+            <button type="button" class="demo-chip" disabled={busy} onclick={() => askDemo(q)}>{q}</button>
+          {/each}
+        </div>
+      {/if}
     </div>
   {:else}
     <form onsubmit={submit}>
@@ -1175,15 +1190,34 @@
     max-width: 760px;
     margin: 0 auto;
   }
-  .demo-hint {
-    margin: 0 0 8px;
-    font-size: 0.85rem;
+  .demo-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px;
+    background: none;
+    border: none;
     color: var(--muted, #8a8f98);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .demo-toggle:hover {
+    color: var(--text);
+  }
+  .demo-toggle .caret {
+    display: inline-block;
+    transition: transform 0.12s ease;
+    font-size: 0.7rem;
+  }
+  .demo-toggle .caret.open {
+    transform: rotate(90deg);
   }
   .demo-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    margin-top: 8px;
   }
   .demo-chip {
     /* full question text wraps inside the chip; never overflow the viewport */
