@@ -18,3 +18,5 @@ travel (flights, hotels, car rental, trains - trips away from home) = delta air,
 restaurant (restaurants, cafes, coffee, and food delivery - dining out) = restaurant, starbucks, chipotle, doordash, uber eats, pizza, cafe
 groceries (supermarkets & grocery stores - food shopping, not dining out) = grocery, whole foods, trader joe, safeway, kroger, costco
 health (pharmacies, doctors, hospitals, dental - medical care; NOT gyms or fitness) = pharmacy, cvs, walgreens, clinic, hospital, dental
+transfers (account transfers - ACH, Zelle, Venmo, wires: money moved between accounts or people, NOT a purchase) = ach, transfer, zelle, venmo, wire
+rewards (credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending) = daily cash, cash back, cashback, reward

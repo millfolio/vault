@@ -55,14 +55,41 @@ def main() raises:
         == 0,
         "Chase Crd Epay with a digit run → NO tag (the bug the ML model hit)",
     )
+    # A card transfer is NOT a phone bill — but it IS legitimately a `transfers`
+    # (the "transfer" keyword). The guarantee is it never mislabels as `phone`.
+    var xfer = reg.tags_for("Online Transfer to VISA Signature Card Xxxx5744")
     expect(
-        len(reg.tags_for("Online Transfer to VISA Signature Card Xxxx5744"))
-        == 0,
-        "card transfer → NO tag",
+        _has(xfer, "transfers") and not _has(xfer, "phone"),
+        "card transfer → transfers, never phone",
     )
     expect(
         len(reg.tags_for("Paypal Inst Xfer 190109 Github Inc Marius")) == 0,
-        "PayPal/GitHub → NO tag",
+        (
+            "PayPal/GitHub → NO tag (PayPal is often a real purchase — not a"
+            " transfer)"
+        ),
+    )
+
+    # ── new default tags: transfers (account activity) + rewards (cash back) ─────
+    expect(
+        _has(reg.tags_for("ACH DEPOSIT PAYROLL"), "transfers"),
+        "ACH deposit → transfers",
+    )
+    expect(
+        _has(reg.tags_for("Zelle payment to Alex"), "transfers")
+        and _has(reg.tags_for("VENMO CASHOUT"), "transfers")
+        and _has(reg.tags_for("WIRE TRANSFER OUT"), "transfers"),
+        "Zelle / Venmo / wire → transfers",
+    )
+    expect(
+        _has(reg.tags_for("APPLECARD GSBANK DAILY CASH"), "rewards"),
+        "Apple Card Daily Cash → rewards",
+    )
+    expect(
+        _has(reg.tags_for("CASH BACK REDEMPTION"), "rewards")
+        and _has(reg.tags_for("Statement Cashback Credit"), "rewards")
+        and _has(reg.tags_for("REWARD REDEMPTION"), "rewards"),
+        "cash back / cashback / reward → rewards",
     )
 
     # ── the other seed categories ────────────────────────────────────────────────

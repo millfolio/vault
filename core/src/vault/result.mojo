@@ -104,7 +104,7 @@ struct Block(Copyable, Movable):
     struct with a `kind` tag + a field per variant keeps serialization trivial and
     avoids a heterogeneous container."""
 
-    var kind: String  # "kpi" | "table" | "series"
+    var kind: String  # "kpi" | "table" | "series" | "map"
     # kpi:
     var label: String
     var value: Cell
@@ -117,6 +117,10 @@ struct Block(Copyable, Movable):
     var hint: String  # optional presenter nudge ("line"/"bar"/…)
     var xs: List[String]  # x values (iso date / category label)
     var ys: List[Cell]  # y values (typed money column)
+    # map (geo breakdown): `title` above is reused for the map title.
+    var map_level: String  # "country" (ISO3) | "state" (US 2-letter)
+    var codes: List[String]  # region codes, parallel to `mvals`
+    var mvals: List[Cell]  # typed money per region
 
     def __init__(out self):
         self.kind = String("")
@@ -129,6 +133,9 @@ struct Block(Copyable, Movable):
         self.hint = String("")
         self.xs = List[String]()
         self.ys = List[Cell]()
+        self.map_level = String("")
+        self.codes = List[String]()
+        self.mvals = List[Cell]()
 
 
 struct Buf(Movable):
@@ -258,6 +265,19 @@ def _block_json(b: Block) raises -> String:
             o += _jstr(b.ys[i].text)
         o += "]}}"
         return o^
+    elif b.kind == "map":
+        # A geo breakdown: one typed-money value per region code. `level` tells the
+        # client whether `code` is an ISO3 country or a US 2-letter state.
+        var o = String('{"kind":"map","title":') + _jstr(b.title)
+        o += ',"level":' + _jstr(b.map_level)
+        o += ',"points":['
+        for i in range(len(b.codes)):
+            if i > 0:
+                o += ","
+            o += '{"code":' + _jstr(b.codes[i]) + ',"value":'
+            o += _cell_json(b.mvals[i]) + "}"
+        o += "]}"
+        return o^
     return String("{}")
 
 
@@ -340,6 +360,26 @@ def series(title: String, kind: String) raises -> SeriesRef:
     return SeriesRef(len(p[].blocks) - 1)
 
 
+def geo_map(title: String, level: String) raises -> MapRef:
+    """Start a geo breakdown; `level` is `"country"` (codes are ISO3, e.g. `"USA"`)
+    or `"state"` (codes are US 2-letter, e.g. `"WA"`). Append regions with
+    `.place(code, money_val(total))`. Emit this for a spending-by-country / by-state
+    question — the CLIENT draws the choropleth; the program never chooses the view.
+    Group with the `Txn.country`/`Txn.state` fields (index-time, deterministic).
+
+    Named `geo_map` (not `map`) because `map` is a Mojo prelude builtin
+    (`std.iter.map`) that shadows a `from vault import *` name; the serialized block
+    is still `{"kind":"map",…}` — the client renderer keys on that."""
+    var p = _bufptr()
+    var b = Block()
+    b.kind = String("map")
+    b.title = title
+    b.map_level = level
+    p[].blocks.append(b^)
+    _emit()
+    return MapRef(len(p[].blocks) - 1)
+
+
 def hint(name: String) raises:
     """OPTIONAL — nudge the presenter's mark for the most recent series
     (`"line"`/`"bar"`/…). Honored when set, ignored when absent; the Phase-1
@@ -379,5 +419,20 @@ struct SeriesRef(Copyable, Movable):
         var p = _bufptr()
         p[].blocks[self.idx].xs.append(x)
         p[].blocks[self.idx].ys.append(y.copy())
+        _emit()
+        return self.copy()
+
+
+@fieldwise_init
+struct MapRef(Copyable, Movable):
+    """A handle to a map block; `.place(code, money_val(y))` appends one region's
+    typed-money total and re-emits. Chainable."""
+
+    var idx: Int
+
+    def place(self, code: String, value: Cell) raises -> Self:
+        var p = _bufptr()
+        p[].blocks[self.idx].codes.append(code)
+        p[].blocks[self.idx].mvals.append(value.copy())
         _emit()
         return self.copy()

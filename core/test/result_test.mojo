@@ -105,9 +105,34 @@ def main() raises:
         ok,
     )
     ok = _expect("hint attaches to the series", _has(b, '"hint":"line"'), ok)
-    # Phase B still carries the narrative + is still v:1.
+
+    # ── Phase C — map block (geo breakdown) ─────────────────────────────────────
+    var m = geo_map("Spending by country", "country")
+    _ = m.place("USA", money_val(4210.55))
+    _ = m.place("GBR", money_val(320.10))
+    var c = result_json()
     ok = _expect(
-        "still v:1 with data", _has(b, '"v":1') and _has(b, '"data":['), ok
+        "map block present with title + level",
+        _has(
+            c, '{"kind":"map","title":"Spending by country","level":"country"'
+        ),
+        ok,
+    )
+    ok = _expect(
+        "map points carry code + typed money value",
+        _has(
+            c,
+            (
+                '"points":[{"code":"USA","value":{"type":"money","raw":4210.55,"text":"$4,210.55"}},'
+                '{"code":"GBR","value":{"type":"money","raw":320.1,"text":"$320.10"}}]'
+            ),
+        ),
+        ok,
+    )
+
+    # Phase B/C still carries the narrative + is still v:1.
+    ok = _expect(
+        "still v:1 with data", _has(c, '"v":1') and _has(c, '"data":['), ok
     )
 
     print()

@@ -35,10 +35,18 @@
 #                      total/count → kpi; a per-month/day breakdown → series; a
 #                      ranked list → table. The CLIENT picks the chart, not the model.
 #     money_val(     — typed money in result data (raw + $ display); the spec-money
-#                      lint FAILS a bare float or a money() string handed to a builder.
+#                      lint FAILS a bare float or a money() string handed to a builder
+#                      (incl. a geo_map .place(code, money()) — .place is guarded too).
+#     map(           — a GEO breakdown (spending by country/state) emits a geo_map(…)
+#                      block, grouping on Txn.country (ISO3) / Txn.state (US 2-letter).
+#                      NB the builder is geo_map( (map is a Mojo prelude name) — the
+#                      literal "map(" still matches as a substring of geo_map(.
+#     .merchant      — top-merchants groups on the cleaned index-time .merchant field,
+#                      NOT raw .desc (store numbers/cities fragment one merchant).
 #
 # The fixture tags (eval/fixtures/data/categories.txt) are the product defaults:
-# phone, travel, restaurant, groceries, health. gym is deliberately NOT one → SUGGEST.
+# phone, travel, restaurant, groceries, health, transfers, rewards. gym is deliberately
+# NOT one → SUGGEST.
 #
 # question	must_contain	must_not_contain	manifest
 how much did I pay for my phone bill	transactions(,money(,phone	].id,search(,$" +,ask_local	statements.txt
@@ -51,7 +59,8 @@ how many documents are in my vault	manifest(	search(,ask_local	statements.txt
 when does my car insurance renew	ask_local	transactions(	statements.txt
 show my spending by month	transactions(,series(,money_val(	].id,search(	statements.txt
 give me a dashboard of my total spending and income	transactions(,kpi(,money_val(	].id,search(	statements.txt
-list my top merchants by total spending	transactions(,table(,money_val(	].id,search(	statements.txt
+list my top merchants by total spending	transactions(,table(,money_val(,.merchant	].id,search(	statements.txt
+which countries did I spend the most in	transactions(,map(,.country,money_val(	].id,search(	statements.txt
 what are my expenses in the last 3 months	transactions(,months_ago(,money(	].id,search(	statements.txt
 how much did I spend on electricity over the last 6 months	SUGGEST_TAG,electricity,transactions(,months_ago(	].id,search(,"health"	statements.txt
 what is the license plate on my car	ask_local	# SUGGEST_TAG:,transactions(	statements.txt

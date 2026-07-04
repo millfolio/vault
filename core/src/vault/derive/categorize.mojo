@@ -327,6 +327,37 @@ def default_registry() -> Registry:
             ),
         )
     )
+    rules.append(
+        _rule(
+            "transfers",
+            [
+                "ach",
+                "transfer",
+                "zelle",
+                "venmo",
+                "wire",
+            ],
+            (
+                "account transfers - ACH, Zelle, Venmo, wires: money moved"
+                " between accounts or people, NOT a purchase"
+            ),
+        )
+    )
+    rules.append(
+        _rule(
+            "rewards",
+            [
+                "daily cash",
+                "cash back",
+                "cashback",
+                "reward",
+            ],
+            (
+                "credit-card cash back & rewards - Daily Cash, cash-back and"
+                " rewards credits, not spending"
+            ),
+        )
+    )
     return Registry(rules^)
 
 

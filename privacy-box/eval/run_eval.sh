@@ -160,9 +160,9 @@ while IFS=$'\t' read -r q must mustnot manifest; do
   # which sneaks in as an untyped TEXT cell (no raw number → the client can't scale an
   # axis or re-aggregate). Flag `money(` (NOT `money_val(` — needs '(' right after
   # "money") appearing as a builder VALUE, i.e. after the first comma of a kpi()/
-  # .row()/.point() call on the same line — so a money() in the narrative
+  # .row()/.point()/.place() call on the same line — so a money() in the narrative
   # print_answer/result_text, or in a builder's leading LABEL, never trips it.
-  if printf '%s' "$prog" | grep -qE '(kpi\(|\.row\(|\.point\()[^,]*,.*money\('; then
+  if printf '%s' "$prog" | grep -qE '(kpi\(|\.row\(|\.point\(|\.place\()[^,]*,.*money\('; then
     ok=0
     reasons="$reasons spec-money:[money() string as a builder value — use money_val()]"
   fi

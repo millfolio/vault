@@ -37,13 +37,21 @@ struct Txn(Copyable, Movable):
     date is unknown) — safe for direct comparison, sorting, and span math.
     `tags` are derived category tags (e.g. `phone`, `travel`) materialised at index
     time from the description — empty at extraction, populated when read back from
-    the index (see `select_txns`); multi-valued (see `vault.derive`)."""
+    the index (see `select_txns`); multi-valued (see `vault.derive`).
+    `merchant`/`country`/`state` are the deterministic index-time location split of
+    `desc` (see `vault.extract.location`): `merchant` is the cleaned brand string,
+    `country` an ISO3 code (`""` when none), `state` a US 2-letter code (`""` when
+    none). Like `tags`, they're empty at extraction and filled from the index.
+    """
 
     var date: String
     var desc: String
     var amount: Float64
     var direction: String
     var tags: List[String]
+    var merchant: String
+    var country: String
+    var state: String
 
     def __init__(
         out self,
@@ -52,14 +60,17 @@ struct Txn(Copyable, Movable):
         amount: Float64,
         var direction: String,
     ):
-        # 4-arg constructor: `tags` default empty and are assigned at
-        # materialisation (index time) / when read back from the index, not at
-        # extraction — so the extraction sites stay unchanged.
+        # 4-arg constructor: `tags` + the location fields default empty and are
+        # assigned at materialisation (index time) / when read back from the index,
+        # not at extraction — so the extraction sites stay unchanged.
         self.date = date^
         self.desc = desc^
         self.amount = amount
         self.direction = direction^
         self.tags = List[String]()
+        self.merchant = String("")
+        self.country = String("")
+        self.state = String("")
 
 
 @fieldwise_init
@@ -1191,6 +1202,14 @@ struct TxnRow(Copyable, Movable):
     # is stored alongside it for display. 0 = unknown (older rows, or a statement
     # with no detectable year). See `statement_year`.
     var year: Int
+    # Deterministic location split of `desc`, computed ONCE when this row is built
+    # at index time (see `vault.extract.location.parse_location`): `merchant` is the
+    # cleaned brand string, `country` an ISO3 code (`""` when none), `state` a US
+    # 2-letter code (`""` when none). Append-only TSV columns — rows written before
+    # these existed parse with all three empty (see `tsv_to_txn_rows`).
+    var merchant: String
+    var country: String
+    var state: String
 
 
 def _tags_to_field(tags: List[String]) -> String:
@@ -1219,10 +1238,11 @@ def _field_to_tags(s: String) raises -> List[String]:
 
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
     """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc <TAB>
-    comma-joined-tags <TAB> added_gen <TAB> year, one per line. Trailing columns
-    are append-only for backward compatibility: rows written before
-    `tags`/`added_gen`/`year` existed parse with empty tags / gen 0 / year 0 (see
-    `tsv_to_txn_rows`)."""
+    comma-joined-tags <TAB> added_gen <TAB> year <TAB> escaped_merchant <TAB>
+    country <TAB> state, one per line. Trailing columns are append-only for
+    backward compatibility: rows written before `tags`/`added_gen`/`year`/
+    `merchant`/`country`/`state` existed parse with empty tags / gen 0 / year 0 /
+    empty location (see `tsv_to_txn_rows`)."""
     var out = String("")
     for i in range(len(rows)):
         ref r = rows[i]
@@ -1242,6 +1262,12 @@ def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
             + String(r.added_gen)
             + "\t"
             + String(r.year)
+            + "\t"
+            + _esc(r.merchant)
+            + "\t"
+            + r.country
+            + "\t"
+            + r.state
             + "\n"
         )
     return out^
@@ -1259,7 +1285,8 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
             continue
         # Backward-compatible: rows written before the tags column (5 fields)
         # parse with no tags; rows before added_gen (6 fields) parse as gen 0;
-        # rows before year (7 fields) parse as year 0.
+        # rows before year (7 fields) parse as year 0; rows before the location
+        # columns (8 fields) parse with empty merchant/country/state.
         var tags = List[String]()
         if len(cols) >= 6:
             tags = _field_to_tags(String(cols[5]))
@@ -1269,6 +1296,15 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
         var year = 0
         if len(cols) >= 8:
             year = atol(String(cols[7].strip()))
+        var merchant = String("")
+        if len(cols) >= 9:
+            merchant = _unesc(String(cols[8]))
+        var country = String("")
+        if len(cols) >= 10:
+            country = String(cols[9].strip())
+        var state = String("")
+        if len(cols) >= 11:
+            state = String(cols[10].strip())
         rows.append(
             TxnRow(
                 _unesc(String(cols[0])),
@@ -1279,6 +1315,9 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
                 tags^,
                 added_gen,
                 year,
+                merchant^,
+                country^,
+                state^,
             )
         )
     return rows^
@@ -1383,6 +1422,9 @@ def select_txns(rows: List[TxnRow], file_alias: String) raises -> List[Txn]:
                 _row_iso_date(r), r.desc.copy(), r.amount, r.direction.copy()
             )
             t.tags = r.tags.copy()
+            t.merchant = r.merchant.copy()
+            t.country = r.country.copy()
+            t.state = r.state.copy()
             out.append(t^)
     return out^
 

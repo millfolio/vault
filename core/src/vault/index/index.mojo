@@ -52,6 +52,7 @@ from vault.extract.transactions import (
     select_txns,
     texts_for_alias,
 )
+from vault.extract.location import parse_location
 from vault.derive.store import (
     config_dir,
     load_registry,
@@ -768,6 +769,8 @@ def build_index(
             var ctxns = csv_transactions(csv_rows(cur_paths[i]))
             for x in range(len(ctxns)):
                 ref ct = ctxns[x]
+                # Location split of the descriptor, computed ONCE here + persisted.
+                var loc = parse_location(ct.desc)
                 trows.append(
                     TxnRow(
                         falias.copy(),
@@ -778,6 +781,9 @@ def build_index(
                         List[String](),
                         cur_gen,
                         ct.year,
+                        loc.merchant.copy(),
+                        loc.country.copy(),
+                        loc.state.copy(),
                     )
                 )
         else:
@@ -797,6 +803,8 @@ def build_index(
                 var syear = statement_year(txn_src)
                 for x in range(len(ext.txns)):
                     ref tx = ext.txns[x]
+                    # Location split of the descriptor, computed ONCE here + persisted.
+                    var loc = parse_location(tx.desc)
                     trows.append(
                         TxnRow(
                             falias.copy(),
@@ -807,6 +815,9 @@ def build_index(
                             List[String](),
                             cur_gen,
                             syear,
+                            loc.merchant.copy(),
+                            loc.country.copy(),
+                            loc.state.copy(),
                         )
                     )
 

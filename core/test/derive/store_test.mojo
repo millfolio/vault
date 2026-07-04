@@ -39,6 +39,9 @@ def _row(var desc: String, var tags: List[String]) -> TxnRow:
         tags^,
         0,  # added_gen
         2026,  # year
+        String(""),  # merchant
+        String(""),  # country
+        String(""),  # state
     )
 
 

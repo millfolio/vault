@@ -53,7 +53,7 @@ Questions are open-ended but personal, e.g.
 |---|---|---|
 | `manifest` | `manifest() -> List[VaultFile]` | the aliased file list; each `VaultFile` has **`.alias`** (e.g. `file_0`), `.kind` (`"csv"`/`"pdf"`/`"md"`/`"docx"`), `.size`, and `.columns` (aliased CSV columns; empty otherwise). Read it; never CONSTRUCT one. (`alias` is a reserved Mojo keyword, but member access `f.alias` reads the field fine — use `.alias`, NOT `.id`.) |
 | `search` | `search(query: String, k: Int) -> List[Chunk]` | **semantic search across the whole indexed vault**; each `Chunk` has `.file_alias`, `.text`, `.score`. **Similarity-ranked top-k** — great to *find* the relevant passages for an open question, but it returns only ~k chunks, so it **structurally undercounts aggregations** (a file can have hundreds of chunks). Do NOT use it to count/sum/total — use `transactions`/`file_chunks`/`csv_rows` for those. |
-| `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date` (a normalized ISO **`"YYYY-MM-DD"`** string, or `""` if unknown — already includes the year, so compare/sort directly and split on `"-"` for day math; do NOT assume `M/D`), `.desc` (merchant), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out), and `.tags` (a `List[String]` of category tags assigned at index time — currently `phone`/`travel`/`restaurant`/`groceries`/`health`; empty when none match). These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest, `.tags` to filter by category — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
+| `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date` (a normalized ISO **`"YYYY-MM-DD"`** string, or `""` if unknown — already includes the year, so compare/sort directly and split on `"-"` for day math; do NOT assume `M/D`), `.desc` (the raw descriptor), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out), `.tags` (a `List[String]` of category tags assigned at index time — currently `phone`/`travel`/`restaurant`/`groceries`/`health`/`transfers`/`rewards`; empty when none match), and a deterministic **index-time location split** of the descriptor: `.merchant` (the cleaned brand string — use this for grouping / top-merchants instead of raw `.desc`), `.country` (an **ISO3** code like `"USA"`/`"GBR"`, `""` when absent), `.state` (a **US 2-letter** code like `"WA"`, `""` when absent). Location is `""` on descriptors that carry none — transfers, online charges, PayPal — so filter `if x.country != "":` before grouping. These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest, `.tags` to filter by category, `.merchant`/`.country`/`.state` to group — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
 | `file_chunks` | `file_chunks(file_alias: String) -> List[String]` | **EVERY chunk of one file, in document order** — complete coverage for enumeration (count/sum/max), unlike `search`'s top-k. Reuses the index's already-extracted text. Use this to scan a whole file. |
 | `csv_rows` | `csv_rows(file_alias: String) -> List[Row]` | a table's rows; columns by alias (`row[0]`, `row["col_2"]`) — exact + complete for a CSV |
 | `pdf_text` | `pdf_text(file_alias: String) -> String` | extracted text of a PDF (pdftotext) |
@@ -217,6 +217,7 @@ Emit data only when it genuinely adds to the answer; a plain reply still just us
 | `kpi(label, value)` | one headline number | a single total / count |
 | `table(headers)` + `.row([...])` | a labeled table | a ranked list (top merchants, spend per tag) |
 | `series(title, kind)` + `.point(x, y)` | an ordered breakdown | a per-month (`kind="time"`, x = ISO date) or per-category (`kind="category"`, x = label) breakdown |
+| `geo_map(title, level)` + `.place(code, value)` | a geo breakdown the client maps | a spending-**by-country** (`level="country"`, codes are ISO3) or **by-state** (`level="state"`, codes are US 2-letter) question |
 
 Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quantity,
 `date(iso)` for a date, or a bare `String` for a plain label.
@@ -232,11 +233,14 @@ Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quanti
 
 So `kpi("Total spent", money_val(total))` ✓ — but `kpi("Total spent", money(total))` ✗
 and `_ = tbl.row([name, money(total)])` ✗ (use `money_val(total)` in the cell). A label
-(the first argument / a text column) stays a plain `String`; only the numeric VALUE is
-`money_val`. Match the SHAPE to the question: a total/count → `kpi`; several headline
+(the first argument / a text column / a region `code`) stays a plain `String`; only the
+numeric VALUE is `money_val` — including a `geo_map` `.place(code, money_val(total))`.
+Match the SHAPE to the question: a total/count → `kpi`; several headline
 numbers → several `kpi` tiles; a per-month/per-day trend → `series(_, "time")`; a
-per-category split → `series(_, "category")`; a ranked list → `table`. `.row(...)` and
-`.point(...)` chain (`_ = s.point(...)`). Every existing rule still holds —
+per-category split → `series(_, "category")`; a ranked list → `table`; a
+spending-by-country/state (geo) breakdown → `geo_map(_, "country"/"state")` (the
+client draws the map — you never choose it). `.row(...)`, `.point(...)` and
+`.place(...)` chain (`_ = s.point(...)`). Every existing rule still holds —
 `transactions()`/`money()`/`.tags`, never `.alias`, never `search()` for a total.
 
 ## Examples
@@ -474,10 +478,12 @@ def main() raises:
 ```
 
 **"List my top merchants by total spending."** (a ranked list → a `table`; each amount CELL is a `money_val`)
-Total the debits per merchant (`.desc`) in plain Mojo, sort descending, then emit a
-`table([...])` header and one `.row([...])` per merchant. The label column is a plain
-`String`; the amount cell is ALWAYS `money_val(...)` — NEVER `money()` in a row (a cell
-is a builder VALUE and needs the typed number).
+Total the debits per merchant in plain Mojo, sort descending, then emit a
+`table([...])` header and one `.row([...])` per merchant. **Group on `.merchant`**
+(the cleaned index-time brand string), NOT raw `.desc` — `.desc` carries store
+numbers / cities / country codes that fragment one merchant into many rows. The
+label column is a plain `String`; the amount cell is ALWAYS `money_val(...)` — NEVER
+`money()` in a row (a cell is a builder VALUE and needs the typed number).
 ```mojo
 from vault import *
 def main() raises:
@@ -490,14 +496,15 @@ def main() raises:
             ref x = txns[t]
             if x.direction != "debit":
                 continue
+            var key = x.merchant if x.merchant != "" else x.desc  # cleaned brand
             var found = False
             for m in range(len(names)):
-                if names[m] == x.desc:
+                if names[m] == key:
                     totals[m] += x.amount
                     found = True
                     break
             if not found:
-                names.append(x.desc)
+                names.append(key)
                 totals.append(x.amount)
     if len(names) == 0:
         print_answer("I couldn't find any spending transactions in your vault.")
@@ -523,6 +530,48 @@ def main() raises:
     for r in range(top):
         # label String, then the amount as money_val — NOT money() — in the cell.
         _ = tbl.row([names[r], money_val(totals[r])])
+```
+
+**"How much did I spend abroad? / spending by country"** (a GEO breakdown → a `geo_map`; group on `Txn.country`, each place value a `money_val`)
+Sum the debits per `.country` (ISO3) in plain Mojo — SKIPPING rows with no country
+(`x.country == ""` — transfers / online have no location) — then emit ONE
+`geo_map(title, "country")` with a `.place(code, money_val(total))` per country. For a
+by-US-state question use `level="state"` and group on `.country == "USA"`'s `.state`.
+You never draw the map — the CLIENT renders it from the codes + typed values.
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    var codes = List[String]()
+    var totals = List[Float64]()
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit" or x.country == "":
+                continue                          # only located spending
+            var found = False
+            for c in range(len(codes)):
+                if codes[c] == x.country:
+                    totals[c] += x.amount
+                    found = True
+                    break
+            if not found:
+                codes.append(x.country)
+                totals.append(x.amount)
+    if len(codes) == 0:
+        print_answer("I couldn't find any transactions with a country on them.")
+        return
+    # Narrative in money() strings (result_text only), then the typed map.
+    var abroad = 0.0
+    for c in range(len(codes)):
+        if codes[c] != "USA":
+            abroad += totals[c]
+    result_text("You spent " + money(abroad) + " outside the US.")
+    var gm = geo_map("Spending by country", "country")
+    for c in range(len(codes)):
+        # code is a plain String (ISO3); the value is ALWAYS money_val, never money().
+        _ = gm.place(codes[c], money_val(totals[c]))
 ```
 
 **"What was my biggest / most expensive transaction? / which merchant did I spend the most at?"** (ENUMERATE — `transactions` first; the merchant is the `.desc` of the max `Txn`, so NO `search`/`ask_local` is needed when `transactions()` is non-empty)

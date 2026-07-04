@@ -289,6 +289,9 @@ def main() raises:
             List[String](),  # no tags
             0,  # added_gen
             0,  # year (unknown)
+            String(""),  # merchant (none)
+            String(""),  # country
+            String(""),  # state
         )
     )
     rows.append(
@@ -301,6 +304,9 @@ def main() raises:
             [String("phone")],  # single tag
             3,  # added_gen
             2026,  # year
+            String("Rent"),  # merchant
+            String(""),  # country
+            String(""),  # state
         )
     )
     rows.append(
@@ -313,6 +319,9 @@ def main() raises:
             [String("travel"), String("restaurant")],  # multi-valued
             3,  # added_gen
             2025,  # year
+            String("Coffee Shop"),  # merchant
+            String("USA"),  # country
+            String("WA"),  # state
         )
     )
     var back = tsv_to_txn_rows(txn_rows_to_tsv(rows))
@@ -353,6 +362,37 @@ def main() raises:
         "transactions: legacy 7-col row parses as year 0",
     )
     ok = (len(legacy7) == 1 and legacy7[0].year == 0) and ok
+    # And a pre-location 8-column row (year, no merchant/country/state) parses with
+    # empty location fields — an existing vault indexed before this change loads.
+    var legacy8 = tsv_to_txn_rows(
+        String("file_0\t4/02\t500.0\tcredit\tPay\tphone\t5\t2026\n")
+    )
+    _say(
+        len(legacy8) == 1
+        and legacy8[0].year == 2026
+        and legacy8[0].merchant == ""
+        and legacy8[0].country == ""
+        and legacy8[0].state == "",
+        "transactions: legacy 8-col row parses with empty location",
+    )
+    ok = (
+        len(legacy8) == 1
+        and legacy8[0].merchant == ""
+        and legacy8[0].state == ""
+    ) and ok
+    # Location columns round-trip (escaped merchant + ISO country + US state).
+    var loc_rt = (
+        back[2].merchant == "Coffee Shop"
+        and back[2].country == "USA"
+        and back[2].state == "WA"
+        and back[0].merchant == ""
+        and back[0].country == ""
+    )
+    _say(
+        loc_rt,
+        "transactions: location columns round-trip (merchant/country/state)",
+    )
+    ok = loc_rt and ok
 
     # ── statement_year: pull the year from the header/period, not the M/D rows ──
     var yr_period = statement_year(
@@ -493,7 +533,17 @@ def main() raises:
     # ── dedupe_txns: cross-file duplicate guard (overlapping imports) ────────────
     def _tr(fa: String, d: String, amt: Float64, dir: String) -> TxnRow:
         return TxnRow(
-            fa, d, amt, dir, d + dir + String(amt), List[String](), 0, 2026
+            fa,
+            d,
+            amt,
+            dir,
+            d + dir + String(amt),
+            List[String](),
+            0,
+            2026,
+            String(""),
+            String(""),
+            String(""),
         )
 
     # file_a (Jan–Feb) and file_b (Feb–Mar) OVERLAP on the 2/10 charge → dedup to one.
@@ -551,20 +601,66 @@ def main() raises:
         and len(sel[0].tags) == 0
         and len(sel[1].tags) == 1
         and sel[1].tags[0] == "phone"
+        and sel[1].merchant
+        == "Rent"  # location fields propagate through select
     )
-    _say(ss, "transactions: select_txns returns file_0's two rows (with tags)")
+    _say(
+        ss,
+        (
+            "transactions: select_txns returns file_0's two rows (with tags +"
+            " location)"
+        ),
+    )
     ok = ss and ok
 
     # Txn.date is normalized to ISO YYYY-MM-DD (row year folded into the M/D token);
     # "" when the year is unknown (so it's never a bogus 0000-.. date).
     var isorows = List[TxnRow]()
     isorows.append(
-        TxnRow("f9", "3/5", 10.0, "debit", "a", List[String](), 0, 2026)
+        TxnRow(
+            "f9",
+            "3/5",
+            10.0,
+            "debit",
+            "a",
+            List[String](),
+            0,
+            2026,
+            String(""),
+            String(""),
+            String(""),
+        )
     )
     isorows.append(
-        TxnRow("f9", "12/25", 20.0, "debit", "b", List[String](), 0, 2025)
+        TxnRow(
+            "f9",
+            "12/25",
+            20.0,
+            "debit",
+            "b",
+            List[String](),
+            0,
+            2025,
+            String(""),
+            String(""),
+            String(""),
+        )
     )
-    isorows.append(TxnRow("f9", "4/2", 5.0, "debit", "c", List[String](), 0, 0))
+    isorows.append(
+        TxnRow(
+            "f9",
+            "4/2",
+            5.0,
+            "debit",
+            "c",
+            List[String](),
+            0,
+            0,
+            String(""),
+            String(""),
+            String(""),
+        )
+    )
     var iso = select_txns(isorows, String("f9"))
     var iso_ok = (
         len(iso) == 3
