@@ -109,6 +109,35 @@ def main() raises:
     print("[" + ("PASS" if no_root else "FAIL") + "] never grants '' or '/'")
     all_ok = all_ok and no_root
 
+    # ── Issue #1 guard: the COMPILE profile must NOT grant write to the toolchain
+    # prefix (the run profile maps that same prefix executable → a prefix write is
+    # a cross-run dylib-plant vector). The only prefix write allowed is the narrow
+    # Mojo build cache. Regression guard for the compile-write-scope hardening.
+    var fakeprefix = base + "/fakeprefix"
+    makedirs(fakeprefix + "/share/max", exist_ok=True)
+    var prefix_c = _canonical(fakeprefix)
+    var cprof = _read(sb._render_compile_profile(scratch_c, fakeprefix))
+    var no_prefix_write = (
+        cprof.find('(allow file-write* (subpath "' + prefix_c + '"))') == -1
+    )
+    print(
+        "["
+        + ("PASS" if no_prefix_write else "FAIL")
+        + "] compile profile does NOT grant toolchain-prefix write"
+    )
+    all_ok = all_ok and no_prefix_write
+
+    var grants_cache = (
+        cprof.find("cache/.mojo_cache") != -1
+        and cprof.find("(allow file-write*") != -1
+    )
+    print(
+        "["
+        + ("PASS" if grants_cache else "FAIL")
+        + "] compile profile still grants the Mojo build cache write"
+    )
+    all_ok = all_ok and grants_cache
+
     print()
     if all_ok:
         print("ALL CHECKS PASSED")
