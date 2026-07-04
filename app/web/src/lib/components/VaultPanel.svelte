@@ -6,7 +6,11 @@
   import SubTabs from "./SubTabs.svelte";
   import TagsPanel from "./TagsPanel.svelte";
   import DefineTagModal from "./DefineTagModal.svelte";
-  import { unlockAmounts as revealUnlock } from "$lib/reveal";
+  import {
+    unlockAmounts as revealUnlock,
+    unlockAmountsNative as revealUnlockNative,
+    hasNativeBridge,
+  } from "$lib/reveal";
 
   // Vault sub-tabs: Records | Tags | Files. `initialSub` lets /tags deep-link open
   // the Tags sub-tab (the tag pills link there).
@@ -177,6 +181,7 @@
   }
 
   onMount(() => {
+    native = hasNativeBridge();
     load();
     if (sub === "records") loadTxns(); // Records is the default sub-tab
   });
@@ -190,6 +195,9 @@
   let showUnlock = $state(false); // the passphrase prompt is open
   let pwInput = $state(""); // the passphrase the user is typing
   let revealToken = ""; // the server-issued bearer token that authorizes ?amounts=1
+  // True inside the native macOS app (WKWebView bridge present) → offer Touch ID.
+  // A plain browser stays on the passphrase flow. Detected client-side on mount.
+  let native = $state(false);
 
   // Fetch the extracted transactions — with amounts only once unlocked. `force`
   // re-fetches even if already loaded (used right after unlocking).
@@ -246,6 +254,25 @@
       await loadTxns(true); // re-fetch, now with the reveal token → amounts
     } catch (e) {
       unlockErr = e instanceof Error ? e.message : "Unlock failed.";
+    } finally {
+      unlocking = false;
+    }
+  }
+  // Native Touch-ID unlock (macOS app only): ask the native bridge to run
+  // LocalAuthentication, which mints the SAME reveal token via
+  // /api/amounts/unlock-local. On cancel/failure we surface the message and leave
+  // the passphrase fallback available. Identical downstream to submitUnlock.
+  async function unlockWithTouchID() {
+    if (unlocking) return;
+    unlocking = true;
+    unlockErr = "";
+    try {
+      revealToken = await revealUnlockNative();
+      unlocked = true;
+      showUnlock = false;
+      await loadTxns(true); // re-fetch, now with the reveal token → amounts
+    } catch (e) {
+      unlockErr = e instanceof Error ? e.message : "Touch ID unlock failed.";
     } finally {
       unlocking = false;
     }
@@ -574,7 +601,14 @@
               {#if unlocked}
                 <button type="button" class="lockbtn" onclick={lockAmounts} title="Hide amounts again">🔓 Hide amounts</button>
               {:else if !showUnlock}
-                <button type="button" class="lockbtn primary" onclick={openUnlock}>🔒 Show amounts</button>
+                {#if native}
+                  <button type="button" class="lockbtn primary" onclick={unlockWithTouchID} disabled={unlocking}>
+                    {unlocking ? "Waiting for Touch ID…" : "🔓 Unlock with Touch ID"}
+                  </button>
+                  <button type="button" class="lockbtn linklike" onclick={openUnlock} disabled={unlocking}>Use a passphrase instead</button>
+                {:else}
+                  <button type="button" class="lockbtn primary" onclick={openUnlock}>🔒 Show amounts</button>
+                {/if}
               {/if}
             {/if}
           </div>
@@ -683,7 +717,20 @@
 <style>
   .recbar {
     display: flex;
+    gap: 8px;
     margin-bottom: 14px;
+  }
+  .lockbtn.linklike {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-dim);
+    text-decoration: underline;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  .lockbtn.linklike:hover {
+    color: var(--accent);
+    border-color: transparent;
   }
   .recbar .filter {
     flex: 1;

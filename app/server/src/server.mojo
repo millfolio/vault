@@ -302,6 +302,66 @@ def _reveal_token_path() -> String:
     return _config_dir() + "/reveal_token.txt"
 
 
+def _reveal_secret_path() -> String:
+    """The LOCAL-CAPABILITY secret: a random token in the data dir (0600) that
+    proves the caller is a local app on this machine. The native menu-bar app
+    reads it (after a Touch-ID / login-password check) and POSTs it to
+    `/api/amounts/unlock-local` to mint a reveal token — the SAME token the
+    passphrase path mints. Not a hard boundary (any local process that can read
+    the data dir could read it, just like `mill get amount-password` exposes the
+    phrase); it matches the gate's privacy-screen threat model."""
+    return _config_dir() + "/.reveal-secret"
+
+
+def _ensure_reveal_secret() -> String:
+    """Create the local-capability secret on first run (0600 owner-only) if
+    absent; return its current value. Best-effort — a read/write failure returns
+    "" so the local-unlock endpoint simply stays closed (falls back to the
+    passphrase). Called at startup AND lazily from the endpoint."""
+    var p = _reveal_secret_path()
+    try:
+        if exists(p):
+            var cur: String
+            with open(p, "r") as f:
+                cur = String(f.read().strip())
+            if cur != "":
+                return cur^
+        var secret = _new_token() + _new_token()  # 256-bit
+        with open(p, "w") as f:
+            f.write(secret)
+        _chmod(p, 0o600)  # owner read/write only
+        return secret^
+    except:
+        return String("")
+
+
+def _mint_reveal_token() raises -> String:
+    """Mint the amount-reveal bearer token: a fresh 128-bit token written to the
+    reveal-token file with a 15-min TTL, returned to the caller. SHARED by the
+    passphrase path (`/api/auth/unlock`) and the native local-unlock path
+    (`/api/amounts/unlock-local`) so both mint an identical token — nothing
+    downstream (`_reveal_authorized`) changes."""
+    var tok = _new_token()
+    with open(_reveal_token_path(), "w") as f:
+        f.write(tok + " " + String(_epoch_s() + 900))  # 15-min TTL
+    return tok^
+
+
+def _const_time_eq(a: String, b: String) -> Bool:
+    """Length-then-XOR compare that avoids an early-out on the first differing
+    byte (timing side-channel). Not constant across differing LENGTHS, which is
+    acceptable here — the secret is fixed-length."""
+    var ab = a.as_bytes()
+    var bb = b.as_bytes()
+    var na = len(ab)
+    var nb = len(bb)
+    var diff = 1 if na != nb else 0
+    var n = na if na < nb else nb
+    for i in range(n):
+        diff |= Int(ab[i]) ^ Int(bb[i])
+    return diff == 0
+
+
 def _hex_nibble(n: Int) -> String:
     return chr(48 + n) if n < 10 else chr(87 + n)  # 0-9 then a-f
 
@@ -834,6 +894,8 @@ struct Api(Copyable, Handler, Movable):
         # WebAuthn (Touch-ID) gate for revealing transaction amounts.
         if req.method == Method.POST and path == "/api/auth/unlock":
             return self.handle_auth_unlock(req)
+        if req.method == Method.POST and path == "/api/amounts/unlock-local":
+            return self.handle_amounts_unlock_local(req)
         if path == "/api/categories/preview":
             return self.handle_categories_preview(req)
         if path == "/api/categories":
@@ -1004,10 +1066,35 @@ struct Api(Copyable, Handler, Movable):
             return _cors(bad_request('{"error":"expected {password}"}'))
         if not verify_amount_password(candidate):
             return _cors(unauthorized('{"error":"wrong passphrase"}'))
-        var tok = _new_token()
-        with open(_reveal_token_path(), "w") as f:
-            f.write(tok + " " + String(_epoch_s() + 900))  # 15-min TTL
-        return _cors(ok_json('{"token":"' + tok + '"}'))
+        return _cors(ok_json('{"token":"' + _mint_reveal_token() + '"}'))
+
+    def handle_amounts_unlock_local(self, req: Request) raises -> Response:
+        """POST /api/amounts/unlock-local → the NATIVE local-capability path. The
+        macOS menu-bar app, after a successful `LAContext` Touch-ID / login-password
+        check, reads the `.reveal-secret` file and presents it here (JSON `{secret}`
+        or the `X-Millfolio-Reveal-Secret` header). On a constant-time match we mint
+        the SAME reveal token the passphrase path mints — so amounts unlock identically.
+        Localhost-only (rides the Tier-1 loopback guard in `_route`). DENIED in the
+        demo (its amounts are already public → no gate to bridge). The passphrase
+        endpoint is untouched, so a browser with no native bridge is unaffected.
+        """
+        if _is_demo():
+            return _forbidden('{"error":"not available in demo"}')
+        var presented = String(req.headers.get("x-millfolio-reveal-secret"))
+        if presented == "":
+            try:
+                var j = loads(req.text())
+                presented = j["secret"].string_value()
+            except:
+                presented = String("")
+        var secret = _ensure_reveal_secret()
+        if (
+            secret == ""
+            or presented == ""
+            or not _const_time_eq(presented, secret)
+        ):
+            return _cors(unauthorized('{"error":"bad local secret"}'))
+        return _cors(ok_json('{"token":"' + _mint_reveal_token() + '"}'))
 
     def handle_demo_verify(self, req: Request) raises -> Response:
         """POST /api/demo/verify {token} → validate the Turnstile token with Cloudflare
@@ -2968,6 +3055,14 @@ def main() raises:
         _chmod(
             _config_dir(), 0o700
         )  # owner-only: holds stats/asks/history + demo tokens
+    except:
+        pass
+
+    # Ensure the local-capability secret exists (0600) so the native menu-bar app's
+    # Touch-ID unlock can bridge to a reveal token. Skipped in the demo (no gate).
+    try:
+        if not _is_demo():
+            _ = _ensure_reveal_secret()
     except:
         pass
 
