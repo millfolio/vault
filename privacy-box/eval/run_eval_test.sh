@@ -32,6 +32,17 @@ elif printf '%s' "$q" | grep -q reldate; then
   printf '%s\n' 'from vault import *' 'def main() raises:' \
     '    var cutoff = months_ago(3)' '    var t = transactions()' \
     '    if t[0].date >= "2026-04-01":' '        print(money(t[0].amount))'
+elif printf '%s' "$q" | grep -q overtag; then
+  # EXTRACTION query that WRONGLY suggests a tag → over-tag guard (must_not) trips.
+  printf '%s\n' 'from vault import *' 'def main() raises:' \
+    '    # SUGGEST_TAG: insurance : Is this an insurance renewal?' \
+    '    var hits = search("insurance", 8)' \
+    '    print(ask_local("renewal date?", hits[0].text))'
+elif printf '%s' "$q" | grep -q extract; then
+  # clean EXTRACTION: inline ask_local, NO SUGGEST_TAG.
+  printf '%s\n' 'from vault import *' 'def main() raises:' \
+    '    var hits = search("insurance", 8)' \
+    '    print(ask_local("renewal date?", hits[0].text))'
 elif printf '%s' "$q" | grep -q good; then
   printf '%s\n' 'from vault import *' 'def main() raises:' \
     '    var t = transactions()' '    print(money(t[0].amount))'
@@ -89,6 +100,16 @@ assert_exit "wall-clock row, no date literal → exit 0" 0 "$rc"
 printf 'reldate q\ttransactions(,months_ago(\t\tstatements.txt\n' >"$TMP/g_reldate.tsv"
 run "$TMP/g_reldate.tsv"
 assert_exit "wall-clock row, hardcoded date literal → exit 1" 1 "$rc"
+
+# 4d) extraction query, INLINE ask_local + NO SUGGEST_TAG → over-tag guard clean → exit 0
+printf 'extract q\task_local\t# SUGGEST_TAG:\tstatements.txt\n' >"$TMP/g_extract.tsv"
+run "$TMP/g_extract.tsv"
+assert_exit "extraction row, no SUGGEST_TAG → exit 0" 0 "$rc"
+
+# 4e) extraction query that WRONGLY emits a SUGGEST_TAG → banned → exit 1 (over-tag guard)
+printf 'overtag q\task_local\t# SUGGEST_TAG:\tstatements.txt\n' >"$TMP/g_overtag.tsv"
+run "$TMP/g_overtag.tsv"
+assert_exit "extraction row, stray SUGGEST_TAG → exit 1" 1 "$rc"
 
 # 5) unknown model (no golden.<model>.tsv, no EVAL_GOLDEN) → exit 2
 PRIVACY_BOX_BIN="$TMP/mockbin" bash "$DIR/run_eval.sh" no-such-model >/dev/null 2>&1

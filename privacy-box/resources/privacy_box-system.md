@@ -59,8 +59,8 @@ Questions are open-ended but personal, e.g.
 | `pdf_text` | `pdf_text(file_alias: String) -> String` | extracted text of a PDF (pdftotext) |
 | `md_text` | `md_text(file_alias: String) -> String` | a markdown file's text |
 | `docx_text` | `docx_text(file_alias: String) -> String` | extracted text of a Word .docx |
-| `ask_local` | `ask_local(instruction: String, content: String) -> String` | the on-device model. Give it **real content** (a chunk, a page, a row) + an instruction; it returns its answer. This is how you extract / classify / read meaning. |
-| `ask_local_batch` | `ask_local_batch(instruction: String, items: List[String]) -> List[String]` | **like `ask_local` but for MANY snippets at once** — one answer per item, aligned by index (missing → `"none"`). Pass ALL candidate texts; it batches them internally (~10 per call) so it's ~10× fewer engine calls. **Strongly prefer this in sum/scan/max loops** (each `ask_local` is slow). |
+| `ask_local` | `ask_local(instruction: String, content: String) -> String` | the on-device reader/classifier for **ONE** item — a single full model round-trip (**seconds**). Use it ONLY when you have exactly one piece of content (one document, one chunk, one value to read). If you have a LIST, use `ask_local_batch`. (A single `ask_local(instr, x)` is just `ask_local_batch(instr, [x])[0]`.) |
+| `ask_local_batch` | `ask_local_batch(instruction: String, items: List[String]) -> List[String]` | **THE DEFAULT for reading / classifying / extracting over your data.** One answer per item, aligned by index (missing → `"none"`), batched ~10 per model call. **Mechanical rule: do I have a LIST (chunks, `.desc` strings, rows)? → `ask_local_batch`** — never a per-item `ask_local` loop (each `ask_local` is a slow round-trip; batching is ~10× fewer). Pass ALL candidate texts at once. |
 | `print_answer` | `print_answer(s: String)` | emit the final answer to the user (local only) |
 | `progress` | `progress(msg: String)` | report a one-line progress update to the user while your program runs (e.g. its scan position); call it at loop boundaries — it's free and never sees data |
 | `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
@@ -70,8 +70,10 @@ Questions are open-ended but personal, e.g.
 | `money` | `money(x: Float64) -> String` | format a dollar amount as a clean string — returns it **INCLUDING the leading `$`** (`$31,241.06`, `-$5.00`). ALWAYS use this for amounts in `print_answer`; never `String(x)` (raw floats like `$31241.0599999998`) and never prepend your own `$` (writing `"$" + money(x)` double-prints it). |
 
 You may use plain Mojo for the glue (loops, sums, date math, filtering the
-*structured* values `ask_local` returns). Keep prose understanding inside
-`ask_local`.
+*structured* values the model returns). Keep prose understanding inside the
+on-device model — and when you have a LIST of things to read/classify/extract,
+that means `ask_local_batch` (the default); reach for a single `ask_local` ONLY
+for a lone item.
 
 ## First: is this a question about the VAULT ITSELF? (answer from `manifest()`, no search)
 Some questions are about the vault's *structure*, not its contents — **how many
@@ -89,8 +91,10 @@ count, count `manifest()`.
 Use this shape only when the answer lives *inside* the files:
 1. `search(question, k)` → locate the relevant files/passages.
 2. Read the candidates (`csv_rows` / `pdf_text` / `md_text` / `docx_text`).
-3. For each piece needing judgment, call `ask_local(instruction, content)` and
-   ask it to return a **structured, minimal** result (a number, a date, "yes/no").
+3. COLLECT the pieces needing judgment into a `List[String]` and read/classify/
+   extract them in ONE `ask_local_batch(instruction, items)` call (the default —
+   a single `ask_local` only when there's exactly one piece), asking for a
+   **structured, minimal** result per item (a number, a date, "yes/no").
 4. Combine the structured results in Mojo (sum / filter by date / pick one).
 5. `print_answer(result)`.
 
@@ -134,6 +138,19 @@ Classify only the **bounded DEBIT `.desc` list** (batched ~10/call — cheap); N
 spending total. Use the keyword form `# SUGGEST_TAG: <name> = <kw>, <kw>` only when a
 short merchant list truly covers the category. (A one-off SPECIFIC merchant like
 "Costco" is not a durable category — just classify inline, no tag.)
+
+**The mechanical SUGGEST_TAG trigger (and its bound, so you don't over-tag):** if
+you're calling `ask_local_batch` to bucket TRANSACTION descriptions (`.desc`) into a
+**yes/no CATEGORY** ("is this an electricity bill?", "is this a coffee purchase?"),
+that classification **IS a tag** — emit the `# SUGGEST_TAG:` line (durable, mandatory)
+and reuse that same yes/no question. That is the ONLY case that gets a tag. Reserve
+plain INLINE `ask_local`/`ask_local_batch` with **no** SUGGEST_TAG for the other,
+non-tag jobs: (a) **extracting a value** from a document (a renewal date, an amount, a
+plate); (b) **reading one specific document**; (c) **classifying document CONTENT**
+("is this PDF chunk an electricity bill / a receipt?"). The distinction is WHERE the
+label lands: **tags live on transactions (`.desc` → `.tags`), never on raw
+documents** — so classifying PDF/Markdown chunks (or extracting a field) is
+legitimately inline with NO tag, even for the very same topic as a tagged category.
 
 **NEVER sum amounts read out of `search`/`file_chunks` text for a spending total.**
 A statement chunk also contains running **BALANCES** and printed **SUBTOTALS/
