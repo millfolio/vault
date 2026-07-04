@@ -912,6 +912,19 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_demo_download()
         if path == "/api/demo/status":
             return _cors(ok_json(_demo_status_json()))
+        # Vault/Files: index an arbitrary local folder/file, track it, and re-index
+        # tracked folders to pick up new files. One job at a time (shared with the
+        # sample-vault import path). See handle_index for the append-not-clobber note.
+        if req.method == Method.POST and path == "/api/index":
+            return self.handle_index(req)
+        if path == "/api/index/status":
+            return _cors(ok_json(_index_status_json()))
+        if path == "/api/index/folders":
+            return _cors(ok_json(_tracked_folders_json()))
+        if req.method == Method.POST and path == "/api/index/reindex":
+            return self.handle_index_reindex(req)
+        if req.method == Method.POST and path == "/api/index/folders/remove":
+            return self.handle_index_folder_remove(req)
         # Demo bot gate: validate a Turnstile token → mint a demo-access token the
         # client echoes on WS chat frames. No-op (empty token) when Turnstile is off.
         if req.method == Method.POST and path == "/api/demo/verify":
@@ -1419,6 +1432,134 @@ struct Api(Copyable, Handler, Movable):
                 bad_request('{"error":"could not start sample data import"}')
             )
         return _cors(ok_json('{"ok":true,"state":"downloading"}'))
+
+    def handle_index(self, req: Request) raises -> Response:
+        """POST /api/index {"path":…} → index an arbitrary local folder or file as a
+        DETACHED background job (polled via /api/index/status), and TRACK the path so
+        it can be re-indexed later.
+
+        APPEND-not-clobber: the on-device indexer keys its ENTIRE store on the
+        common-ancestor directory of the paths it's handed, and rebuilds from scratch
+        whenever that base changes — so indexing a lone new folder would REPLACE the
+        previously-indexed one. We therefore always index the UNION of every tracked
+        path in one run; the content-hash diff skips unchanged files, so re-indexing
+        the union to add one folder stays cheap. (Adding a folder that shifts the
+        common ancestor still forces a full re-embed — no data loss, just slower.)
+
+        Disabled in the demo; needs the engine runner (MILLFOLIO_RUN_SCRIPT). One job
+        at a time (rejects a second while one runs)."""
+        if _is_demo():
+            return _cors(
+                unauthorized('{"error":"indexing is disabled in the demo"}')
+            )
+        if getenv("MILLFOLIO_RUN_SCRIPT", "") == "":
+            return _cors(
+                bad_request(
+                    '{"error":"indexing unavailable (engine runner not'
+                    ' configured)"}'
+                )
+            )
+        var raw: String
+        try:
+            var j = loads(req.text())
+            raw = j["path"].string_value()
+        except:
+            return _cors(bad_request('{"error":"expected {path}"}'))
+        var p = String(raw.strip())
+        if p == "":
+            return _cors(bad_request('{"error":"empty path"}'))
+        # A newline/CR would let the path break out of the shell command below.
+        if p.find("\n") != -1 or p.find("\r") != -1:
+            return _cors(bad_request('{"error":"invalid path"}'))
+        if not exists(p):
+            return _cors(
+                bad_request(
+                    '{"error":"path not found","path":' + json_escape(p) + "}"
+                )
+            )
+        if _index_running():
+            return _cors(
+                bad_request('{"error":"an index job is already running"}')
+            )
+        # Union of the already-tracked paths + this one (dedup, order-preserving).
+        var union = _read_tracked_paths()
+        var seen = False
+        for i in range(len(union)):
+            if union[i] == p:
+                seen = True
+                break
+        if not seen:
+            union.append(p.copy())
+        if not _start_index_detached(union):
+            return _cors(bad_request('{"error":"could not start indexing"}'))
+        return _cors(ok_json('{"ok":true,"state":"indexing"}'))
+
+    def handle_index_reindex(self, req: Request) raises -> Response:
+        """POST /api/index/reindex {"path"?:…} → re-run indexing to pick up new/changed
+        files. Whether a specific `path` is given or not, the WHOLE union of tracked
+        paths is re-indexed (see handle_index: indexing a subset would clobber the
+        rest); a given `path` must be one of the tracked ones. No-op error when nothing
+        is tracked yet."""
+        if _is_demo():
+            return _cors(
+                unauthorized('{"error":"indexing is disabled in the demo"}')
+            )
+        if getenv("MILLFOLIO_RUN_SCRIPT", "") == "":
+            return _cors(
+                bad_request(
+                    '{"error":"indexing unavailable (engine runner not'
+                    ' configured)"}'
+                )
+            )
+        if _index_running():
+            return _cors(
+                bad_request('{"error":"an index job is already running"}')
+            )
+        var tracked = _read_tracked_paths()
+        if len(tracked) == 0:
+            return _cors(bad_request('{"error":"no tracked folders to re-index"}'))
+        # An explicit `path`, when present, must be tracked (we still index the union).
+        try:
+            var j = loads(req.text())
+            var want = String(j["path"].string_value().strip())
+            if want != "":
+                var ok = False
+                for i in range(len(tracked)):
+                    if tracked[i] == want:
+                        ok = True
+                        break
+                if not ok:
+                    return _cors(
+                        bad_request('{"error":"path is not tracked"}')
+                    )
+        except:
+            pass  # no/empty body → re-index all tracked
+        if not _start_index_detached(tracked):
+            return _cors(bad_request('{"error":"could not start indexing"}'))
+        return _cors(ok_json('{"ok":true,"state":"indexing"}'))
+
+    def handle_index_folder_remove(self, req: Request) raises -> Response:
+        """POST /api/index/folders/remove {"path":…} → stop TRACKING a folder. This
+        only forgets the path (so it's no longer re-indexed); the already-embedded
+        chunks stay in the index until the next full re-index rebuilds the store from
+        the remaining tracked paths. Returns the updated list."""
+        var p: String
+        try:
+            var j = loads(req.text())
+            p = String(j["path"].string_value().strip())
+        except:
+            return _cors(bad_request('{"error":"expected {path}"}'))
+        if p == "":
+            return _cors(bad_request('{"error":"empty path"}'))
+        var cur = _read_tracked()
+        var keep_paths = List[String]()
+        var keep_epochs = List[String]()
+        for i in range(len(cur.paths)):
+            if cur.paths[i] != p:
+                keep_paths.append(cur.paths[i].copy())
+                keep_epochs.append(cur.epochs[i].copy())
+        _write_tracked(keep_paths, keep_epochs)
+        return _cors(ok_json(_tracked_folders_json()))
 
     def handle_tags_add(self, req: Request) raises -> Response:
         """POST /api/tags/add {"name":…, "prompt"?:…, "keywords"?:…} → append a new
@@ -2356,6 +2497,218 @@ def _start_demo_detached() -> Bool:
         + "' ) </dev/null &"
     )
     _write_small(state, "downloading")
+    _write_small(log, "")
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    return True
+
+
+# ── general folder/file indexing (Vault/Files) ────────────────────────────────
+# The SAME detached-job + state/log-file pattern as the sample-vault import above,
+# generalised to any local path, plus a small tracked-folders registry so a re-index
+# can pick up new files. See `handle_index` for the append-not-clobber rationale.
+
+
+def _index_state_path() -> String:
+    return _config_dir() + "/.index.state"  # idle|indexing|done|error
+
+
+def _index_log_path() -> String:
+    return _config_dir() + "/.index.log"  # captured indexer output
+
+
+def _tracked_paths_path() -> String:
+    return _config_dir() + "/indexed-paths.json"  # the tracked-folders registry
+
+
+def _index_read_state() -> String:
+    try:
+        var s: String
+        with open(_index_state_path(), "r") as f:
+            s = f.read()
+        return String(s.strip())
+    except:
+        return String("idle")
+
+
+def _index_running() -> Bool:
+    """True while an index job is genuinely in flight."""
+    return _index_read_state() == "indexing"
+
+
+def _index_progress() -> String:
+    """The last non-empty captured line — a human-readable progress detail."""
+    try:
+        var s: String
+        with open(_index_log_path(), "r") as f:
+            s = f.read()
+        var lines = s.split("\n")
+        var last = String("")
+        for i in range(len(lines)):
+            var ln = String(lines[i].strip())
+            if ln != "":
+                last = ln^
+        return last^
+    except:
+        return String("")
+
+
+def _index_status_json() raises -> String:
+    """{"state","detail"} for the folder-index job — same shape as the demo status.
+    `state` is idle|indexing|done|error."""
+    return (
+        '{"state":'
+        + json_escape(_index_read_state())
+        + ',"detail":'
+        + json_escape(_index_progress())
+        + "}"
+    )
+
+
+@fieldwise_init
+struct _Tracked(Copyable, Movable):
+    """The tracked-folders registry, split into parallel lists: `paths[i]` was last
+    indexed at epoch-seconds `epochs[i]` (stored as a string)."""
+
+    var paths: List[String]
+    var epochs: List[String]
+
+
+def _read_tracked() raises -> _Tracked:
+    """Parse indexed-paths.json → parallel (path, lastIndexed) lists. Empty when the
+    file is missing/blank/corrupt (best-effort — a bad registry never wedges the UI).
+    """
+    var paths = List[String]()
+    var epochs = List[String]()
+    if not exists(_tracked_paths_path()):
+        return _Tracked(paths^, epochs^)
+    var text: String
+    with open(_tracked_paths_path(), "r") as f:
+        text = f.read()
+    if String(text.strip()) == "":
+        return _Tracked(paths^, epochs^)
+    try:
+        var j = loads(text)
+        var arr = j["folders"]
+        for i in range(arr.array_count()):
+            paths.append(String(arr[i]["path"].string_value()))
+            try:
+                epochs.append(String(arr[i]["lastIndexed"].string_value()))
+            except:
+                epochs.append(String(""))
+    except:
+        pass
+    return _Tracked(paths^, epochs^)
+
+
+def _read_tracked_paths() raises -> List[String]:
+    """Just the tracked folder paths (convenience for the index/reindex handlers)."""
+    var t = _read_tracked()
+    return t.paths.copy()
+
+
+def _write_tracked(paths: List[String], epochs: List[String]) raises:
+    """Persist the registry as indexed-paths.json (`{"folders":[{path,lastIndexed}]}`).
+    `epochs[i]` is epoch-seconds-as-string (or "" if unknown)."""
+    var out = String('{"folders":[')
+    for i in range(len(paths)):
+        if i > 0:
+            out += ","
+        var ep = epochs[i] if i < len(epochs) else String("")
+        out += (
+            '{"path":'
+            + json_escape(paths[i])
+            + ',"lastIndexed":'
+            + json_escape(ep)
+            + "}"
+        )
+    out += "]}"
+    _write_small(_tracked_paths_path(), out)
+
+
+def _tracked_folders_json() raises -> String:
+    """GET /api/index/folders body: {"folders":[{"path","lastIndexed"}]}. Re-serialised
+    from the parsed registry so a hand-mangled file still returns valid JSON."""
+    var t = _read_tracked()
+    var out = String('{"folders":[')
+    for i in range(len(t.paths)):
+        if i > 0:
+            out += ","
+        out += (
+            '{"path":'
+            + json_escape(t.paths[i])
+            + ',"lastIndexed":'
+            + json_escape(t.epochs[i])
+            + "}"
+        )
+    out += "]}"
+    return out^
+
+
+def _sh_squote(s: String) raises -> String:
+    """Single-quote `s` for /bin/sh, escaping embedded single quotes as '\\''. Makes a
+    user-supplied path (spaces, `$`, …) a safe single shell word."""
+    var parts = s.split("'")
+    var out = String("'")
+    for i in range(len(parts)):
+        if i > 0:
+            out += "'\\''"
+        out += String(parts[i])
+    out += "'"
+    return out^
+
+
+def _start_index_detached(paths: List[String]) -> Bool:
+    """Start the DETACHED `millfolio index <paths…>` over the whole tracked union (no
+    --force → incremental: unchanged files are skipped), flipping the state file
+    indexing→done (error on any failure); output captured to the log. Stamps every
+    path in `paths` as the tracked set with `lastIndexed = now` (they're all indexed
+    in this run). False when the run-script isn't configured or no paths were given.
+    """
+    var run_script = String(getenv("MILLFOLIO_RUN_SCRIPT", "").strip())
+    if run_script == "" or len(paths) == 0:
+        return False
+    var state = _index_state_path()
+    var log = _index_log_path()
+    var args = String("")
+    try:
+        for i in range(len(paths)):
+            args += " " + _sh_squote(paths[i])
+    except:
+        return False
+    # printf/echo always succeed, so the chain flips indexing→done and any real
+    # failure short-circuits to the trailing `|| printf error`.
+    var cmd = (
+        "( printf indexing > '"
+        + state
+        + "' && echo 'Indexing…' > '"
+        + log
+        + "'"
+        + " && /bin/bash '"
+        + run_script
+        + "' index"
+        + args
+        + " >> '"
+        + log
+        + "' 2>&1"
+        + " && printf done > '"
+        + state
+        + "' || printf error > '"
+        + state
+        + "' ) </dev/null &"
+    )
+    # Record the tracked set (all indexed now) BEFORE launching, so a poll of
+    # /api/index/folders right after start already reflects the new path.
+    try:
+        var now = String(_epoch_s())
+        var epochs = List[String]()
+        for _ in range(len(paths)):
+            epochs.append(now)
+        _write_tracked(paths, epochs)
+    except:
+        pass
+    _write_small(state, "indexing")
     _write_small(log, "")
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)

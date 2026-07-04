@@ -183,6 +183,7 @@
   onMount(() => {
     native = hasNativeBridge();
     load();
+    loadFolders(); // tracked index folders for the Files sub-tab
     if (sub === "records") loadTxns(); // Records is the default sub-tab
   });
 
@@ -517,6 +518,182 @@
     }
     return `${v.toFixed(v < 10 ? 1 : 0)} ${u[i]}`;
   }
+
+  // ── Files: index arbitrary local folders/files + track them for re-index ──────
+  // The server (POST /api/index) always re-indexes the UNION of every tracked path
+  // (the on-device indexer keys its whole store on the paths' common ancestor, so
+  // indexing a lone new folder would replace the previous one) — cheap, since the
+  // content-hash diff skips unchanged files. We only kick it and poll its progress.
+  interface TrackedFolder {
+    path: string;
+    lastIndexed: string; // epoch-seconds as a string ("" = unknown)
+  }
+  interface IndexStatus {
+    state: "idle" | "indexing" | "done" | "error";
+    detail: string;
+  }
+  let folders = $state<TrackedFolder[]>([]);
+  let idxStatus = $state<IndexStatus | null>(null);
+  let idxError = $state<string | null>(null);
+  let pathInput = $state(""); // the browser-fallback "paste a folder path" field
+  let idxPolling = false;
+
+  // Format an epoch-seconds string as a short local timestamp ("just now" fallback).
+  function fmtWhen(epoch: string): string {
+    const s = Number(epoch);
+    if (!s || Number.isNaN(s)) return "—";
+    const d = new Date(s * 1000);
+    return d.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  async function loadFolders() {
+    const base = apiBase();
+    if (base === null) return; // no backend (dev/sample) → nothing to track
+    try {
+      const r = await fetch(`${base}/api/index/folders`, { headers: { accept: "application/json" } });
+      if (r.ok) folders = ((await r.json()).folders ?? []) as TrackedFolder[];
+    } catch {
+      /* leave folders as-is */
+    }
+  }
+
+  // Poll /api/index/status until the job settles; refresh the vault + folder lists
+  // when it finishes so new files/counts appear without a manual reload.
+  function pollIndex() {
+    if (idxPolling) return;
+    idxPolling = true;
+    const base = apiBase() ?? "";
+    const tick = async () => {
+      try {
+        const d = (await fetch(`${base}/api/index/status`).then((r) => (r.ok ? r.json() : null))) as IndexStatus | null;
+        if (d) {
+          idxStatus = d;
+          if (d.state === "done") {
+            idxPolling = false;
+            await Promise.all([load(), loadFolders()]);
+            return;
+          }
+          if (d.state === "error") {
+            idxPolling = false;
+            idxError = d.detail || "Indexing failed.";
+            return;
+          }
+        }
+      } catch {
+        /* keep polling — a transient blip shouldn't strand the UI */
+      }
+      setTimeout(tick, 1200);
+    };
+    tick();
+  }
+
+  // Kick an index of `path` (POST /api/index). Server appends it to the tracked set
+  // and re-indexes the union. Returns true if the job started.
+  async function indexPath(path: string): Promise<boolean> {
+    const base = apiBase();
+    if (base === null) return false;
+    idxError = null;
+    try {
+      const r = await fetch(`${base}/api/index`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        idxError = (d && d.error) || `HTTP ${r.status}`;
+        return false;
+      }
+      idxStatus = { state: "indexing", detail: "" };
+      await loadFolders();
+      pollIndex();
+      return true;
+    } catch (e) {
+      idxError = e instanceof Error ? e.message : String(e);
+      return false;
+    }
+  }
+
+  // "Add files or folder…" — inside the native macOS app, ask it to open a native
+  // NSOpenPanel via the WKWebView bridge; the app calls back window.__millfolioPickedPath
+  // (or __millfolioPickCancelled) with the chosen absolute path(s), which we then index.
+  // A plain browser can't read a folder path from a file input, so we fall back to a
+  // paste-a-path text field (rendered in the markup) instead.
+  function addFolderNative() {
+    if (!hasNativeBridge()) return;
+    idxError = null;
+    const w = window as unknown as {
+      webkit: { messageHandlers: { millfolio: { postMessage: (m: unknown) => void } } };
+      __millfolioPickedPath?: (path: string) => void;
+      __millfolioPickCancelled?: (msg?: string) => void;
+    };
+    w.__millfolioPickedPath = (path: string) => {
+      delete w.__millfolioPickedPath;
+      delete w.__millfolioPickCancelled;
+      if (path) indexPath(path);
+    };
+    w.__millfolioPickCancelled = (msg?: string) => {
+      delete w.__millfolioPickedPath;
+      delete w.__millfolioPickCancelled;
+      if (msg) idxError = msg;
+    };
+    try {
+      w.webkit.messageHandlers.millfolio.postMessage({ type: "pickPath", mode: "folder" });
+    } catch {
+      idxError = "Couldn't reach the native picker.";
+    }
+  }
+
+  async function addFolderPath() {
+    const p = pathInput.trim();
+    if (!p) return;
+    if (await indexPath(p)) pathInput = "";
+  }
+
+  // Re-index one tracked folder (or all when no path) — picks up new files.
+  async function reindex(path?: string) {
+    const base = apiBase();
+    if (base === null) return;
+    idxError = null;
+    try {
+      const r = await fetch(`${base}/api/index/reindex`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(path ? { path } : {}),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        idxError = (d && d.error) || `HTTP ${r.status}`;
+        return;
+      }
+      idxStatus = { state: "indexing", detail: "" };
+      pollIndex();
+    } catch (e) {
+      idxError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function removeFolder(path: string) {
+    const base = apiBase();
+    if (base === null) return;
+    try {
+      const r = await fetch(`${base}/api/index/folders/remove`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      if (r.ok) folders = ((await r.json()).folders ?? []) as TrackedFolder[];
+    } catch {
+      /* ignore — the list just won't update */
+    }
+  }
+
+  const indexing = $derived(idxStatus?.state === "indexing");
 </script>
 
 <section class="vault">
@@ -555,6 +732,75 @@
       {#if sub === "tags"}
         <TagsPanel {demo} embedded />
       {:else if sub === "files"}
+      {#if !mock && !demo}
+      <div class="indexcard">
+        <div class="ixhead">
+          <span class="ixtitle">Index your files</span>
+          <span class="ixsub">Add a folder of statements or documents (<code>.csv</code>, <code>.pdf</code>, <code>.md</code>) — millfolio indexes them on-device.</span>
+        </div>
+        <div class="ixadd">
+          {#if native}
+            <button type="button" class="ixbtn" onclick={addFolderNative} disabled={indexing}>
+              Add files or folder…
+            </button>
+          {:else}
+            <form class="ixpath" onsubmit={(e) => { e.preventDefault(); addFolderPath(); }}>
+              <input
+                type="text"
+                placeholder="Paste a folder path to index (e.g. /Users/you/statements)"
+                bind:value={pathInput}
+                disabled={indexing}
+              />
+              <button type="submit" class="ixbtn" disabled={indexing || !pathInput.trim()}>Index</button>
+            </form>
+          {/if}
+        </div>
+        {#if indexing}
+          <div class="ixprog">
+            <span class="spin" aria-hidden="true"></span>
+            <span class="ixdetail">{idxStatus?.detail || "Indexing… (first run loads the embedding model)"}</span>
+          </div>
+        {:else if idxStatus?.state === "done"}
+          <p class="ixok">✓ Indexing complete.</p>
+        {/if}
+        {#if idxError}
+          <p class="banner warn">{idxError}</p>
+        {/if}
+
+        {#if folders.length > 0}
+          <div class="tracked">
+            <div class="trhead">
+              <span class="trlabel">Tracked folders</span>
+              <button type="button" class="trall" onclick={() => reindex()} disabled={indexing}>
+                Re-index all
+              </button>
+            </div>
+            <ul class="trlist">
+              {#each folders as fdr (fdr.path)}
+                <li class="tritem">
+                  <div class="trmeta">
+                    <code class="trpath" title={fdr.path}>{fdr.path}</code>
+                    <span class="trwhen">indexed {fmtWhen(fdr.lastIndexed)}</span>
+                  </div>
+                  <div class="tracts">
+                    <button type="button" class="trbtn" onclick={() => reindex(fdr.path)} disabled={indexing}>
+                      Re-index
+                    </button>
+                    <button type="button" class="trrm" title="Stop tracking" onclick={() => removeFolder(fdr.path)} disabled={indexing}>
+                      ✕
+                    </button>
+                  </div>
+                </li>
+              {/each}
+            </ul>
+            <p class="trhint">
+              Re-index picks up new files added to a tracked folder. Removing a folder just
+              stops tracking it (its already-indexed files stay searchable until the next re-index).
+            </p>
+          </div>
+        {/if}
+      </div>
+      {/if}
       <form class="search" onsubmit={runSearch}>
         <input
           type="text"
@@ -879,6 +1125,197 @@
 {/if}
 
 <style>
+  /* ── Files: index-your-files card + tracked folders ── */
+  .indexcard {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    padding: 14px 16px;
+    margin: 0 0 16px;
+  }
+  .ixhead {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 12px;
+  }
+  .ixtitle {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .ixsub {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .ixadd {
+    margin-bottom: 6px;
+  }
+  .ixpath {
+    display: flex;
+    gap: 8px;
+  }
+  .ixpath input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+  }
+  .ixpath input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .ixbtn {
+    flex: none;
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #06101f;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ixbtn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .ixprog {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .ixdetail {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ixok {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .spin {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: ixspin 0.8s linear infinite;
+  }
+  @keyframes ixspin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .tracked {
+    margin-top: 14px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .trhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .trlabel {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .trall,
+  .trbtn {
+    padding: 5px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .trall:hover,
+  .trbtn:hover {
+    border-color: var(--accent);
+  }
+  .trall:disabled,
+  .trbtn:disabled,
+  .trrm:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .trlist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .tritem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .trmeta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .trpath {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trwhen {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .tracts {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .trrm {
+    padding: 5px 8px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .trrm:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .trhint {
+    margin: 10px 0 0;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
   .recbar {
     display: flex;
     gap: 8px;
