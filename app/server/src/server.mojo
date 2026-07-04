@@ -323,6 +323,49 @@ def _memory_gb() -> Int:
         return -1
 
 
+def _memory_used_pct() -> Int:
+    """Instantaneous system memory-used % — App + Wired + Compressed over the total
+    resident pages, from `vm_stat` (same subprocess-to-temp-file pattern as
+    `_gpu_util_pct`; the bottom bar polls it beside the GPU sample). Returns -1 when
+    unavailable so the bar can hide the indicator."""
+    var out_path = _config_dir() + "/.mem_used"
+    # `cd /` first (see `_gpu_util_pct`): guard against a wiped cwd after a re-unpack.
+    var cmd = (
+        String("cd / 2>/dev/null; vm_stat 2>/dev/null | awk '")
+        + '/^Pages free/{v=$NF;gsub(/\\./,"",v);free=v}'
+        + '/^Pages active/{v=$NF;gsub(/\\./,"",v);active=v}'
+        + '/^Pages inactive/{v=$NF;gsub(/\\./,"",v);inactive=v}'
+        + '/^Pages speculative/{v=$NF;gsub(/\\./,"",v);spec=v}'
+        + '/^Pages wired/{v=$NF;gsub(/\\./,"",v);wired=v}'
+        + '/occupied by compressor/{v=$NF;gsub(/\\./,"",v);comp=v}'
+        + "END{total=free+active+inactive+spec+wired+comp;"
+        + 'if(total>0)printf "%d",((active+wired+comp)*100/total)}'
+        + "' > '"
+        + out_path
+        + "' 2>/dev/null"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    try:
+        var s: String
+        with open(out_path, "r") as f:
+            s = f.read()
+        var cur = 0
+        var indig = False
+        var b = s.as_bytes()
+        for i in range(len(b)):
+            var c = Int(b[i])
+            if c >= 48 and c <= 57:
+                cur = cur * 10 + (c - 48)
+                indig = True
+            elif indig:
+                break
+        return cur if indig else -1
+    except:
+        return -1
+
+
 # ── WebAuthn (Touch-ID) amount gate: single-file challenge + token stores ──────
 # Single-user local app → one active challenge + one active token at a time is
 # enough (both live in the data dir so they survive across worker threads). The
@@ -931,7 +974,15 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_demo_verify(req)
         # Instantaneous GPU utilization (%); the bottom bar keeps a 30s average.
         if path == "/api/gpu":
-            return _cors(ok_json('{"util":' + String(_gpu_util_pct()) + "}"))
+            return _cors(
+                ok_json(
+                    '{"util":'
+                    + String(_gpu_util_pct())
+                    + ',"mem":'
+                    + String(_memory_used_pct())
+                    + "}"
+                )
+            )
         # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
         if path == "/api/stats":
             return self.handle_stats()

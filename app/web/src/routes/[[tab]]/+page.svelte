@@ -140,6 +140,7 @@
   // 30-second GPU-utilization average. Both poll lightweight endpoints every 2s; the
   // 30s window is kept here so /api/gpu can stay a cheap, stateless instantaneous read.
   let gpuAvg = $state<number | null>(null);
+  let memUsed = $state<number | null>(null); // system memory-used %, from /api/gpu
   let bkPending = $state(0);
   let bkPriority = $state("");
   let bkEta = $state<number | null>(null);
@@ -160,6 +161,9 @@
           while (gpuRing.length && t - gpuRing[0].t > 30000) gpuRing.shift();
           gpuAvg = Math.round(gpuRing.reduce((s, x) => s + x.v, 0) / gpuRing.length);
         }
+        // Memory-used % rides the same sample (instantaneous — it's stable enough
+        // that a rolling average isn't worth it).
+        if (typeof d.mem === "number" && d.mem >= 0) memUsed = d.mem;
       }
     } catch {}
     // Backfill: pending count + priority + a live ETA measured from the drain rate
@@ -857,6 +861,11 @@
     {#if !isDemo && gpuAvg !== null}
       <span class="metric" title="average GPU utilization over the last 30 seconds">
         GPU avg: {gpuAvg}%
+      </span>
+    {/if}
+    {#if !isDemo && memUsed !== null}
+      <span class="metric" title="system memory in use (app + wired + compressed)">
+        MEM: {memUsed}%
       </span>
     {/if}
     <span class="spacer"></span>
