@@ -52,6 +52,7 @@
   // it here. The inline list is just a fallback when /questions.json can't be fetched.
   let SUGGESTED = $state<string[]>([
     "Build me a dashboard with spending by merchant for the last 3 months",
+    "Give me a table with the weekly amounts I spent per merchant in the last 6 months for the merchants that had more than 2 transactions. Display line graphs for the top 10 merchants where I spent the most money.",
     "how many transactions do I have",
     "what is the total of my transactions",
     "what kinds of files are in my vault",
@@ -90,7 +91,21 @@
   const RECENT_KEY = "millfolio:recent-questions";
   let recent = $state<AskRecord[]>([]);
   let showHistory = $state(false);
-  let inputEl = $state<HTMLInputElement>();
+  let inputEl = $state<HTMLTextAreaElement>();
+
+  // The question box is a textarea that GROWS with its content (a composer), up to a
+  // max then scrolls. Recompute after every content change: shrink to auto first so
+  // it can get smaller again, then size to the content (capped).
+  const MAX_TEXTAREA_PX = 160;
+  function autogrow() {
+    const el = inputEl;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_PX) + "px";
+  }
+  function resetGrow() {
+    if (inputEl) inputEl.style.height = "auto";
+  }
 
   // Merge two record lists, newest-first, deduped by question — the FIRST occurrence
   // wins, so callers pass the richer source (backend, with code+answer) first.
@@ -162,6 +177,8 @@
     // panel), so close it AFTER so "Ask again" actually dismisses the list.
     inputEl?.focus();
     showHistory = false;
+    // Grow to fit the dropped-in text (after the DOM reflects the new value).
+    requestAnimationFrame(autogrow);
   }
   // "Run again" — re-run this record's SAVED program directly (no model call): stream
   // the answer into the timeline over the CURRENT vault. Only offered when the record
@@ -335,14 +352,27 @@
     wasBusy = busy;
   });
 
-  function submit(e: SubmitEvent) {
-    e.preventDefault();
+  function doSend() {
     const t = draft.trim();
     if (!t || busy) return;
     onsend(t);
     remember(t);
     draft = "";
     showHistory = false;
+    resetGrow(); // collapse the grown composer back to one line
+  }
+  function submit(e: SubmitEvent) {
+    e.preventDefault();
+    doSend();
+  }
+  // Enter submits (a growing composer's convention); Shift+Enter inserts a newline.
+  function onQuestionKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      doSend();
+    } else if (e.key === "Escape") {
+      showHistory = false;
+    }
   }
 
   // Demo: ask the selected curated question (only these are in the replay cache).
@@ -547,16 +577,17 @@
   {:else}
     <form onsubmit={submit}>
       <div class="row">
-        <input
-          type="text"
+        <textarea
+          class="question"
+          rows="1"
           placeholder="My question is…"
           bind:value={draft}
           bind:this={inputEl}
           disabled={busy}
           onfocus={() => (showHistory = recent.length > 0)}
-          oninput={() => (showHistory = false)}
-          onkeydown={(e) => { if (e.key === "Escape") showHistory = false; }}
-        />
+          oninput={() => { showHistory = false; autogrow(); }}
+          onkeydown={onQuestionKeydown}
+        ></textarea>
         <button type="submit" disabled={busy || !draft.trim()}>Send</button>
       </div>
     </form>
@@ -1137,6 +1168,7 @@
     gap: 8px;
     max-width: 760px;
     margin: 0 auto; /* match the centered conversation column */
+    align-items: flex-end; /* keep Send button-sized as the composer grows */
   }
   input {
     flex: 1;
@@ -1149,6 +1181,33 @@
   input:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  /* the "My question" composer — a textarea that grows with content, wraps long
+     text (no horizontal scroll), and scrolls once it hits max-height. */
+  .question {
+    flex: 1;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    line-height: 1.4;
+    resize: none;
+    display: block;
+    max-height: 160px; /* keep in sync with MAX_TEXTAREA_PX */
+    overflow-y: auto;
+    overflow-x: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .question:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .question:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
   select {
     flex: 1;

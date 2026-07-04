@@ -16,6 +16,7 @@
   import LineChart from "$lib/components/charts/LineChart.svelte";
   import BarChart from "$lib/components/charts/BarChart.svelte";
   import GroupedBarChart from "$lib/components/charts/GroupedBarChart.svelte";
+  import MapChart from "$lib/components/charts/MapChart.svelte";
 
   let { result }: { result: ResultSpec } = $props();
 
@@ -24,7 +25,8 @@
     | { t: "kpi"; label: string; value: ResultValue }
     | { t: "table"; headers: string[]; rows: ResultValue[][] }
     | { t: "chart"; mark: "line" | "bar"; title: string; x: string[]; raw: number[]; text: string[] }
-    | { t: "group"; title: string; xcats: string[]; series: { title: string; raw: number[]; text: string[] }[] };
+    | { t: "group"; title: string; xcats: string[]; series: { title: string; raw: number[]; text: string[] }[] }
+    | { t: "map"; level: "country" | "state"; title: string; points: { code: string; value: ResultValue }[] };
 
   // The mark for ONE series, from its shape (+ optional hint override).
   function markFor(s: SeriesBlock): "line" | "bar" {
@@ -54,6 +56,8 @@
         out.push({ t: "kpi", label: b.label, value: b.value });
       } else if (b.kind === "table") {
         out.push({ t: "table", headers: b.headers, rows: b.rows });
+      } else if (b.kind === "map") {
+        if ((b.points?.length ?? 0) > 0) out.push({ t: "map", level: b.level, title: b.title, points: b.points });
       } else {
         // series
         if (b.x.values.length === 0) continue; // empty → nothing to draw
@@ -116,6 +120,8 @@
         </div>
       {:else if u.t === "group"}
         <GroupedBarChart title={u.title} xcats={u.xcats} series={u.series} />
+      {:else if u.t === "map"}
+        <MapChart title={u.title} level={u.level} points={u.points} />
       {:else if u.mark === "line"}
         <LineChart title={u.title} xValues={u.x} raw={u.raw} text={u.text} />
       {:else}

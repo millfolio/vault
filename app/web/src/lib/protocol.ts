@@ -56,7 +56,9 @@ export type ResultValue =
   | { type: "text"; value: string };
 
 /** One data block. Phase 1 renders kpi + table; series is rendered as a table
- *  (charts are Phase 2). */
+ *  (charts are Phase 2). `map` is an offline bubble map (proportional-symbol) over
+ *  a bundled outline — points are ISO-3166 alpha-3 country codes (level "country")
+ *  or US 2-letter state codes (level "state"), each sized by its money value. */
 export type ResultBlock =
   | { kind: "kpi"; label: string; value: ResultValue }
   | { kind: "table"; headers: string[]; rows: ResultValue[][] }
@@ -67,6 +69,12 @@ export type ResultBlock =
       hint?: string; // optional presenter nudge ("line"/"bar"/…) — Phase 2
       x: { type: "date" | "category"; values: string[] };
       y: { type: "money"; raw: number[]; text: string[] };
+    }
+  | {
+      kind: "map";
+      level: "country" | "state";
+      title: string;
+      points: { code: string; value: ResultValue }[];
     };
 
 /** The versioned result spec. Clients ignore-with-fallback (render `text` only)
