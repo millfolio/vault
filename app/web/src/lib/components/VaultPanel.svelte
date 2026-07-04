@@ -299,6 +299,121 @@
     modalOpen = true;
   }
 
+  // ── "+ tag" per-record menu: create a new tag OR add this record to an existing
+  // one. Tags are rule-based (no manual per-txn assignment), so "add to existing"
+  // = append this merchant's description as a KEYWORD to the chosen tag's rule.
+  // Only keyword tags are offered (AI tags match by prompt, not keywords).
+  interface FullTag {
+    name: string;
+    keywords: string[];
+    description: string;
+    ml: string; // "" = keyword rule; non-empty = AI rule (not a merge target)
+    count: number;
+  }
+  let menuIdx = $state(-1); // which record row's "+ tag" menu is open (-1 = none)
+  function toggleMenu(i: number) {
+    menuIdx = menuIdx === i ? -1 : i;
+  }
+  function closeMenu() {
+    menuIdx = -1;
+  }
+
+  // The "add to an existing tag" picker.
+  let addOpen = $state(false);
+  let addRow = $state<Txn | null>(null);
+  let addFilter = $state("");
+  let addMsg = $state("");
+  let addingTo = $state(false);
+  let fullTags = $state<FullTag[]>([]);
+  const keywordTags = $derived(fullTags.filter((t) => !t.ml || !t.ml.trim()));
+  const filteredPickTags = $derived.by(() => {
+    const q = addFilter.trim().toLowerCase();
+    if (!q) return keywordTags;
+    return keywordTags.filter((t) => t.name.toLowerCase().includes(q));
+  });
+
+  const cleanName = (s: string) => s.replace(/[,=:()\t\n]/g, "").trim();
+  const cleanDesc = (s: string) => s.replace(/[()\t\n]/g, "").trim();
+  // The keyword we add for a record = its merchant description, with characters
+  // that would break the categories.txt line format neutralised (commas separate
+  // keywords; = / : are rule separators; tabs/newlines end the line).
+  const kwFromDesc = (s: string) => s.replace(/[,=:\t\n]/g, " ").replace(/\s+/g, " ").trim();
+
+  // Rebuild categories.txt from the full tag list — the SAME format/path the Tags
+  // editor uses (POST /api/categories), which merges into an existing rule safely
+  // (add_category can only append a brand-new line, so we can't reuse it here).
+  function tagsToText(ts: FullTag[]): string {
+    let out = "# millfolio category rules — edited in the Tags page.\n";
+    for (const t of ts) {
+      const name = cleanName(t.name);
+      if (!name) continue;
+      if (t.ml && t.ml.trim()) {
+        out += `${name} : ${t.ml.trim()}\n`;
+      } else {
+        const desc = cleanDesc(t.description ?? "");
+        const head = desc ? `${name} (${desc})` : name;
+        const kw = (t.keywords ?? []).map((s) => s.trim()).filter(Boolean).join(", ");
+        if (kw) out += `${head} = ${kw}\n`;
+      }
+    }
+    return out;
+  }
+
+  async function openAddExisting(row: Txn) {
+    closeMenu();
+    addRow = row;
+    addFilter = "";
+    addMsg = "";
+    addOpen = true;
+    const base = apiBase();
+    if (base === null) return;
+    try {
+      const r = await fetch(`${base}/api/tags`, { headers: { accept: "application/json" } });
+      if (r.ok) fullTags = ((await r.json()).tags ?? []) as FullTag[];
+    } catch {
+      /* leave fullTags as-is; the picker just shows what it had */
+    }
+  }
+  function closeAddExisting() {
+    addOpen = false;
+    addRow = null;
+    addMsg = "";
+  }
+
+  // Add the current record's merchant as a keyword to `tag`'s rule, then persist the
+  // whole rule set. Side effect: any OTHER record whose description contains this
+  // keyword will also pick up the tag on the re-tag (surfaced in the picker copy).
+  async function addToExistingTag(tag: FullTag) {
+    if (addingTo || !addRow) return;
+    const base = apiBase();
+    if (base === null) return;
+    const kw = kwFromDesc(addRow.desc);
+    if (!kw) { addMsg = "This record has no usable description."; return; }
+    addingTo = true;
+    addMsg = "";
+    try {
+      const has = (tag.keywords ?? []).some((k) => k.trim().toLowerCase() === kw.toLowerCase());
+      const next = fullTags.map((t) =>
+        t.name === tag.name
+          ? { ...t, keywords: has ? t.keywords : [...(t.keywords ?? []), kw] }
+          : t,
+      );
+      const r = await fetch(`${base}/api/categories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: tagsToText(next) }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error ?? "save failed");
+      closeAddExisting();
+      await reloadAfterTag();
+    } catch (e) {
+      addMsg = e instanceof Error ? e.message : "Failed to add to tag.";
+    } finally {
+      addingTo = false;
+    }
+  }
+
   // A signed, formatted amount: debit = money OUT (−), credit = money IN (+).
   function fmtMoney(amount: number, direction: string): string {
     const sign = direction === "debit" ? "-" : "+";
@@ -312,11 +427,6 @@
   // Map a hit's frontier-safe alias back to its real filename (from the manifest).
   function nameFor(alias: string): string {
     return info?.files.find((f) => f.alias === alias)?.name ?? alias;
-  }
-  // Short label for the Records → File link — the LAST n chars (keeps the date/
-  // extension suffix, which distinguishes statements); full name stays in the title.
-  function abbrev(s: string, n = 12): string {
-    return s.length > n ? "…" + s.slice(-n) : s;
   }
   // The indexed file behind a hit's alias (for opening it in the viewer).
   function fileFor(alias: string): VaultFile | undefined {
@@ -645,15 +755,23 @@
                   <td class="rfile">
                     {#if !mock && fileFor(t.file)}
                       <button type="button" class="filelink" onclick={() => openHit(t.file)} title={nameFor(t.file)}>
-                        <span class="open" aria-hidden="true">↗</span>{abbrev(nameFor(t.file))}
+                        <span class="open" aria-hidden="true">↗</span><span class="fname">{nameFor(t.file)}</span>
                       </button>
                     {:else}
-                      <span class="muted" title={nameFor(t.file)}>{abbrev(nameFor(t.file))}</span>
+                      <span class="muted fname srcname" title={nameFor(t.file)}>{nameFor(t.file)}</span>
                     {/if}
                   </td>
                   <td class="act">
                     {#if !mock && !demo}
-                      <button type="button" class="mini" title="Define a tag from this merchant" aria-label="Define a tag from this record" onclick={() => defineFromRecord(t.desc)}>+ tag</button>
+                      <div class="actwrap">
+                        <button type="button" class="mini" class:open={menuIdx === i} title="Tag this record" aria-label="Tag this record" aria-haspopup="menu" aria-expanded={menuIdx === i} onclick={() => toggleMenu(i)}>+ tag</button>
+                        {#if menuIdx === i}
+                          <div class="tagmenu" role="menu">
+                            <button type="button" role="menuitem" onclick={() => { closeMenu(); defineFromRecord(t.desc); }}>Create a new tag…</button>
+                            <button type="button" role="menuitem" onclick={() => openAddExisting(t)}>Add to an existing tag…</button>
+                          </div>
+                        {/if}
+                      </div>
                     {/if}
                   </td>
                 </tr>
@@ -671,6 +789,14 @@
   </div>
 </section>
 
+<!-- Close the per-record "+ tag" menu on Escape or an outside click. -->
+<svelte:window onkeydown={(e) => { if (e.key === "Escape") { if (addOpen) closeAddExisting(); else closeMenu(); } }} />
+{#if menuIdx !== -1}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="menu-backdrop" onclick={closeMenu}></div>
+{/if}
+
 <DefineTagModal
   open={modalOpen}
   initialMode="keyword"
@@ -679,6 +805,44 @@
   oncreated={reloadAfterTag}
   onclose={() => (modalOpen = false)}
 />
+
+<!-- "Add to an existing tag" picker — mirrors the DefineTagModal look. Adds THIS
+     record's merchant as a keyword to the chosen (keyword) tag's rule. -->
+{#if addOpen && addRow}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="backdrop" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) closeAddExisting(); }}>
+    <div class="pmodal" role="dialog" aria-modal="true" aria-label="Add to an existing tag">
+      <h3>Add to an existing tag</h3>
+      <p class="psub">
+        Tag records matching <span class="merch">“{addRow.desc}”</span>. This adds it as a
+        keyword to the chosen tag's rule — so any record whose description contains it
+        gets that tag too.
+      </p>
+      <input class="pfilter" type="text" placeholder="Filter tags…" bind:value={addFilter} />
+      {#if keywordTags.length === 0}
+        <p class="muted phint">No keyword tags yet — use “Create a new tag” instead.</p>
+      {:else if filteredPickTags.length === 0}
+        <p class="muted phint">No tags match “{addFilter}”.</p>
+      {:else}
+        <div class="plist">
+          {#each filteredPickTags as tg (tg.name)}
+            <button type="button" class="prow" disabled={addingTo} onclick={() => addToExistingTag(tg)}>
+              <span class="pname">{tg.name}</span>
+              <span class="pcount">{tg.count}</span>
+              {#if tg.keywords.length}
+                <span class="pkw" title={tg.keywords.join(", ")}>{tg.keywords.join(", ")}</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if addMsg}<p class="pmsg">{addMsg}</p>{/if}
+      <div class="pactions">
+        <button type="button" class="pbtn" onclick={closeAddExisting}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .recbar {
@@ -829,9 +993,182 @@
       opacity: 1;
     }
   }
-  .records .act .mini:hover {
+  .records .act .mini:hover,
+  .records .act .mini.open {
     border-color: var(--accent);
     color: var(--accent);
+  }
+  /* Keep the "+ tag" button visible while its menu is open (else the row-hover
+     rule hides it the moment focus leaves the row). */
+  .records tr:hover .act .mini,
+  .records .act .mini.open {
+    opacity: 1;
+  }
+  .actwrap {
+    position: relative;
+    display: inline-block;
+  }
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+  .tagmenu {
+    position: absolute;
+    z-index: 50;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 190px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    text-align: left;
+  }
+  .tagmenu button {
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    padding: 7px 10px;
+    border-radius: calc(var(--radius) - 2px);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tagmenu button:hover {
+    background: var(--surface-2);
+    color: var(--accent);
+  }
+
+  /* "Add to an existing tag" picker modal */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .pmodal {
+    width: 100%;
+    max-width: 480px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  }
+  .pmodal h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+  }
+  .psub {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .psub .merch {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .pfilter {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+  }
+  .pfilter:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .plist {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .prow {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    padding: 7px 10px;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+  .prow:hover {
+    background: var(--surface-2);
+    border-color: var(--accent);
+  }
+  .prow:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .prow .pname {
+    font-size: 13px;
+    font-weight: 600;
+    flex: none;
+  }
+  .prow .pcount {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+  .prow .pkw {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .phint {
+    margin: 6px 0 0;
+    font-size: 12.5px;
+  }
+  .pmsg {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--warn);
+  }
+  .pactions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .pbtn {
+    padding: 7px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+  }
+  .pbtn:hover {
+    border-color: var(--accent);
   }
   .vault {
     display: flex;
@@ -1232,14 +1569,33 @@
     border-color: var(--accent);
     background: var(--surface-2);
   }
+  /* The File (source) cell: let the link use the column's width and, when the
+     name is too long, truncate on ONE line with an ellipsis (full name in the
+     title tooltip). max-width caps how much of the row it can claim; the inner
+     .fname does the clipping. No overflow-wrap here — that was forcing the link
+     to wrap inside the old 220px cap regardless of window width. */
   .records td.rfile {
-    overflow-wrap: anywhere;
-    max-width: 220px;
+    max-width: 260px;
   }
   .records td.rfile .muted {
     font-size: 12px;
   }
+  .fname {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  span.srcname {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: bottom;
+  }
   button.filelink {
+    display: inline-flex;
+    align-items: baseline;
+    max-width: 100%;
+    min-width: 0;
     background: none;
     border: none;
     padding: 0;
@@ -1249,7 +1605,9 @@
     font: inherit;
     font-size: 12.5px;
     text-align: left;
-    overflow-wrap: anywhere;
+  }
+  button.filelink .open {
+    flex: none;
   }
   button.filelink:hover {
     text-decoration: underline;
