@@ -94,9 +94,25 @@ def write_txn_rows(rows: List[TxnRow]) raises:
     var tmp = final + ".tmp"
     with open(tmp, "w") as f:
         f.write(txn_rows_to_tsv(rows))
-    # libc rename(2) — atomic on the same filesystem (String buffers are NUL-terminated,
-    # so `.unsafe_ptr()` is a valid C string).
-    _ = external_call["rename", Int32](tmp.unsafe_ptr(), final.unsafe_ptr())
+    # libc rename(2) — atomic on the same filesystem. `String.unsafe_ptr()` is NOT
+    # guaranteed NUL-terminated (the trailing byte is whatever the heap left there),
+    # so passing it straight to a C string arg intermittently gave `rename(2)` a
+    # garbage path → -1 → the tmp was never promoted and `transactions.tsv` never
+    # appeared (0 transactions). `as_c_string_slice()` NUL-terminates in place (it
+    # mutates, hence the owned `var` strings above) and is the correct C-string path.
+    var rc = external_call["rename", Int32](
+        tmp.as_c_string_slice(), final.as_c_string_slice()
+    )
+    if Int(rc) != 0:
+        raise Error(
+            "rename("
+            + tmp
+            + " -> "
+            + final
+            + ") failed (rc="
+            + String(Int(rc))
+            + ")"
+        )
 
 
 # ── registry (categories.txt is the source of truth) ──────────────────────────

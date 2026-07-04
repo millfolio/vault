@@ -91,6 +91,13 @@ test-classify = { cmd = "mkdir -p build && mojo build core/test/derive/classify_
 # AFTER the ML carry-over). Links flare (store→classify) but never calls it —
 # retag is pure.
 test-store = { cmd = "mkdir -p build && mojo build core/test/derive/store_test.mojo -I core/src -I ../flare -o build/store-test && ./build/store-test" }
+# Gate: the REAL on-disk persist path (write_txn_rows tmp+rename → load_txn_rows).
+# A synthetic reconciling statement extracts → is written → reads back with every
+# row intact. Guards the prod HOTFIX regression where the atomic rename got a
+# non-NUL-terminated C path (unsafe_ptr) → -1 → transactions.tsv never appeared →
+# 0 transactions. The in-memory TSV round-trip (test-transactions) misses this
+# because it never crosses the file boundary. Pinned MILLFOLIO_DATA_DIR (hermetic).
+test-persist = { cmd = "mkdir -p build && rm -rf build/persist-data && MILLFOLIO_DATA_DIR=\"$PWD/build/persist-data\" bash -c 'mojo build core/test/derive/persist_test.mojo -I core/src -I ../flare -o build/persist-test && MILLFOLIO_DATA_DIR=\"$PWD/build/persist-data\" ./build/persist-test'" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
@@ -127,4 +134,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
