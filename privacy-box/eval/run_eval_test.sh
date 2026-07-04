@@ -22,7 +22,17 @@ trap 'rm -rf "$TMP"' EXIT
 cat >"$TMP/mockbin" <<'EOF'
 #!/usr/bin/env bash
 q="${2:-}"
-if printf '%s' "$q" | grep -q good; then
+if printf '%s' "$q" | grep -q relok; then
+  # relative-date program: months_ago() cutoff, NO hardcoded date literal → clean.
+  printf '%s\n' 'from vault import *' 'def main() raises:' \
+    '    var cutoff = months_ago(3)' '    var t = transactions()' \
+    '    if t[0].date >= cutoff:' '        print(money(t[0].amount))'
+elif printf '%s' "$q" | grep -q reldate; then
+  # relative-date program that WRONGLY hardcodes a YYYY-MM-DD literal → guard trips.
+  printf '%s\n' 'from vault import *' 'def main() raises:' \
+    '    var cutoff = months_ago(3)' '    var t = transactions()' \
+    '    if t[0].date >= "2026-04-01":' '        print(money(t[0].amount))'
+elif printf '%s' "$q" | grep -q good; then
   printf '%s\n' 'from vault import *' 'def main() raises:' \
     '    var t = transactions()' '    print(money(t[0].amount))'
 else
@@ -69,6 +79,16 @@ assert_exit "banned substring present → exit 1" 1 "$rc"
 printf '# header comment\n\ngood q\ttransactions(\t\tstatements.txt\n' >"$TMP/g_cmt.tsv"
 run "$TMP/g_cmt.tsv"
 assert_exit "comments/blanks skipped → exit 0" 0 "$rc"
+
+# 4b) relative-date row satisfied (months_ago present, NO hardcoded date) → exit 0
+printf 'relok q\ttransactions(,months_ago(\t\tstatements.txt\n' >"$TMP/g_relok.tsv"
+run "$TMP/g_relok.tsv"
+assert_exit "wall-clock row, no date literal → exit 0" 0 "$rc"
+
+# 4c) relative-date row whose program hardcodes a YYYY-MM-DD literal → guard → exit 1
+printf 'reldate q\ttransactions(,months_ago(\t\tstatements.txt\n' >"$TMP/g_reldate.tsv"
+run "$TMP/g_reldate.tsv"
+assert_exit "wall-clock row, hardcoded date literal → exit 1" 1 "$rc"
 
 # 5) unknown model (no golden.<model>.tsv, no EVAL_GOLDEN) → exit 2
 PRIVACY_BOX_BIN="$TMP/mockbin" bash "$DIR/run_eval.sh" no-such-model >/dev/null 2>&1

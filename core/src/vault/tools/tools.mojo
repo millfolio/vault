@@ -47,6 +47,10 @@ from vault.extract import Txn
 from vault.extract.dates import iso_date as _iso_date
 from vault.extract.amounts import parse_amount as _parse_amount
 from vault.extract.amounts import format_money as _format_money
+from vault.extract.wall_clock import wall_clock as _wall_clock
+from vault.extract.wall_clock import days_ago as _days_ago
+from vault.extract.wall_clock import months_ago as _months_ago
+from vault.extract.wall_clock import years_ago as _years_ago
 
 
 # The SENTINEL that prefixes a progress line on stdout. A `progress(msg)` call
@@ -607,6 +611,37 @@ def iso_date(year: Int, md: String) raises -> String:
     program reads the year once, then folds each transaction's M/D with it.
     Compare/sort the results with plain `<`."""
     return _iso_date(year, md)
+
+
+def wall_clock() raises -> String:
+    """Today's date as an ISO `"YYYY-MM-DD"` string — the notion of "now" a program
+    needs for relative-date questions ("last N months", "this year", "year to
+    date"). It compares directly with `Txn.date` (also ISO), so filtering is a plain
+    string compare: `if t.date >= months_ago(3): …`. Reads the LOCAL system clock
+    (or the `MILLFOLIO_NOW` ISO override, for deterministic tests/eval). NEVER
+    hardcode a date — call this / the *_ago helpers instead."""
+    return _wall_clock()
+
+
+def days_ago(n: Int) raises -> String:
+    """The ISO `"YYYY-MM-DD"` date `n` days before today — for "the last N days".
+    Filter with `t.date >= days_ago(n)` (ISO string compare)."""
+    return _days_ago(n)
+
+
+def months_ago(n: Int) raises -> String:
+    """The ISO `"YYYY-MM-DD"` date `n` calendar months before today — for "the last
+    N months". Handles year rollover and clamps the day to the target month's length
+    (`2026-03-31` → `months_ago(1)` = `2026-02-28`). Filter with
+    `t.date >= months_ago(n)` (ISO string compare)."""
+    return _months_ago(n)
+
+
+def years_ago(n: Int) raises -> String:
+    """The ISO `"YYYY-MM-DD"` date `n` years before today — for "the last N years"
+    / "since <year>". Filter with `t.date >= years_ago(n)` (ISO string compare).
+    """
+    return _years_ago(n)
 
 
 def parse_amount(s: String) raises -> Float64:

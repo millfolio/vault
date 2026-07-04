@@ -11,10 +11,18 @@
 #     manifest(      — vault-structure questions answer from the manifest
 #     .tags / <tag>  — category spending filters transactions() on a KNOWN tag
 #                      (the tag name appears in the filter), NOT ask_local/search
-#     SUGGEST_TAG    — an UNKNOWN category proposes a tag (# SUGGEST_TAG: name : q),
-#                      and must NOT force a wrong near-match (e.g. "health" for gym)
+#     SUGGEST_TAG    — an UNKNOWN durable category MUST propose a tag
+#                      (# SUGGEST_TAG: name : q) — required, not optional — including
+#                      recurring bills/utilities (electricity/gas/water/internet); it
+#                      may still classify inline this time; and must NOT force a wrong
+#                      near-match (e.g. "health" for gym/electricity)
 #     ask_local      — reading a value out of a DOCUMENT (a renewal date) calls the
 #                      on-device reader; a meta count must NOT call it at all
+#     months_ago(    — a relative-date question ("last N months/days", "this year")
+#                      uses the wall-clock API (wall_clock()/months_ago()/days_ago())
+#                      and filters t.date >= … ; a row requiring it ALSO trips a
+#                      scoped guard if the program hardcodes a YYYY-MM-DD literal
+#                      (relative windows come from the clock, never a baked-in date).
 #     ].id           — manifest files are VaultFile (field is `.alias`, not `.id`;
 #                      `files[i].id` won't compile — the phone-bill regression)
 #     search(        — wrong for exact transaction aggregates / meta questions
@@ -40,3 +48,5 @@ when does my car insurance renew	ask_local	transactions(	statements.txt
 show my spending by month	transactions(,series(,money_val(	].id,search(	statements.txt
 give me a dashboard of my total spending and income	transactions(,kpi(,money_val(	].id,search(	statements.txt
 list my top merchants by total spending	transactions(,table(,money_val(	].id,search(	statements.txt
+what are my expenses in the last 3 months	transactions(,months_ago(,money(	].id,search(	statements.txt
+how much did I spend on electricity over the last 6 months	SUGGEST_TAG,electricity,transactions(,months_ago(	].id,search(,"health"	statements.txt

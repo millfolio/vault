@@ -49,6 +49,17 @@
   (subpath "/private/etc")
   (subpath "/etc")
   (literal "/private/var/run/resolv.conf"))
+;; The timezone database, read-only. The vault tools' `wall_clock()`/`months_ago()`
+;; relative-date helpers read the LOCAL system clock via libc `localtime_r`, which
+;; resolves /etc/localtime through to the zoneinfo file under /var/db/timezone. This
+;; allow is EXPLICIT for clarity + as a defense-in-depth safety net: bsd.sb's broad
+;; system-read baseline (this profile is read-blocklist over it — see the header)
+;; ALREADY permits both this path and the clock syscall, so the real-clock date read
+;; works even without this line (verified under sandbox-exec). It's here so a future
+;; tightening of the read baseline can't silently break relative-date questions. Time
+;; is not user data and grants no egress (the network rule above bounds the wire), so
+;; the tz db is safe to read. (Tests pin MILLFOLIO_NOW, so only production hits this.)
+(allow file-read* (subpath "/var/db/timezone"))
 
 ;; ── PRIMARY CONTAINMENT: network = LOOPBACK ONLY ─────────────────────────────
 ;; Deny all network first ...

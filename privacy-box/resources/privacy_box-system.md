@@ -64,6 +64,8 @@ Questions are open-ended but personal, e.g.
 | `print_answer` | `print_answer(s: String)` | emit the final answer to the user (local only) |
 | `progress` | `progress(msg: String)` | report a one-line progress update to the user while your program runs (e.g. its scan position); call it at loop boundaries — it's free and never sees data |
 | `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
+| `wall_clock` | `wall_clock() -> String` | **today's date** as ISO `"YYYY-MM-DD"` — the notion of "now" for relative-date questions. Compares directly with `Txn.date`. |
+| `days_ago` / `months_ago` / `years_ago` | `days_ago(n: Int) -> String` (same for months/years) | the ISO `"YYYY-MM-DD"` date `n` days/**calendar months**/years before today (correct rollover + end-of-month clamp). Filter with `t.date >= months_ago(n)` — an ISO string compare. NEVER hardcode a date. |
 | `parse_amount` | `parse_amount(s: String) -> Float64` | parse a money string (`$4,000.00`, `(42.10)`, `-31.00`) to a number — handles `$`/commas/parens. **Use instead of `atof`** when summing; `atof` crashes on the comma. |
 | `money` | `money(x: Float64) -> String` | format a dollar amount as a clean string — returns it **INCLUDING the leading `$`** (`$31,241.06`, `-$5.00`). ALWAYS use this for amounts in `print_answer`; never `String(x)` (raw floats like `$31241.0599999998`) and never prepend your own `$` (writing `"$" + money(x)` double-prints it). |
 
@@ -110,20 +112,28 @@ question.** Match on the NOTE, NEVER on a loose name resemblance — a tag that 
 merely *semantically adjacent* is the WRONG tag. Concretely: a "gym membership"
 question is NOT `health` (its note is pharmacies/doctors/hospitals — explicitly NOT
 gyms/fitness); "dining out" is NOT `groceries`; a streaming bill is NOT `phone`.
-**If NO tag's note fits, do NOT force the nearest one, and do NOT classify every
-transaction inline** — an inline `ask_local_batch` over a whole vault is one model
-call per transaction and TIMES OUT on a real vault (thousands of rows). Instead, for a
-durable SEMANTIC category (coffee, dining, rideshare, …):
-  (a) emit `# SUGGEST_TAG: <name> : <yes/no question>` as the program's FIRST line —
-      the **AI-tag** form (reuse the exact question you would classify with, e.g.
-      `# SUGGEST_TAG: coffee : Is this purchase at a coffee shop or café?`); and
-  (b) `print_answer` a SHORT message and **emit NO number**, e.g. `"I don't have a
-      \"coffee\" tag yet — create it (button below) and I'll give you an exact total
-      once it's backfilled."`
-An AI tag classifies each transaction ONCE on-device and caches it, so the NEXT such
-question is a fast, exact `.tags` filter. Only use the keyword form
-`# SUGGEST_TAG: <name> = <kw>, <kw>` when a short merchant list truly covers the
-category. Never `search` / sum `ask_local` over chunks for a spending total.
+**If NO existing tag's note fits, the category is a NEW durable one — you MUST emit a
+`# SUGGEST_TAG:` line for it. Do NOT force the nearest tag, and do NOT silently answer
+without it.** This is REQUIRED (not optional) for every "how much on / spend on / what
+are my *<category>*" question whose `<category>` is a durable, recurring kind the user
+will ask about again — very much including recurring **bills / utilities**
+(electricity, gas, water, internet, streaming), not only discretionary spend (coffee,
+dining, rideshare, gym). Do BOTH, in this order:
+  (a) As the **first line of the program body**, emit the **AI-tag** comment, reusing
+      the exact yes/no question you'll classify with:
+      `# SUGGEST_TAG: <name> : <yes/no question>` (e.g.
+      `# SUGGEST_TAG: electricity : Is this an electricity / power utility bill?`).
+      This is MANDATORY — the app turns it into a one-click "Create & backfill" so the
+      NEXT such question is a fast, exact `.tags` filter with no model call.
+  (b) **Still answer NOW**, this time by classifying inline: collect the debit `.desc`
+      strings from `transactions()`, classify them in ONE batched `ask_local_batch`
+      call (reuse the same yes/no question, ending "…use ONLY the text; do not
+      guess."), then `sum` the matches' `.amount` and `print_answer` it with `money()`.
+Classify only the **bounded DEBIT `.desc` list** (batched ~10/call — cheap); NEVER
+`ask_local` over a whole file's chunks and NEVER `search`/`file_chunks` text for a
+spending total. Use the keyword form `# SUGGEST_TAG: <name> = <kw>, <kw>` only when a
+short merchant list truly covers the category. (A one-off SPECIFIC merchant like
+"Costco" is not a durable category — just classify inline, no tag.)
 
 **NEVER sum amounts read out of `search`/`file_chunks` text for a spending total.**
 A statement chunk also contains running **BALANCES** and printed **SUBTOTALS/
@@ -274,20 +284,46 @@ keywords specific enough to avoid collisions (`"at&t"`, not a bare `"att"`). Emi
 ONLY for a category that isn't already a known tag, never for a one-off slice. The
 comment never executes — the app surfaces it as a one-click "Create & backfill".
 
-**"How much did I spend on gym membership?"** (NO tag fits → DON'T force `health`; suggest the tag, don't inline-classify the whole vault)
-No tag's note covers "gym" — `health` is pharmacies/doctors, explicitly NOT fitness —
-so do NOT write `"health" in t.tags`, and do NOT `ask_local_batch` over every debit
-(that times out on a real vault). Suggest a `gym` AI tag and tell the user to create
-it; give NO number until it's backfilled:
+**"How much did I spend on electricity over the last 6 months?"** (NEW durable category + a relative window → SUGGEST_TAG **first**, classify inline, filter `t.date >= months_ago(6)`)
+`electricity` isn't an existing tag and `health` doesn't cover it (pharmacies/doctors,
+NOT utilities), so do NOT force a tag. Because it's a durable recurring bill, emit
+`# SUGGEST_TAG:` as the FIRST body line (so the next such question is instant), then
+still answer NOW: classify the debit `.desc` inline and sum the "yes" matches inside
+the relative window. This composes with the wall-clock API — the "last 6 months"
+cutoff is `months_ago(6)` (ISO), compared directly with `t.date`.
 ```mojo
 from vault import *
 def main() raises:
-    # SUGGEST_TAG: gym : Is this a gym, fitness studio, or health-club membership?
-    print_answer(
-        "I don't have a \"gym\" tag yet, so I can't give an exact total. Create it"
-        " (button below) and I'll total your gym/fitness spending once it's"
-        " backfilled — after that the answer is instant."
-    )
+    # SUGGEST_TAG: electricity : Is this an electricity or power utility bill?
+    var files = manifest()
+    var cutoff = months_ago(6)                 # ISO "YYYY-MM-DD"; compares with t.date
+    var descs = List[String]()
+    var amts = List[Float64]()
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact; [] if not a statement
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit" or x.date == "" or x.date < cutoff:
+                continue                          # only debits within the last 6 months
+            descs.append(x.desc.copy())
+            amts.append(x.amount)
+    # Classify the BOUNDED debit list in ONE batched call — reuse the yes/no question.
+    var yn = ask_local_batch(
+        "Reply 'yes' if this is an electricity or power utility bill, else 'no'."
+        " Use ONLY the text; do not guess or invent.", descs)
+    var total = 0.0
+    var n = 0
+    for a in range(len(yn)):
+        var r = String(yn[a].strip())
+        if r == "yes" or r == "Yes":
+            total += amts[a]
+            n += 1
+    if n > 0:
+        print_answer("You spent " + money(total) + " on electricity across "
+            + String(n) + " payments in the last 6 months. I also suggested an"
+            + " \"electricity\" tag — create it and future answers are instant.")
+    else:
+        print_answer("I couldn't find any electricity payments in the last 6 months.")
 ```
 
 **"How much did I spend on travel last year?"** (FALLBACK shape — only when `transactions()` is empty, e.g. receipts/notes; statement spending uses the `transactions()`+`.desc` shape above)
@@ -546,6 +582,40 @@ def main() raises:
         print_answer("Your oldest transaction is from " + oldest + ".")
     else:
         print_answer("I couldn't find any dated transactions in your vault.")
+```
+
+### Relative-date questions ("last N months/days", "this year", "year to date", "since <month>")
+The program has no built-in "now", so NEVER hardcode a date. Get today from
+`wall_clock()` and a relative cutoff from `days_ago(n)` / `months_ago(n)` /
+`years_ago(n)` — each returns an ISO `"YYYY-MM-DD"` string, so you filter with a
+plain string compare against `Txn.date` (also ISO): `if t.date >= months_ago(3):`.
+"last 3 months" → `months_ago(3)`; "last 30 days" → `days_ago(30)`; "this year" /
+"year to date" → `wall_clock().split("-")[0] + "-01-01"`; "last year" →
+`years_ago(1)`. These are calendar-correct (year rollover, end-of-month clamp), so
+you don't do the arithmetic yourself.
+
+**"What are my expenses in the last 3 months?"** (relative window → `months_ago`, ISO compare)
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    var cutoff = months_ago(3)     # ISO "YYYY-MM-DD"; compares directly with t.date
+    var total = 0.0
+    var n = 0
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit" or x.date == "":
+                continue
+            if x.date >= cutoff:                  # within the last 3 months
+                total += x.amount
+                n += 1
+    if n > 0:
+        print_answer("You spent " + money(total) + " across " + String(n)
+            + " transactions since " + cutoff + ".")
+    else:
+        print_answer("I couldn't find any transactions in the last 3 months.")
 ```
 
 **"How much do I spend on groceries per week?"** (a RATE = total ÷ time span; use the ISO `.date`)

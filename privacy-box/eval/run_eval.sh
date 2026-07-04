@@ -131,6 +131,19 @@ while IFS=$'\t' read -r q must mustnot manifest; do
       reasons="$reasons present:[$t]"
     fi
   done
+  # RELATIVE-DATE guard. When a row OPTS IN by requiring the wall-clock API in its
+  # must_contain (months_ago(/days_ago(/years_ago(/wall_clock(), the program must NOT
+  # also carry a hardcoded `YYYY-MM-DD` literal — a relative window comes from the
+  # clock, never a baked-in date (which rots the moment "now" moves). Scoped to those
+  # rows (grep the $must list), so it never touches the non-date goldens. Regex, so
+  # it can't ride in must_not_contain (that's literal grep -F).
+  if printf '%s' "$must" | grep -qE 'months_ago\(|days_ago\(|years_ago\(|wall_clock\('; then
+    if printf '%s' "$prog" | grep -qE '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]'; then
+      ok=0
+      reasons="$reasons hardcoded-date:[relative-date question must not hardcode a YYYY-MM-DD literal — use wall_clock()/months_ago()]"
+    fi
+  fi
+
   # SPEC TYPED-MONEY guard (COMPUTE_VS_RENDER Phase 2). Applies to every case, not a
   # golden row: money in result DATA must be TYPED via money_val(). A BARE FLOAT can't
   # even reach a builder — Cell has no Float64 constructor, so `kpi("x", 12.5)` is a
