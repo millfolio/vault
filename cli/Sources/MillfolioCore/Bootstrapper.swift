@@ -1843,6 +1843,31 @@ public final class Bootstrapper: ObservableObject {
                                    env: ["MILLFOLIO_SESSION_LOG": session.path])
     }
 
+    /// Run a SUPPLIED vault program (from `mill run <path-or-url>`) over the vault
+    /// WITHOUT a model call: privacy_box's `run` mode compiles + sandboxes the
+    /// program through the identical path a model-written program takes. See
+    /// runLoggedScript. `programPath` is a local file the CLI already resolved (a
+    /// downloaded temp file for a URL, or the user's local path).
+    public func runVaultRun(programPath: String, vaultDir: String) throws -> Int32 {
+        refreshServerRunning()
+        ensureVaultShims()  // self-heal a wiped shared-toolchain lib/ before the vault binary dlopens it
+        let script = try writePrivacyBoxScript()
+        let args = ["run", programPath, vaultDir]
+        logRunDiagnostics(label: "run", launcher: script, args: args, probes: [
+            ("privacy_box launcher", script.path),
+            ("privacy_box dir (cwd)", privacy_boxDir.path),
+            ("privacy_box binary", privacy_boxBin.path),
+            ("mojo compiler (privacy_box shells it)", privacy_boxMojoPrefix.appendingPathComponent("bin/mojo").path),
+            ("supplied program", programPath),
+            ("vault dir", vaultDir),
+        ])
+        // Per-run transcript: the supplied program + its (local-only) output.
+        let session = newSessionLog(for: "run " + URL(fileURLWithPath: programPath).lastPathComponent)
+        set("session transcript → \(session.path)")
+        return try runLoggedScript(script.path, args, label: "run",
+                                   env: ["MILLFOLIO_SESSION_LOG": session.path])
+    }
+
     /// Run the millfolio engine `index <path…>` over one or more files/folders.
     /// See runLoggedScript.
     public func runVaultIndex(paths: [String], force: Bool = false) throws -> Int32 {

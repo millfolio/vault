@@ -419,6 +419,37 @@ struct Orchestrator(Movable):
         )
         return _strip_progress(out)
 
+    def run_vault_program(
+        mut self, program: String, vault_dir: String
+    ) raises -> String:
+        """Run a SUPPLIED `from vault import *` program (from `mill run <file/URL>`,
+        NOT the model) through the EXACT same compile + Seatbelt + capture path a
+        generated program takes — same include paths (`vault_include_paths`), same
+        loopback run profile, same `_strip_progress`/result-spec handling. There is
+        NO codegen, NO manifest, NO remote budget, and — deliberately — NO model
+        FIX loop: a user program may embed real content, so a compile error is
+        surfaced LOCALLY and NEVER fed upstream (unlike `vault_build`, whose
+        aliased-only errors are safe to send to the model).
+
+        The program is UNTRUSTED exactly like model output, so it runs in the
+        IDENTICAL loopback Seatbelt profile (network-denied except 127.0.0.1,
+        writes confined to scratch) — `vault_run` renders the same vault profile
+        `run_vault_task` uses. No relaxation."""
+        log("• compiling the supplied program…")
+        var includes = vault_include_paths()
+        var compiled = self.sandbox.compile(program, includes)
+        if compiled.exit_code != 0:
+            raise Error(
+                "vault: the supplied program did not compile:\n"
+                + compiled.output
+            )
+        _session_append(
+            "===== SUPPLIED PROGRAM (mill run — not model-written) =====\n"
+            + program
+            + "\n"
+        )
+        return self.vault_run(vault_dir)
+
     def run_vault_task(
         mut self, question: String, vault_dir: String
     ) raises -> String:

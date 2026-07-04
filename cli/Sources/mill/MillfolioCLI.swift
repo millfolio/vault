@@ -15,7 +15,7 @@ struct Millfolio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mill",
         abstract: "The millfolio personal data vault — install, start, stop, index, and ask.",
-        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self, Get.self, SetCmd.self, Doctor.self]
+        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self, Run.self, Get.self, SetCmd.self, Doctor.self]
     )
 }
 
@@ -348,6 +348,73 @@ struct Ask: AsyncParsableCommand {
         let code = try boot.runVaultAsk(question: q, vaultDir: dir)
         try finish(code, boot, "mill ask")
     }
+}
+
+// ── mill run <path-or-url> ────────────────────────────────────────────────
+struct Run: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Run a supplied vault program over your vault (`mill run <path-or-url>`).",
+        discussion: """
+        Runs a HUMAN-written `from vault import *` Mojo program over your real \
+        indexed vault WITHOUT any model call — the program comes from a local file \
+        or an https:// URL instead of the frontier model. It runs in the SAME \
+        Seatbelt sandbox that model-written programs run in (network-denied except \
+        127.0.0.1, writes confined to scratch), so it's as sandboxed as codegen \
+        output — but it's arbitrary code you chose to run, so only run programs you \
+        trust. The vault dir is $MILLFOLIO_VAULT, else ~/.config/millfolio/vault. \
+        Needs the inference server running (a program may call search()/ask_local()).
+        """)
+    @Argument(help: "A local .mojo file path OR an https:// URL to a `from vault import *` program.")
+    var source: String
+
+    @MainActor func run() async throws {
+        let boot = streaming()   // stream progress to the console
+        let dir = boot.ensureVaultDir()
+        // Resolve the program to a LOCAL file: download an https URL to a temp file,
+        // or use the local path directly. http:// and other schemes are rejected.
+        let resolved = try await resolveRunProgram(source)
+        defer { if resolved.isTemp { try? FileManager.default.removeItem(atPath: resolved.path) } }
+
+        print("Program source: \(source)")
+        print("Running it in the sandbox over your vault (\(dir)).")
+        print("  It runs as sandboxed as model-written code — but this is arbitrary")
+        print("  code you supplied, so only run programs you trust.")
+
+        // A supplied program may call search()/ask_local() (127.0.0.1 only) — make
+        // sure the inference server is up, mirroring `mill ask`.
+        try boot.ensureInferenceServer()
+        let code = try boot.runVaultRun(programPath: resolved.path, vaultDir: dir)
+        try finish(code, boot, "mill run")
+    }
+}
+
+/// Resolve a `mill run` source to a local file path. An `https://` URL is fetched
+/// to a temp file (returned with `isTemp: true` so the caller deletes it); a bare
+/// path is used in place. `http://` and any other `<scheme>://` are rejected —
+/// https + local file only.
+private func resolveRunProgram(_ source: String) async throws -> (path: String, isTemp: Bool) {
+    if source.hasPrefix("https://") {
+        guard let url = URL(string: source) else {
+            throw BootstrapError.step("mill run", "not a valid URL: \(source)")
+        }
+        let (data, resp) = try await URLSession.shared.data(from: url)
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw BootstrapError.step("mill run", "download failed (HTTP \(http.statusCode)): \(source)")
+        }
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mill-run-\(UUID().uuidString).mojo")
+        try data.write(to: tmp)
+        return (tmp.path, true)
+    }
+    if source.contains("://") {
+        throw BootstrapError.step("mill run",
+            "only https:// URLs and local file paths are supported (got: \(source))")
+    }
+    let abs = URL(fileURLWithPath: source).standardizedFileURL.path
+    guard FileManager.default.fileExists(atPath: abs) else {
+        throw BootstrapError.step("mill run", "no such file: \(source)")
+    }
+    return (abs, false)
 }
 
 /// Map a child's exit status to the CLI's: on failure, point at the diagnostic

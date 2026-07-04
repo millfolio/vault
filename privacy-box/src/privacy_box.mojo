@@ -55,6 +55,23 @@ def _run_vault(question: String, var vault_dir: String) raises:
     print(orch.run_vault_task(question, dir.copy()))
 
 
+def _run_program(program_path: String, var vault_dir: String) raises:
+    """`privacy_box run <program-file> [dir]` — run a SUPPLIED program over the
+    vault WITHOUT calling the model. Reads the program from `program_path` (the
+    CLI writes a temp file for a URL / passes the local file directly), then runs
+    it through the SAME compile + Seatbelt + capture path a generated program
+    takes (orchestrator.run_vault_program). No codegen, no manifest, no budget —
+    but the program is UNTRUSTED, so it runs in the identical loopback sandbox.
+    """
+    var cfg = load_config()
+    var dir = _vault_dir(vault_dir^)
+    var orch = build_vault_orchestrator(cfg, dir)
+    var program: String
+    with open(program_path, "r") as f:
+        program = f.read()
+    print(orch.run_vault_program(program, dir.copy()))
+
+
 def _run_codegen(
     question: String, manifest_path: String, var vault_dir: String
 ) raises:
@@ -63,7 +80,8 @@ def _run_codegen(
     MANIFEST, so the pre-release prompt eval feeds a hand-written synthetic manifest
     (`--manifest`) and lints the program the frontier model writes — no index or
     embedding server needed, just the frontier key. With a `<dir>` instead, the real
-    `mill manifest <dir>` is used (needs millfolio built + the vault indexed)."""
+    `mill manifest <dir>` is used (needs millfolio built + the vault indexed).
+    """
     var cfg = load_config()
     var dir = _vault_dir(vault_dir^)
     var orch = build_vault_orchestrator(cfg, dir)
@@ -87,6 +105,19 @@ def main() raises:
         var question = String(argv0[2])
         var vdir = String(argv0[3]) if len(argv0) >= 4 else String("")
         _run_vault(question, vdir^)
+        return
+
+    # `privacy_box run <program-file> [vault_dir]` — run a SUPPLIED program (a
+    # human-written / shared `from vault import *` file, NOT the model) over the
+    # vault, through the exact same sandbox path as a generated program. Drives
+    # `mill run <path-or-url>`.
+    if len(argv0) > 1 and String(argv0[1]) == "run":
+        if len(argv0) < 3:
+            print("usage: privacy_box run <program-file> [vault_dir]")
+            return
+        var prog = String(argv0[2])
+        var vdir = String(argv0[3]) if len(argv0) >= 4 else String("")
+        _run_program(prog, vdir^)
         return
 
     # `privacy_box codegen "<question>" [--manifest <file> | <vault_dir>]` — print
@@ -114,7 +145,9 @@ def main() raises:
         return
 
     print('usage: privacy_box vault "<question>" [vault_dir]')
+    print("       privacy_box run <program-file> [vault_dir]")
     print("  Answer a question about your private VAULT (CSV/PDF/Markdown).")
+    print("  `run` executes a SUPPLIED program (no model) in the same sandbox.")
     print("  Index it first with `mill index <dir>` (embedding server live).")
     print(
         "  The vault dir defaults to $MILLFOLIO_VAULT, else $PRIVACY_BOX_DATA,"
