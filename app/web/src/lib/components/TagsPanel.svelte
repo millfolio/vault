@@ -166,7 +166,7 @@
     {:else}
       <table class="tagtable">
         <thead>
-          <tr><th>Tag</th><th>Rule</th><th class="num">Txns</th><th class="act"></th></tr>
+          <tr><th>Tag</th><th>Rule</th><th class="num">Records</th><th class="act"></th></tr>
         </thead>
         <tbody>
           {#each filteredTags as t (t.name)}
