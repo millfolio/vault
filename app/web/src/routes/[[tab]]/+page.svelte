@@ -101,11 +101,29 @@
   // not-downloaded one shows a Download action (→ background fetch + poll).
   let models = $state<{ id: string; label: string; gb?: number; downloaded?: boolean }[]>([]);
   let currentModel = $state("");
+  // Total physical RAM (GB) reported by the server (/api/models). 0/undefined on an
+  // older server or the in-browser mock (:5173, no backend) → the fit check is skipped
+  // and no model is grayed out (fall back to the prior behavior).
+  let memoryGb = $state(0);
+  // Headroom (GB) reserved for macOS itself, the app-server + web app, and the engine's
+  // KV-cache/activations on top of the raw weights — so a model whose weights alone
+  // nearly fill RAM is (correctly) flagged won't-fit. `gb` is the bf16 DOWNLOAD size, a
+  // conservative UPPER bound on the runtime footprint (the engine may quantize to int4),
+  // which is fine for an "unlikely to fit" heuristic — it errs toward caution.
+  const RESERVE_GB = 5;
   let switching = $state(false);
   let catalogOpen = $state(false);
   // The in-flight download (from /api/models/download/status): which model +
-  // running|done|error + the latest progress line. Null when idle.
-  let dl = $state<{ model: string; state: string; detail: string } | null>(null);
+  // running|done|error + the latest progress line, plus a numeric progress 0–100
+  // (-1/undefined = unknown → indeterminate spinner) and optional byte counts.
+  let dl = $state<{
+    model: string;
+    state: string;
+    detail: string;
+    progress?: number;
+    bytesDone?: number;
+    bytesTotal?: number;
+  } | null>(null);
   let dlTimer: ReturnType<typeof setTimeout> | undefined;
   // Build stamp: the app SHA with the build date stripped. When the server reports a
   // real release version (a `mill` install — not the demo's "<sha> · <date>" deploy
@@ -376,12 +394,26 @@
       const m = await fetch("/api/models").then((r) => (r.ok ? r.json() : null));
       if (m && Array.isArray(m.available)) models = m.available;
       if (m && typeof m.current === "string") currentModel = m.current;
+      // -1/absent = server couldn't detect RAM → treat as unknown (0 disables the check).
+      if (m && typeof m.memoryGb === "number" && m.memoryGb > 0) memoryGb = m.memoryGb;
     } catch {}
+  }
+  // Does model `m` plausibly fit in this Mac's RAM? Unknown memory (mock/older server)
+  // or no advertised size → always "fits" (don't disable). We NEVER flag the currently
+  // loaded/in-use model as won't-fit — it's demonstrably running (guarded at the call
+  // site via isCurrent). `gb` is the bf16 download size, a conservative upper bound.
+  function fits(m: { gb?: number }): boolean {
+    if (!memoryGb || !m.gb) return true;
+    return m.gb + RESERVE_GB <= memoryGb;
   }
   // Is `id` the model the engine is currently serving? The loaded id differs from a
   // catalog id by org prefix + an `-int4` suffix, so match on the short, stripped form.
   function isCurrent(id: string): boolean {
     return !!currentModel && shortId(id) === shortId(currentModel);
+  }
+  // Bytes → GiB with one decimal (for the download progress "X.X / Y.Y GB" readout).
+  function fmtGB(bytes: number): string {
+    return (bytes / (1 << 30)).toFixed(1);
   }
   // The catalog label for a model id (falls back to the last path segment).
   function labelFor(id: string): string {
@@ -755,7 +787,14 @@
                   {#if m.gb}<span class="cm-gb">~{m.gb} GB</span>{/if}
                 </span>
                 {#if isCurrent(m.id)}
+                  <!-- Never won't-fit: the loaded model is demonstrably running. -->
                   <span class="cm-badge">In use</span>
+                {:else if !fits(m)}
+                  <button
+                    class="cm-nofit"
+                    disabled
+                    title={`Needs ~${m.gb} GB; this Mac has ${memoryGb} GB`}
+                  >Won't fit in memory</button>
                 {:else if m.downloaded}
                   <button
                     class="cm-use"
@@ -763,7 +802,14 @@
                     onclick={() => { selectModel(m.id); catalogOpen = false; }}
                   >Use</button>
                 {:else if dl && dl.model === m.id && dl.state === "running"}
-                  <span class="cm-prog" title={dl.detail}>Downloading…</span>
+                  {#if typeof dl.progress === "number" && dl.progress >= 0}
+                    <span class="cm-progbar" title={dl.detail} role="progressbar" aria-valuenow={dl.progress} aria-valuemin="0" aria-valuemax="100">
+                      <span class="cm-bar"><span class="cm-fill" style="width:{dl.progress}%"></span></span>
+                      <span class="cm-pct">{dl.progress}%</span>
+                    </span>
+                  {:else}
+                    <span class="cm-prog" title={dl.detail}>Downloading…</span>
+                  {/if}
                 {:else if dl && dl.model === m.id && dl.state === "error"}
                   <button class="cm-dl" onclick={() => downloadModel(m.id)}>Retry</button>
                 {:else}
@@ -777,7 +823,14 @@
             {/each}
             {#if dl && dl.state === "running"}
               <div class="catalog-foot" title={dl.detail}>
-                Downloading {labelFor(dl.model)}… <span class="cf-detail">{dl.detail}</span>
+                Downloading {labelFor(dl.model)}…
+                {#if typeof dl.progress === "number" && dl.progress >= 0}
+                  {dl.progress}%{#if dl.bytesTotal && dl.bytesTotal > 0 && dl.bytesDone !== undefined && dl.bytesDone >= 0}
+                    <span class="cf-detail"> · {fmtGB(dl.bytesDone)} / {fmtGB(dl.bytesTotal)} GB</span>
+                  {/if}
+                {:else}
+                  <span class="cf-detail">{dl.detail}</span>
+                {/if}
               </div>
             {:else if dl && dl.state === "error"}
               <div class="catalog-foot err">Download failed: {dl.detail}</div>
@@ -1197,6 +1250,44 @@
   .cm-prog {
     color: var(--text-dim);
     font-size: 11px;
+  }
+  /* Determinate download progress: a thin track + fill and a NN% readout. */
+  .cm-progbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .cm-bar {
+    width: 72px;
+    height: 4px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .cm-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .cm-pct {
+    color: var(--text-dim);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Won't-fit: a disabled, dimmed pseudo-button matching the catalog buttons. */
+  .cm-nofit {
+    appearance: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    opacity: 0.55;
+    cursor: not-allowed;
   }
   .cm-use,
   .cm-dl {

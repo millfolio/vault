@@ -282,6 +282,47 @@ def _gpu_util_pct() -> Int:
         return -1
 
 
+def _memory_gb() -> Int:
+    """Total physical RAM in whole GB, read via `sysctl -n hw.memsize` (bytes) —
+    same subprocess-to-temp-file pattern as `_gpu_util_pct`. Used by the model
+    catalog UI to gray out checkpoints too big to fit in memory. Returns -1 when
+    unavailable (non-macOS / parse miss) so the client falls back to enabling all
+    models. RAM is fixed for a machine, but /api/models is polled rarely (only when
+    the catalog popover opens), so a per-call sample is cheap enough — no caching."""
+    var out_path = _config_dir() + "/.mem_bytes"
+    # `cd /` first (see `_gpu_util_pct`): a re-unpacked bundle can leave the spawned
+    # shell with no valid cwd, which otherwise spams a getcwd warning.
+    var cmd = (
+        String("cd / 2>/dev/null; sysctl -n hw.memsize > '")
+        + out_path
+        + "' 2>/dev/null"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    try:
+        var s: String
+        with open(out_path, "r") as f:
+            s = f.read()
+        var bytes = 0
+        var indig = False
+        var b = s.as_bytes()
+        for i in range(len(b)):
+            var c = Int(b[i])
+            if c >= 48 and c <= 57:
+                bytes = bytes * 10 + (c - 48)
+                indig = True
+            elif indig:
+                break
+        if not indig:
+            return -1
+        # Bytes → GiB (macOS reports hw.memsize as a power-of-two capacity, e.g.
+        # a "24 GB" Mac is 25769803776 = 24 * 1024^3). Round to nearest whole GB.
+        return (bytes + (1 << 29)) >> 30
+    except:
+        return -1
+
+
 # ── WebAuthn (Touch-ID) amount gate: single-file challenge + token stores ──────
 # Single-user local app → one active challenge + one active token at a time is
 # enough (both live in the data dir so they survive across worker threads). The
@@ -790,6 +831,8 @@ struct Api(Copyable, Handler, Movable):
                     + json_escape(_current_model_id())
                     + ',"loaded":'
                     + json_escape(_engine_loaded_model())
+                    + ',"memoryGb":'
+                    + String(_memory_gb())
                     + ',"available":'
                     + _available_models_json()
                     + "}"
@@ -1867,12 +1910,92 @@ def _dl_read_model() -> String:
         return String("")
 
 
+def _catalog_gb(id: String) -> Int:
+    """The catalog's approximate download size (whole GB) for `id`, or 0 if unknown
+    (a manually-cached model not in the catalog). Used as the progress denominator."""
+    var cat = _catalog()
+    for i in range(len(cat)):
+        if cat[i][0] == id:
+            var out = 0
+            var b = cat[i][2].as_bytes()
+            for j in range(len(b)):
+                var c = Int(b[j])
+                if c >= 48 and c <= 57:
+                    out = out * 10 + (c - 48)
+            return out
+    return 0
+
+
+def _du_bytes(path: String) -> Int:
+    """On-disk size of `path` in bytes via `du -sk` (KiB blocks → bytes) — the
+    subprocess-to-temp-file pattern of `_gpu_util_pct`. Robust to the downloader's
+    verbosity: we measure what has actually landed on disk. Returns -1 on miss."""
+    if not exists(path):
+        return 0
+    var out_path = _config_dir() + "/.dl_du"
+    var cmd = (
+        String("cd / 2>/dev/null; du -sk '") + path + "' > '" + out_path + "'"
+        " 2>/dev/null"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    try:
+        var s: String
+        with open(out_path, "r") as f:
+            s = f.read()
+        var kb = 0
+        var indig = False
+        var b = s.as_bytes()
+        for i in range(len(b)):
+            var c = Int(b[i])
+            if c >= 48 and c <= 57:
+                kb = kb * 10 + (c - 48)
+                indig = True
+            elif indig:
+                break  # stop at the first non-digit (the tab before the path)
+        return (kb * 1024) if indig else -1
+    except:
+        return -1
+
+
+def _dl_progress_pct(id: String, done: Bool) raises -> Int:
+    """Download progress 0–100 for `id`. `done` (refs/main present) short-circuits to
+    100. Otherwise it's the on-disk size of the model's cache dir over the catalog's
+    expected total. The catalog GB is the bf16 download size — a slight over-estimate
+    of the final on-disk bytes — so the ratio can approach but should be clamped to
+    <100 until genuinely done, avoiding a premature 100%. Returns -1 when unknown (no
+    catalog size, or du failed) so the client falls back to the indeterminate spinner.
+    """
+    if done:
+        return 100
+    var gb = _catalog_gb(id)
+    if gb <= 0:
+        return -1
+    var repo = _hf_hub_dir() + "/models--" + _id_to_slug(id)
+    var on_disk = _du_bytes(repo)
+    if on_disk < 0:
+        return -1
+    var total = gb * (1 << 30)  # GiB → bytes
+    var pct = (on_disk * 100) // total
+    if pct < 0:
+        pct = 0
+    if pct > 99:
+        pct = 99  # never report 100 until refs/main lands (see docstring)
+    return pct
+
+
 def _download_status_json() raises -> String:
-    """{"model","state","detail"} for the in-flight (or last) download. `state` is
-    idle|running|done|error; `detail` is the latest downloader progress line. Self-
-    heals to `done` when `refs/main` appears (the fetch's final write)."""
+    """{"model","state","detail","progress","bytesDone","bytesTotal"} for the in-flight
+    (or last) download. `state` is idle|running|done|error; `detail` is the latest
+    downloader progress line. `progress` is 0–100 (integer; -1 when unknown → the
+    client shows an indeterminate spinner). Self-heals to `done`/100 when `refs/main`
+    appears (the fetch's final write)."""
     var model = _dl_read_model()
     var state = String("idle")
+    var progress = -1
+    var bytes_done = -1
+    var bytes_total = -1
     if model != "":
         try:
             var s: String
@@ -1881,8 +2004,18 @@ def _download_status_json() raises -> String:
             state = String(s.strip())
         except:
             state = String("running")
-        if _model_downloaded(model):
+        var done = _model_downloaded(model)
+        if done:
             state = String("done")
+        # Only surface a live percentage while the fetch is active (or done).
+        if state == "running" or state == "done":
+            progress = _dl_progress_pct(model, done)
+            var gb = _catalog_gb(model)
+            if gb > 0:
+                bytes_total = gb * (1 << 30)
+                bytes_done = bytes_total if done else _du_bytes(
+                    _hf_hub_dir() + "/models--" + _id_to_slug(model)
+                )
     return (
         '{"model":'
         + json_escape(model)
@@ -1890,6 +2023,12 @@ def _download_status_json() raises -> String:
         + json_escape(state)
         + ',"detail":'
         + json_escape(_dl_progress())
+        + ',"progress":'
+        + String(progress)
+        + ',"bytesDone":'
+        + String(bytes_done)
+        + ',"bytesTotal":'
+        + String(bytes_total)
         + "}"
     )
 
