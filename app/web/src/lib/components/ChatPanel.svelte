@@ -33,6 +33,7 @@
     busy,
     demo = false,
     onsend,
+    onrun,
     onapprove,
     onreject,
   }: {
@@ -40,6 +41,7 @@
     busy: boolean;
     demo?: boolean;
     onsend: (text: string) => void;
+    onrun: (program: string, question: string) => void;
     onapprove: (id: string, stepId: string) => void;
     onreject: (id: string, stepId: string) => void;
   } = $props();
@@ -159,6 +161,15 @@
     // Focus FIRST — focusing fires the input's onfocus (which would re-open the
     // panel), so close it AFTER so "Ask again" actually dismisses the list.
     inputEl?.focus();
+    showHistory = false;
+  }
+  // "Run again" — re-run this record's SAVED program directly (no model call): stream
+  // the answer into the timeline over the CURRENT vault. Only offered when the record
+  // carries a stored program (older question-only records don't). Closes the panel so
+  // the streamed result is visible, mirroring pickRecent.
+  function runAgain(r: AskRecord) {
+    if (!r.code || busy) return;
+    onrun(r.code, r.q);
     showHistory = false;
   }
   // Remove a question from history — from the local list + cache AND (best-effort)
@@ -380,6 +391,9 @@
               <!-- backend record: expandable to its stored answer + generated program -->
               <details class="hist-rec">
                 <summary title={r.q}>{r.q}</summary>
+                <!-- Ask again: drop the question back into the box → the model writes a
+                     NEW program (right after the question, as the primary action). -->
+                <button type="button" class="hist-use" onclick={() => pickRecent(r.q)}>Ask again</button>
                 {#if r.answer}<p class="hist-answer">{r.answer}</p>{/if}
                 {#if r.source}<p class="hist-src">📄 {r.source}</p>{/if}
                 {#if r.code}
@@ -387,8 +401,16 @@
                     <summary>generated program</summary>
                     {@render codeBox(r.code, "hist-" + r.q)}
                   </details>
+                  <!-- Run again: re-run this SAVED program directly (no model call) —
+                       faster + deterministic. After the program, as the spec asks. -->
+                  <button
+                    type="button"
+                    class="hist-run"
+                    disabled={busy}
+                    title="Re-run the saved program over your current vault — no model call"
+                    onclick={() => runAgain(r)}
+                  >Run again</button>
                 {/if}
-                <button type="button" class="hist-use" onclick={() => pickRecent(r.q)}>Ask again</button>
               </details>
             {:else}
               <button type="button" class="hist-item" title={r.q} onclick={() => pickRecent(r.q)}>{r.q}</button>
@@ -763,6 +785,22 @@
     font-size: 12px;
   }
   .hist-use:hover { background: var(--accent-dim); }
+  /* Run again — a filled accent button (the deterministic, no-model re-run), set
+     apart from the outline "Ask again"; sits after the generated program. */
+  .hist-run {
+    margin: 0 10px 8px;
+    padding: 5px 12px;
+    background: var(--accent);
+    color: #06101f;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .hist-run:hover:not(:disabled) { filter: brightness(1.08); }
+  .hist-run:disabled { opacity: 0.45; cursor: not-allowed; }
   .stream {
     flex: 1;
     overflow-y: auto;

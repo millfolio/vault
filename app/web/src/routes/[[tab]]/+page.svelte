@@ -621,6 +621,15 @@
     session = client.ask(text, handle);
   }
 
+  // "Run again" — re-run a SAVED program directly (no model call). Mark it in the
+  // timeline with a user-style "Run again: <q>" bubble, then stream the answer with the
+  // SAME event handler as a normal ask (status/message/result render identically).
+  function runAgain(program: string, q: string) {
+    items.push({ kind: "user", id: uid(), text: `Run again: ${q}` });
+    busy = true;
+    session = client.run(program, q, handle);
+  }
+
   function resolve(id: string, decision: "approved" | "rejected") {
     const i = items.findIndex((x) => x.id === id);
     if (i !== -1 && items[i].kind === "approval") items[i] = { ...items[i], resolved: decision };
@@ -744,7 +753,7 @@
   {/if}
   <div class="single">
     {#if view === "chat"}
-      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
+      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />
     {:else if view === "vault"}
       <VaultPanel demo={isDemo} initialSub="records" />
     {:else if view === "tags"}
@@ -760,7 +769,7 @@
         <SystemPanel demo={isDemo} initialSub="stats" />
       {/if}
     {:else}
-      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onapprove={approve} onreject={reject} />
+      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />
     {/if}
   </div>
   <footer class="statusbar">

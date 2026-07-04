@@ -20,6 +20,12 @@ function safeId(): string {
   return `ask-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 }
 
+// The opening frame of a session — either an ask (codegen → run) or a run (re-run a
+// saved program). The id/demo_token are filled in when the socket opens.
+type OpenFrame =
+  | { type: "ask"; text: string }
+  | { type: "run"; program: string; text: string };
+
 class WsSession implements Session {
   private ws: WebSocket;
   private ready = false;
@@ -28,7 +34,7 @@ class WsSession implements Session {
 
   constructor(
     url: string,
-    text: string,
+    open: OpenFrame,
     private onEvent: (e: ServerEvent) => void,
     demoToken?: string,
   ) {
@@ -37,8 +43,13 @@ class WsSession implements Session {
     this.ws.onopen = () => {
       this.ready = true;
       // demo_token: the demo bot gate echoes the Turnstile-minted token on the ask
-      // frame (server on_connect validates it). Omitted (harmless) outside the demo.
-      this.put({ type: "ask", id: safeId(), text, ...(demoToken ? { demo_token: demoToken } : {}) });
+      // frame (server on_connect validates it). Omitted (harmless) outside the demo
+      // and on run frames (Run again is rejected in the demo server-side).
+      if (open.type === "run") {
+        this.put({ type: "run", id: safeId(), program: open.program, text: open.text });
+      } else {
+        this.put({ type: "ask", id: safeId(), text: open.text, ...(demoToken ? { demo_token: demoToken } : {}) });
+      }
       for (const m of this.pending) this.write(m);
       this.pending = [];
     };
@@ -97,7 +108,10 @@ export function createWsClient(
 ): MillfolioClient {
   return {
     ask(text, onEvent) {
-      return new WsSession(url, text, onEvent, getDemoToken?.());
+      return new WsSession(url, { type: "ask", text }, onEvent, getDemoToken?.());
+    },
+    run(program, question, onEvent) {
+      return new WsSession(url, { type: "run", program, text: question }, onEvent);
     },
   };
 }

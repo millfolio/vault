@@ -84,10 +84,43 @@ class MockSession implements Session {
   }
 }
 
+// A canned "run again" session for the mock (no backend on :5173) — it echoes a
+// couple of status lines then a message, so the dev UI exercises the run path.
+class MockRunSession implements Session {
+  constructor(
+    private program: string,
+    private question: string,
+    private onEvent: (e: ServerEvent) => void,
+  ) {
+    void this.run();
+  }
+  approve(_stepId: string) {}
+  reject(_stepId: string, _reason?: string) {}
+  private wait(ms: number) {
+    return new Promise<void>((r) => setTimeout(r, ms));
+  }
+  private async run() {
+    const emit = this.onEvent;
+    const run = uid("run");
+    emit({ type: "status", stepId: run, label: "Re-running the saved program", state: "running" });
+    await this.wait(500);
+    emit({ type: "status", stepId: run, label: "Re-running the saved program", state: "done" });
+    emit({
+      type: "message",
+      id: uid("msg"),
+      role: "assistant",
+      text: `Re-ran the saved program for “${this.question}”. (mock — the real server runs it over your vault)`,
+    });
+  }
+}
+
 export function createMockClient(): MillfolioClient {
   return {
     ask(text, onEvent) {
       return new MockSession(text, onEvent);
+    },
+    run(program, question, onEvent) {
+      return new MockRunSession(program, question, onEvent);
     },
   };
 }

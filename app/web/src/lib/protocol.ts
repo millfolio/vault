@@ -11,6 +11,10 @@ export type StepState =
 
 export type ClientMessage =
   | { type: "ask"; id: string; text: string; demo_token?: string }
+  // "run" — the "Run again" path: re-run a SAVED program directly (no model call).
+  // `program` is the stored generated program; `text` is the original question (for
+  // the stats/history record). Streams the same events an "ask" produces.
+  | { type: "run"; id: string; program: string; text: string }
   | { type: "approve"; stepId: string }
   | { type: "reject"; stepId: string; reason?: string };
 
@@ -121,4 +125,7 @@ export interface Session {
 
 export interface MillfolioClient {
   ask(text: string, onEvent: (e: ServerEvent) => void): Session;
+  /** Re-run a SAVED program directly (no model call). `program` is the stored
+   *  generated program; `question` is the original question (for the record). */
+  run(program: string, question: string, onEvent: (e: ServerEvent) => void): Session;
 }

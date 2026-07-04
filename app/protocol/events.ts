@@ -15,6 +15,11 @@ export type StepState =
 // ── client → server ──────────────────────────────────────────────────────────
 export type ClientMessage =
   | { type: "ask"; id: string; text: string }
+  // "run" — the "Run again" path: re-run a SAVED program (from the chat history)
+  // directly, with NO model call. `program` is the stored generated program; `text`
+  // is the original question (for the stats/history record). Streams the SAME events
+  // an "ask" produces (minus manifest/codegen/approval).
+  | { type: "run"; id: string; program: string; text: string }
   | { type: "approve"; stepId: string }
   | { type: "reject"; stepId: string; reason?: string };
 

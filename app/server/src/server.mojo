@@ -3079,22 +3079,48 @@ def on_connect(mut conn: WsConnection) raises:
     var frame = conn.recv()
     if frame.opcode == WsOpcode.CLOSE:
         return
+    # Two client frames open a session: an "ask" (codegen → approve → run) or a "run" —
+    # the "Run again" path, which re-runs a SAVED program (from the chat history) over
+    # the CURRENT vault with NO model call. Both stream the SAME events; only how we
+    # obtain the program to run differs (codegen vs. supplied), so the compile+run tail
+    # below is shared.
+    var msg_type = field(frame.text_payload(), "type")
+    var is_run = msg_type == "run"
     var question = field(frame.text_payload(), "text")
-    if question == "":
-        conn.send_text(error_event("empty or malformed ask"))
-        conn.close(WsCloseCode.NORMAL)
-        return
-    # Demo bot gate: require a valid demo-access token (minted after a Turnstile solve)
-    # on every chat frame. Server-enforced, so a bot can't skip the client widget. No-op
-    # when the gate is off (real product / local dev / no secret configured).
-    if _turnstile_enabled() and not _demo_token_valid(
-        field(frame.text_payload(), "demo_token")
-    ):
-        conn.send_text(
-            error_event("please complete the human check to use the demo")
-        )
-        conn.close(WsCloseCode.NORMAL)
-        return
+    var supplied_program = String("")
+    if is_run:
+        # Re-run a stored program directly. Rejected in the replay demo: it only answers
+        # the curated questions via the codegen replay cache — there is no arbitrary-
+        # program run path there (and its data is synthetic + public anyway).
+        if _is_demo():
+            conn.send_text(
+                error_event('"Run again" is not available in the demo')
+            )
+            conn.close(WsCloseCode.NORMAL)
+            return
+        supplied_program = field(frame.text_payload(), "program")
+        if supplied_program == "":
+            conn.send_text(error_event("empty or malformed run"))
+            conn.close(WsCloseCode.NORMAL)
+            return
+        if question == "":
+            question = String("(re-run)")  # for the stats/history record
+    else:
+        if question == "":
+            conn.send_text(error_event("empty or malformed ask"))
+            conn.close(WsCloseCode.NORMAL)
+            return
+        # Demo bot gate: require a valid demo-access token (minted after a Turnstile
+        # solve) on every ASK frame. Server-enforced, so a bot can't skip the client
+        # widget. No-op when the gate is off (real product / local dev / no secret).
+        if _turnstile_enabled() and not _demo_token_valid(
+            field(frame.text_payload(), "demo_token")
+        ):
+            conn.send_text(
+                error_event("please complete the human check to use the demo")
+            )
+            conn.close(WsCloseCode.NORMAL)
+            return
     var ticket = (
         -1
     )  # our run-queue ticket; >= 0 once we've entered (see runqueue.mojo)
@@ -3118,129 +3144,138 @@ def on_connect(mut conn: WsConnection) raises:
         # compile+run), deliberately EXCLUDING the human approval pause + queue wait.
         var t_total0 = perf_counter_ns()
         var pre_ms: Float64
-        conn.send_text(status("manifest", "Aliasing vault manifest", "running"))
-        var _t = perf_counter_ns()
-        var manifest = orch.vault_manifest(vault_dir)
-        _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
-        # The frontier-safe view also carries the category tag NAMES + scope notes
-        # (so the model filters `.tags`); never the keyword RULES (real merchant
-        # strings → on-device). DISPLAY-ONLY truncation so this dropdown stays
-        # readable as the vault grows — show the first few of each group + the total.
-        # The FULL manifest + tag list still go to the model (codegen uses `manifest`
-        # / _tags_context, untouched); this only shapes the debug body.
-        var _head = 3
-        var _dbg = String("")
-        # Manifest: keep the header lines (vault:/count), cap the `file_` lines.
-        var _files = List[String]()
-        var _mlines = manifest.split("\n")
-        for _i in range(len(_mlines)):
-            var _ln = String(_mlines[_i])
-            if String(_ln.strip()).startswith("file_"):
-                _files.append(_ln)
-            elif String(_ln.strip()).byte_length() > 0:
-                if _dbg.byte_length() > 0:
-                    _dbg += "\n"
-                _dbg += _ln
-        for _i in range(len(_files)):
-            if _i >= _head:
-                break
-            if _dbg.byte_length() > 0:
-                _dbg += "\n"
-            _dbg += _files[_i]
-        if len(_files) > _head:
-            _dbg += (
-                "\n  … and "
-                + String(len(_files) - _head)
-                + " more files ("
-                + String(len(_files))
-                + " total)"
-            )
-        # Category tags (name + scope note), capped the same way.
-        var _avail = effective_tags()
-        var _adesc = effective_tag_descriptions()
-        if len(_avail) > 0:
-            _dbg += (
-                "\n\nCategory tags also sent (name + scope note; the model"
-                " filters .tags on these):"
-            )
-            for _i in range(len(_avail)):
+        var code: String
+        if is_run:
+            # "Run again": no manifest, no codegen, no model call — the program
+            # is supplied by the client (a program saved from a prior ask). Skip
+            # straight to the shared compile + run tail. No approval gate: it was
+            # reviewed when first asked and is re-run unchanged over the CURRENT
+            # vault (deterministic — the whole point of Run again).
+            code = supplied_program.copy()
+            pre_ms = 0.0
+        else:
+            conn.send_text(status("manifest", "Aliasing vault manifest", "running"))
+            var _t = perf_counter_ns()
+            var manifest = orch.vault_manifest(vault_dir)
+            _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
+            # The frontier-safe view also carries the category tag NAMES + scope notes
+            # (so the model filters `.tags`); never the keyword RULES (real merchant
+            # strings → on-device). DISPLAY-ONLY truncation so this dropdown stays
+            # readable as the vault grows — show the first few of each group + the total.
+            # The FULL manifest + tag list still go to the model (codegen uses `manifest`
+            # / _tags_context, untouched); this only shapes the debug body.
+            var _head = 3
+            var _dbg = String("")
+            # Manifest: keep the header lines (vault:/count), cap the `file_` lines.
+            var _files = List[String]()
+            var _mlines = manifest.split("\n")
+            for _i in range(len(_mlines)):
+                var _ln = String(_mlines[_i])
+                if String(_ln.strip()).startswith("file_"):
+                    _files.append(_ln)
+                elif String(_ln.strip()).byte_length() > 0:
+                    if _dbg.byte_length() > 0:
+                        _dbg += "\n"
+                    _dbg += _ln
+            for _i in range(len(_files)):
                 if _i >= _head:
                     break
-                _dbg += "\n- " + _avail[_i]
-                if _i < len(_adesc) and _adesc[_i].byte_length() > 0:
-                    _dbg += " — " + _adesc[_i]
-            if len(_avail) > _head:
+                if _dbg.byte_length() > 0:
+                    _dbg += "\n"
+                _dbg += _files[_i]
+            if len(_files) > _head:
                 _dbg += (
                     "\n  … and "
-                    + String(len(_avail) - _head)
-                    + " more tags ("
-                    + String(len(_avail))
+                    + String(len(_files) - _head)
+                    + " more files ("
+                    + String(len(_files))
                     + " total)"
                 )
-        conn.send_text(
-            debug_event(
-                "manifest",
-                "Frontier-safe view — aliases + category tag names",
-                _dbg,
-                "text",
-            )
-        )
-        conn.send_text(status("manifest", "Aliasing vault manifest", "done"))
-
-        conn.send_text(status("codegen", "Writing the program", "running"))
-        _t = perf_counter_ns()
-        var code: String
-        if getenv("MILLFOLIO_STREAM_CODEGEN", "") != "":
-            # Stream the program — update the "codegen" line live with its size.
-            var sink = WsSink(Int(UnsafePointer(to=conn)))
-            code = orch.vault_codegen_stream(question, manifest, sink)
-        else:
-            code = orch.vault_codegen(question, manifest)
-        _bump(api_names, api_count, api_ms, "codegen", 1, _ms_since(_t))
-        conn.send_text(
-            debug_event("codegen", "Generated program", code, "mojo")
-        )
-        conn.send_text(status("codegen", "Writing the program", "done"))
-        # Surface which category tags the program filtered on (so the user knows
-        # the answer came from a tag, not a guess) — the available tag NAMES that
-        # appear as a quoted literal in the program (`"phone" in t.tags`).
-        var used = _tags_in_program(code)
-        if used.byte_length() > 0:
-            conn.send_text(tags_event(used))
-        # If the model proposed a NEW reusable tag for a category that isn't one
-        # yet, surface it so the user can save it (next time = a fast `.tags`
-        # filter, not an inline classify). A comment in the program; never runs.
-        var prop = _tag_proposal_in_program(code)
-        if len(prop) == 3:
-            conn.send_text(tag_proposal_event(prop[0], prop[1], prop[2]))
-        pre_ms = _ms_since(
-            t_total0
-        )  # manifest + codegen, before the approval pause
-
-        conn.send_text(
-            status(
-                "run",
-                "Run the generated program over your vault?",
-                "awaiting-approval",
-            )
-        )
-        conn.send_text(
-            approval("run", "Run the generated program over your vault?", code)
-        )
-        var decision = conn.recv()
-        if (
-            decision.opcode == WsOpcode.CLOSE
-            or field(decision.text_payload(), "type") != "approve"
-        ):
-            conn.send_text(status("run", "Run rejected", "error"))
+            # Category tags (name + scope note), capped the same way.
+            var _avail = effective_tags()
+            var _adesc = effective_tag_descriptions()
+            if len(_avail) > 0:
+                _dbg += (
+                    "\n\nCategory tags also sent (name + scope note; the model"
+                    " filters .tags on these):"
+                )
+                for _i in range(len(_avail)):
+                    if _i >= _head:
+                        break
+                    _dbg += "\n- " + _avail[_i]
+                    if _i < len(_adesc) and _adesc[_i].byte_length() > 0:
+                        _dbg += " — " + _adesc[_i]
+                if len(_avail) > _head:
+                    _dbg += (
+                        "\n  … and "
+                        + String(len(_avail) - _head)
+                        + " more tags ("
+                        + String(len(_avail))
+                        + " total)"
+                    )
             conn.send_text(
-                message(
-                    "Okay — I won't run that. Tell me how you'd like to"
-                    " adjust it."
+                debug_event(
+                    "manifest",
+                    "Frontier-safe view — aliases + category tag names",
+                    _dbg,
+                    "text",
                 )
             )
-            conn.close(WsCloseCode.NORMAL)
-            return
+            conn.send_text(status("manifest", "Aliasing vault manifest", "done"))
+
+            conn.send_text(status("codegen", "Writing the program", "running"))
+            _t = perf_counter_ns()
+            if getenv("MILLFOLIO_STREAM_CODEGEN", "") != "":
+                # Stream the program — update the "codegen" line live with its size.
+                var sink = WsSink(Int(UnsafePointer(to=conn)))
+                code = orch.vault_codegen_stream(question, manifest, sink)
+            else:
+                code = orch.vault_codegen(question, manifest)
+            _bump(api_names, api_count, api_ms, "codegen", 1, _ms_since(_t))
+            conn.send_text(
+                debug_event("codegen", "Generated program", code, "mojo")
+            )
+            conn.send_text(status("codegen", "Writing the program", "done"))
+            # Surface which category tags the program filtered on (so the user knows
+            # the answer came from a tag, not a guess) — the available tag NAMES that
+            # appear as a quoted literal in the program (`"phone" in t.tags`).
+            var used = _tags_in_program(code)
+            if used.byte_length() > 0:
+                conn.send_text(tags_event(used))
+            # If the model proposed a NEW reusable tag for a category that isn't one
+            # yet, surface it so the user can save it (next time = a fast `.tags`
+            # filter, not an inline classify). A comment in the program; never runs.
+            var prop = _tag_proposal_in_program(code)
+            if len(prop) == 3:
+                conn.send_text(tag_proposal_event(prop[0], prop[1], prop[2]))
+            pre_ms = _ms_since(
+                t_total0
+            )  # manifest + codegen, before the approval pause
+
+            conn.send_text(
+                status(
+                    "run",
+                    "Run the generated program over your vault?",
+                    "awaiting-approval",
+                )
+            )
+            conn.send_text(
+                approval("run", "Run the generated program over your vault?", code)
+            )
+            var decision = conn.recv()
+            if (
+                decision.opcode == WsOpcode.CLOSE
+                or field(decision.text_payload(), "type") != "approve"
+            ):
+                conn.send_text(status("run", "Run rejected", "error"))
+                conn.send_text(
+                    message(
+                        "Okay — I won't run that. Tell me how you'd like to"
+                        " adjust it."
+                    )
+                )
+                conn.close(WsCloseCode.NORMAL)
+                return
 
         # Enter the serial run-queue — AFTER approval. With multiple workers several
         # visitors reach here at once; only ONE runs at a time (shared scratch path +
@@ -3280,7 +3315,13 @@ def on_connect(mut conn: WsConnection) raises:
         # NON-BLOCKING and we poll its captured stdout, streaming each `progress(…)`
         # line the generated program emits as a live "execute" status update (same
         # stepId, so the UI updates ONE line in place) instead of a frozen spinner.
-        conn.send_text(status("run", "Approved — running", "done"))
+        conn.send_text(
+            status(
+                "run",
+                "Re-running the saved program" if is_run else "Approved — running",
+                "done",
+            )
+        )
         var t_run0 = (
             perf_counter_ns()
         )  # compile + run wall-clock (post-approval/queue)

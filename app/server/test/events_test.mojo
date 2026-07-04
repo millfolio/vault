@@ -88,4 +88,29 @@ def main() raises:
     expect_eq(field("not json", "text"), "", "field on bad json")
     expect_eq(field('{"text":"q"}', "missing"), "", "field on missing key")
 
+    # "run" frame (the Run again path): on_connect reads `type`/`program`/`text` off
+    # the opening frame. The program is a JSON-escaped multi-line string — `field`
+    # (loads → string_value) must decode the escapes back to real newlines.
+    expect_eq(
+        field('{"type":"run","program":"p","text":"q"}', "type"),
+        "run",
+        "field run type",
+    )
+    expect_eq(
+        field(
+            (
+                '{"type":"run","program":"from vault import *\\ndef main():\\n '
+                '   pass","text":"q"}'
+            ),
+            "program",
+        ),
+        "from vault import *\ndef main():\n    pass",
+        "field run program (unescaped)",
+    )
+    expect_eq(
+        field('{"type":"run","program":"p"}', "text"),
+        "",
+        "field run missing text",
+    )
+
     print("ok: all event tests passed")
