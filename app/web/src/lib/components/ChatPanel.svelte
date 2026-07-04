@@ -382,6 +382,12 @@
     onsend(picked);
     picked = "";
   }
+  // Demo: tap a suggested-question chip to ask it (chips wrap their full text, so a
+  // long question stays readable on a phone — a native <select> would overflow).
+  function askDemo(q: string) {
+    if (busy) return;
+    onsend(q);
+  }
 </script>
 
 <!-- A generated-program box with a copy icon (top-right); clicking it copies the code. -->
@@ -563,17 +569,14 @@
   </div>
 
   {#if demo}
-    <form onsubmit={submitPicked}>
-      <div class="row">
-        <select bind:value={picked} disabled={busy} aria-label="Pick a question">
-          <option value="" disabled>Pick a demo question…</option>
-          {#each SUGGESTED as q}
-            <option value={q}>{q}</option>
-          {/each}
-        </select>
-        <button type="submit" disabled={busy || !picked}>Ask</button>
+    <div class="demo-picker">
+      <p class="demo-hint">Try one of these questions:</p>
+      <div class="demo-chips">
+        {#each SUGGESTED as q}
+          <button type="button" class="demo-chip" disabled={busy} onclick={() => askDemo(q)}>{q}</button>
+        {/each}
       </div>
-    </form>
+    </div>
   {:else}
     <form onsubmit={submit}>
       <div class="row">
@@ -1163,6 +1166,49 @@
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--border);
   }
+  /* Demo: tappable suggested-question chips that WRAP (replaces a native <select>,
+     whose long options overflowed horizontally + were unusable on a phone). */
+  .demo-picker {
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .demo-hint {
+    margin: 0 0 8px;
+    font-size: 0.85rem;
+    color: var(--muted, #8a8f98);
+  }
+  .demo-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .demo-chip {
+    /* full question text wraps inside the chip; never overflow the viewport */
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+    line-height: 1.35;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-2, #1b1d22);
+    color: inherit;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .demo-chip:hover:not(:disabled) {
+    border-color: var(--accent, #3987e5);
+    background: var(--surface-3, #23262c);
+  }
+  .demo-chip:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .row {
     display: flex;
     gap: 8px;
@@ -1172,6 +1218,7 @@
   }
   input {
     flex: 1;
+    min-width: 0; /* let the field shrink within the flex row (no overflow on mobile) */
     padding: 9px 12px;
     border-radius: var(--radius);
     border: 1px solid var(--border);
@@ -1186,6 +1233,9 @@
      text (no horizontal scroll), and scrolls once it hits max-height. */
   .question {
     flex: 1;
+    min-width: 0; /* shrink within the flex row → wrap, never horizontal-scroll on mobile */
+    width: 100%;
+    box-sizing: border-box;
     padding: 9px 12px;
     border-radius: var(--radius);
     border: 1px solid var(--border);
@@ -1208,20 +1258,6 @@
   .question:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-  }
-  select {
-    flex: 1;
-    padding: 9px 12px;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
-    font: inherit;
-    cursor: pointer;
-  }
-  select:focus {
-    outline: none;
-    border-color: var(--accent);
   }
   form button {
     padding: 9px 16px;
