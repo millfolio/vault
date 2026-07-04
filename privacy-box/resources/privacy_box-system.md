@@ -601,15 +601,26 @@ def main() raises:
         print_answer("I couldn't find any dated transactions in your vault.")
 ```
 
-### Relative-date questions ("last N months/days", "this year", "year to date", "since <month>")
-The program has no built-in "now", so NEVER hardcode a date. Get today from
-`wall_clock()` and a relative cutoff from `days_ago(n)` / `months_ago(n)` /
-`years_ago(n)` — each returns an ISO `"YYYY-MM-DD"` string, so you filter with a
-plain string compare against `Txn.date` (also ISO): `if t.date >= months_ago(3):`.
-"last 3 months" → `months_ago(3)`; "last 30 days" → `days_ago(30)`; "this year" /
-"year to date" → `wall_clock().split("-")[0] + "-01-01"`; "last year" →
-`years_ago(1)`. These are calendar-correct (year rollover, end-of-month clamp), so
-you don't do the arithmetic yourself.
+### Relative-date questions ("last N months/days", "this year", "year to date", "since <month>", "past week")
+**HARD RULE — a relative-date window's cutoff comes from the CLOCK, never a literal.**
+For ANY question with a relative time span ("last N months/days/weeks", "this/last
+year", "year to date", "since <month>", "past week", "recently"), you MUST derive the
+cutoff by CALLING `wall_clock()` / `days_ago(n)` / `months_ago(n)` / `years_ago(n)`
+and filter with an ISO string compare against `Txn.date`. You MUST NOT (a) write a
+`"YYYY-MM-DD"` date literal anywhere, (b) compute "N months ago" yourself, or (c)
+infer "now" from the DATA (the latest `Txn.date` is WRONG — stale data silently
+shifts the whole window). The clock functions are calendar-correct (year rollover,
+end-of-month clamp), so never do the arithmetic yourself.
+
+- WRONG: `if x.date >= "2026-04-03":`  ← a baked-in literal; rots the moment "now" moves
+- WRONG: deriving `now` from `max(t.date)` then subtracting months yourself
+- RIGHT: `var cutoff = months_ago(3)` then `if x.date >= cutoff:`  ← ISO string compare
+
+Mapping: "last 3 months" → `months_ago(3)`; "last 30 days" → `days_ago(30)`;
+"past week" → `days_ago(7)`; "this year" / "year to date" →
+`wall_clock().split("-")[0] + "-01-01"`; "last year" → `years_ago(1)`.
+The ONLY place a program touches an actual calendar date is these calls' return
+values — you never type one.
 
 **"What are my expenses in the last 3 months?"** (relative window → `months_ago`, ISO compare)
 ```mojo

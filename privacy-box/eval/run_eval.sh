@@ -112,7 +112,15 @@ pass=0
 fail=0
 while IFS=$'\t' read -r q must mustnot manifest; do
   case "$q" in '' | \#*) continue ;; esac
-  prog="$("$BIN" codegen "$q" --manifest "$MANIFESTS/$manifest" 2>/dev/null)"
+  # `codegen` promises "print ONLY the generated program" on stdout, but the
+  # orchestrator also emits a couple of timestamped diagnostic `log()` lines there
+  # (`[YYYY-MM-DD HH:MM:SS.mmm] • …`). Those are NOT the program — and their date
+  # stamp (today's date) is a `20\d\d-\d\d-\d\d` literal that would trip the
+  # relative-date hardcoded-date guard below on EVERY run. Drop only those log lines
+  # (the generated program never starts a line with a `[YYYY-MM-DD HH:MM:SS` prefix)
+  # so the lint sees the real program; every rule still applies to it unchanged.
+  prog="$("$BIN" codegen "$q" --manifest "$MANIFESTS/$manifest" 2>/dev/null \
+    | grep -vE '^\[20[0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]')"
   ok=1
   reasons=""
   IFS=',' read -ra need <<<"$must"
