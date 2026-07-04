@@ -482,10 +482,10 @@ public final class Bootstrapper: ObservableObject {
             set("Downloading Mojo compiler for engine (~70 MB)…")
             try? fm.removeItem(at: mojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: mojoPrefix, withIntermediateDirectories: true)
-            let compiler = try await download(mojoCompilerURL, name: "mojo-compiler.conda")
+            let compiler = try await downloadCondaVerified(mojoCompilerURL, name: "mojo-compiler.conda")
             set("Extracting Mojo…")
             try extractConda(compiler, into: mojoPrefix)
-            let py = try await download(mojoPythonURL, name: "mojo-python.conda")
+            let py = try await downloadCondaVerified(mojoPythonURL, name: "mojo-python.conda")
             try extractConda(py, into: mojoPrefix)
             recordMojoVersion(mojoPrefix, Self.mojoVersion)
         }
@@ -739,6 +739,52 @@ public final class Bootstrapper: ObservableObject {
         return tok.count == 64 && tok.allSatisfy { $0.isHexDigit } ? tok : nil
     }
 
+    /// The sha256 the conda channel publishes for a `.conda` package, read from the
+    /// channel's own `repodata.json` (`…/<subdir>/repodata.json` →
+    /// `packages.conda[<filename>].sha256`). The subdir + filename are derived from
+    /// `pkgURL` (which is `\(condaChannel)/<subdir>/<filename>`), so the repodata is
+    /// fetched over the same HTTPS channel that serves the package. Returns nil when
+    /// repodata can't be fetched or has no entry for the file — `downloadCondaVerified`
+    /// decides whether an unverified toolchain may proceed (loud warning, don't
+    /// hard-break), mirroring `expectedBundleSHA256`.
+    private func condaSHA256(for pkgURL: URL) async -> String? {
+        let filename = pkgURL.lastPathComponent
+        let repodataURL = pkgURL.deletingLastPathComponent().appendingPathComponent("repodata.json")
+        guard let (data, resp) = try? await URLSession.shared.data(from: repodataURL),
+              (resp as? HTTPURLResponse).map({ $0.statusCode == 200 }) ?? false,
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let pkgs = root["packages.conda"] as? [String: Any],
+              let entry = pkgs[filename] as? [String: Any],
+              let sha = entry["sha256"] as? String
+        else { return nil }
+        let tok = sha.lowercased()
+        return tok.count == 64 && tok.allSatisfy { $0.isHexDigit } ? tok : nil
+    }
+
+    /// Download a Mojo-toolchain `.conda`, verifying it against the channel's
+    /// published sha256 (see `condaSHA256`) BEFORE it is unpacked + used. The Mojo
+    /// toolchain COMPILES every on-device component, so a poisoned `.conda` = arbitrary
+    /// code execution at build time. A hash MISMATCH throws (via `download`) and nothing
+    /// is installed. A MISSING checksum (repodata unreachable / no entry) warns loudly and
+    /// proceeds — unless `MILLFOLIO_REQUIRE_TOOLCHAIN_CHECKSUM=1` demands strictness —
+    /// matching the bundle-checksum degrade path.
+    private func downloadCondaVerified(_ url: URL, name: String) async throws -> URL {
+        let expected = await condaSHA256(for: url)
+        if expected == nil {
+            if ProcessInfo.processInfo.environment["MILLFOLIO_REQUIRE_TOOLCHAIN_CHECKSUM"] == "1" {
+                throw BootstrapError.step(
+                    "verify \(name)",
+                    "no published sha256 for \(url.lastPathComponent) in the conda repodata, and "
+                        + "MILLFOLIO_REQUIRE_TOOLCHAIN_CHECKSUM=1")
+            }
+            set("Warning: no published sha256 for \(url.lastPathComponent) — installing unverified toolchain.")
+            appendLog("WARNING: no repodata sha256 for \(url.lastPathComponent); installing UNVERIFIED toolchain.\n")
+        }
+        let f = try await download(url, name: name, expectedSHA256: expected)
+        if expected != nil { appendLog("verified toolchain \(url.lastPathComponent) sha256 ✓\n") }
+        return f
+    }
+
     /// Download + unpack the one source bundle (millfolio.zip) once. Each component
     /// (server/privacy_box/millfolio/app) calls this before building, so it runs once
     /// per install and is a no-op thereafter. Gates on the **actual unpacked engine
@@ -949,10 +995,10 @@ public final class Bootstrapper: ObservableObject {
             set("Downloading Mojo compiler for privacy_box (~70 MB)…")
             try? fm.removeItem(at: privacy_boxMojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: privacy_boxMojoPrefix, withIntermediateDirectories: true)
-            let compiler = try await download(privacy_boxMojoCompilerURL, name: "privacy_box-mojo-compiler.conda")
+            let compiler = try await downloadCondaVerified(privacy_boxMojoCompilerURL, name: "privacy_box-mojo-compiler.conda")
             set("Extracting Mojo…")
             try extractConda(compiler, into: privacy_boxMojoPrefix)
-            let py = try await download(privacy_boxMojoPythonURL, name: "privacy_box-mojo-python.conda")
+            let py = try await downloadCondaVerified(privacy_boxMojoPythonURL, name: "privacy_box-mojo-python.conda")
             try extractConda(py, into: privacy_boxMojoPrefix)
             recordMojoVersion(privacy_boxMojoPrefix, Self.privacy_boxMojoVersion)
         }
@@ -1110,10 +1156,10 @@ public final class Bootstrapper: ObservableObject {
             set("Downloading Mojo compiler for millfolio (~70 MB)…")
             try? fm.removeItem(at: millfolioMojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: millfolioMojoPrefix, withIntermediateDirectories: true)
-            let compiler = try await download(millfolioMojoCompilerURL, name: "millfolio-mojo-compiler.conda")
+            let compiler = try await downloadCondaVerified(millfolioMojoCompilerURL, name: "millfolio-mojo-compiler.conda")
             set("Extracting Mojo…")
             try extractConda(compiler, into: millfolioMojoPrefix)
-            let py = try await download(millfolioMojoPythonURL, name: "millfolio-mojo-python.conda")
+            let py = try await downloadCondaVerified(millfolioMojoPythonURL, name: "millfolio-mojo-python.conda")
             try extractConda(py, into: millfolioMojoPrefix)
             recordMojoVersion(millfolioMojoPrefix, Self.privacy_boxMojoVersion)
         }

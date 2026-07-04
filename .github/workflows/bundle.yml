@@ -24,28 +24,55 @@ jobs:
       # component packagers + package_bundle.sh expect (engine/, app/, the libs).
       - uses: actions/checkout@v6
         with: { path: vault }
+
+      # Reproducible releases: a TAG build pins every sibling to the EXACT commit the
+      # release was cut from, recorded in vault/.github/bundle-pins.env by
+      # scripts/release.sh (which reads each sibling's current main tip at publish
+      # time — so "push to sibling main → cut rc" still gets the latest, just frozen).
+      # Each PIN_<REPO> below feeds the matching checkout's `ref:`. When the file is
+      # absent (a release cut before pinning landed) OR this isn't a tag build
+      # (main push / PR / manual dispatch), no PIN_* is set → `ref:` is empty →
+      # actions/checkout uses the default branch = the historical unpinned behavior.
+      - name: Pin sibling repos (reproducible release build)
+        run: |
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "not a tag build — siblings unpinned (default-branch tips)."; exit 0
+          fi
+          if [ ! -f vault/.github/bundle-pins.env ]; then
+            echo "::warning::no bundle-pins.env in $GITHUB_REF_NAME — siblings unpinned."; exit 0
+          fi
+          echo "Pinning siblings from vault/.github/bundle-pins.env:"
+          cat vault/.github/bundle-pins.env
+          while IFS='=' read -r repo sha; do
+            case "$repo" in ''|\#*) continue;; esac
+            sha="${sha%%[[:space:]]*}"
+            [ -n "$sha" ] || continue
+            key="PIN_$(printf '%s' "$repo" | tr 'a-z.-' 'A-Z__')"
+            echo "$key=$sha" >> "$GITHUB_ENV"
+          done < vault/.github/bundle-pins.env
+
       - uses: actions/checkout@v6
-        with: { repository: millfolio/engine, path: engine }
+        with: { repository: millfolio/engine, path: engine, ref: "${{ env.PIN_ENGINE }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/app, path: app }
+        with: { repository: millfolio/app, path: app, ref: "${{ env.PIN_APP }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/flare, path: flare }
+        with: { repository: millfolio/flare, path: flare, ref: "${{ env.PIN_FLARE }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/json, path: json }
+        with: { repository: millfolio/json, path: json, ref: "${{ env.PIN_JSON }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/jinja2.mojo, path: jinja2.mojo }
+        with: { repository: millfolio/jinja2.mojo, path: jinja2.mojo, ref: "${{ env.PIN_JINJA2_MOJO }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/lancedb.mojo, path: lancedb.mojo }
+        with: { repository: millfolio/lancedb.mojo, path: lancedb.mojo, ref: "${{ env.PIN_LANCEDB_MOJO }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/pdftotext.mojo, path: pdftotext.mojo }
+        with: { repository: millfolio/pdftotext.mojo, path: pdftotext.mojo, ref: "${{ env.PIN_PDFTOTEXT_MOJO }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/zlib.mojo, path: zlib.mojo }
+        with: { repository: millfolio/zlib.mojo, path: zlib.mojo, ref: "${{ env.PIN_ZLIB_MOJO }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/csv.mojo, path: csv.mojo }
+        with: { repository: millfolio/csv.mojo, path: csv.mojo, ref: "${{ env.PIN_CSV_MOJO }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/docx.mojo, path: docx.mojo }
+        with: { repository: millfolio/docx.mojo, path: docx.mojo, ref: "${{ env.PIN_DOCX_MOJO }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/logging.mojo, path: logging.mojo }   # privacy_box: from logging import log
+        with: { repository: millfolio/logging.mojo, path: logging.mojo, ref: "${{ env.PIN_LOGGING_MOJO }}" }   # privacy_box: from logging import log
 
       # ── caches: skip re-downloading the Mojo toolchain + recompiling the Rust shim ──
       - name: Cache pixi/conda packages (Mojo toolchain + deps)
