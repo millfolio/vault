@@ -82,21 +82,21 @@ def delete_ask_records(raw: String, q: String) raises -> String:
 def system_json(
     home: String,
     version: String,
-    model: String,
     data_dir: String,
     stats_file: String,
     asks_file: String,
 ) -> String:
-    """The `/api/system` payload: WHERE the data + logs live, plus version/model.
+    """The `/api/system` payload: WHERE the data + logs live, plus the version.
     Data paths are passed in (the server computes them from its own config — honors
     env overrides); the log paths are derived here from `home` and mirror the ones
-    the `mill` CLI's launch agents write to."""
+    the `mill` CLI's launch agents write to. (The served model is NOT reported here —
+    the bottom status bar shows the live model from /api/models; a second source drifted.)
+    """
     var app_log = home + "/Library/Application Support/Millfolio/Millfolio.log"
     var server_log = home + "/Library/Logs/Millfolio/server.log"
     var transcripts = String("/tmp/millfolio/sessions/")
     var out = String("{")
     out += '"version":' + json_escape(version)
-    out += ',"model":' + json_escape(model)
     out += ',"dataDir":' + json_escape(data_dir)
     out += ',"statsFile":' + json_escape(stats_file)
     out += ',"asksFile":' + json_escape(asks_file)

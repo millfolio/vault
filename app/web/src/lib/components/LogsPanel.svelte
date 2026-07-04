@@ -7,8 +7,6 @@
   // output, which is the fastest way to see what the model actually did.
   type Logs = { transcripts?: string; app?: string; server?: string };
   type Sys = {
-    version?: string;
-    model?: string;
     dataDir?: string;
     statsFile?: string;
     asksFile?: string;
@@ -105,13 +103,6 @@
 {/snippet}
 
 <section class="system">
-  {#if sys?.version || sys?.model}
-    <p class="meta">
-      {#if sys?.version}<span>version <strong>{sys.version}</strong></span>{/if}
-      {#if sys?.model}<span>model <strong>{sys.model}</strong></span>{/if}
-    </p>
-  {/if}
-
   {#if !loaded}
     <p class="muted">Loading…</p>
   {:else if failed}
@@ -145,17 +136,6 @@
     max-width: 820px;
     margin: 0 auto;
     width: 100%;
-  }
-  .meta {
-    margin: 0 0 14px;
-    display: flex;
-    gap: 14px;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-  .meta strong {
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
   }
   .group {
     margin-bottom: 20px;

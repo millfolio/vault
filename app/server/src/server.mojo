@@ -1143,7 +1143,6 @@ struct Api(Copyable, Handler, Movable):
                 system_json(
                     getenv("HOME", ""),
                     _app_version(),
-                    _model_label(),
                     _config_dir(),
                     _stats_path(),
                     _asks_path(),
