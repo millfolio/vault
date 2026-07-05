@@ -88,9 +88,12 @@ test-classify = { cmd = "mkdir -p build && mojo build core/test/derive/classify_
 # Gate: the REAL materialization path (vault.derive.store.retag) for tag
 # references — a keyword member row gains both the member + group tags, and a
 # cached ML tag is preserved while a group that @refs it is derived (refs run
-# AFTER the ML carry-over). Links flare (store→classify) but never calls it —
-# retag is pure.
-test-store = { cmd = "mkdir -p build && mojo build core/test/derive/store_test.mojo -I core/src -I ../flare -o build/store-test && ./build/store-test" }
+# AFTER the ML carry-over). Also pins the DIRECTION gate: retag drops expense tags
+# off credits (and income tags off debits), and ml_backfill_rows skips
+# wrong-direction rows (exercised on a no-eligible-rows path, so no network). That
+# ml_backfill_rows call traverses store→classify→flare, so this links the full
+# sibling set like test-result (json/lancedb/pdftotext/zlib/csv/docx).
+test-store = { cmd = "mkdir -p build && mojo build core/test/derive/store_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/store-test && ./build/store-test" }
 # Gate: the REAL on-disk persist path (write_txn_rows tmp+rename → load_txn_rows).
 # A synthetic reconciling statement extracts → is written → reads back with every
 # row intact. Guards the prod HOTFIX regression where the atomic rename got a

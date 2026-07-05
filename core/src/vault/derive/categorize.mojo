@@ -55,6 +55,64 @@ def _contains_ci(xs: List[String], s: String) -> Bool:
     return False
 
 
+# ── direction-scoped tagging ───────────────────────────────────────────────────
+#
+# Tags are DIRECTION-SCOPED: expense tags apply to debits (money out), income tags
+# to credits (money in). This is what stops an expense category (e.g. "coffee
+# shop") from ever landing on income — an "ACH DEPOSIT / card payment" credit. The
+# matcher (`tags_for` / `derive_ref_tags`) stays description-only + pure; the
+# direction gate is a SEPARATE, composable filter (`filter_tags_by_direction`)
+# applied by the mutating callers that know a row's direction (retag / ML backfill
+# / preview), so the pure matcher's contract and its unit tests are untouched.
+#
+# This is a per-TAG-SET split TODAY: `income_tag_names()` below is the single named
+# set of income-side tags (currently {"transfers", "rewards"}); EVERYTHING else
+# (the other built-in defaults AND every user-created tag) is expense-side. A
+# per-tag `direction` attribute — so a user can mark ANY tag as income — is a
+# planned extension: when it lands, `tag_is_income` reads the `Rule`'s field and
+# this set goes away. Keep the income/expense designation in THIS ONE PLACE.
+
+
+def income_tag_names() -> List[String]:
+    """The income-side tag names — applied ONLY to credits (money in). Every other
+    tag is expense-side (applied only to debits). THE single source of the
+    income/expense split (see the note above); moving to a per-tag attribute means
+    replacing this + `tag_is_income`, nothing else."""
+    return [String("transfers"), String("rewards")]
+
+
+def tag_is_income(tag: String) -> Bool:
+    """Whether `tag` is an INCOME-side tag (credit-only). See `income_tag_names`.
+    """
+    return _contains(income_tag_names(), tag)
+
+
+def tag_allows_direction(tag: String, direction: String) -> Bool:
+    """Whether a rule producing `tag` may apply to a transaction with this
+    `direction` (`"debit"` = money out/expense, `"credit"` = money in/income).
+    Income tags apply only to credits; every other (expense) tag only to debits. A
+    row whose direction is unknown/empty is treated as a debit (the overwhelming
+    common case) so expense tagging never regresses on data lacking a direction.
+    """
+    if tag_is_income(tag):
+        return direction == "credit"
+    return direction != "credit"
+
+
+def filter_tags_by_direction(
+    var tags: List[String], direction: String
+) -> List[String]:
+    """Drop every tag whose income/expense side doesn't match `direction` — the
+    direction gate applied to a fully-derived tag set (keyword ∪ carried ML ∪ group
+    refs). Order-preserving. This is where the "no expense tag on a credit"
+    guarantee is enforced for the deterministic path."""
+    var out = List[String]()
+    for i in range(len(tags)):
+        if tag_allows_direction(tags[i], direction):
+            out.append(tags[i].copy())
+    return out^
+
+
 @fieldwise_init
 struct Rule(Copyable, Movable):
     """One tag and how it's assigned. A rule is ONE of two kinds:

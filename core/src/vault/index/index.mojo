@@ -78,7 +78,10 @@ comptime EMBED_BATCH = 64  # chunks per /v1/embeddings request
 # v1: `.merchant`/`.state`/`.country` location fields filled by `parse_location`.
 # v2: parse_location: strip trailing parenthetical annotations (e.g. `(return)`).
 # v3: parse_location: extract city + zip.
-comptime INDEX_PROCESSING_VERSION = 3
+# v4: direction-gated tags — expense tags apply only to debits, income tags
+#     (transfers/rewards) only to credits (so a credit/ACH deposit never carries an
+#     expense category); a re-index re-tags existing rows with the new gate.
+comptime INDEX_PROCESSING_VERSION = 4
 
 
 @fieldwise_init

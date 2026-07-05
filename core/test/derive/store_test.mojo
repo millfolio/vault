@@ -4,15 +4,19 @@
 integration in `vault.derive.store.retag`, which is what actually writes group
 tags into the `.tags` column. It links `classify` (flare HTTP) but never calls
 it — `retag` is pure (no model call, no file I/O), operating on the in-memory
-rows + registry passed in. Two guarantees:
+rows + registry passed in. Guarantees:
 
   1. a keyword member row gains BOTH the member tag and the group tag;
   2. a row carrying a cached ML tag KEEPS it and gains a group that `@refs` it —
-     i.e. refs derive AFTER the ML carry-over and never clobber it.
+     i.e. refs derive AFTER the ML carry-over and never clobber it;
+  3. the DIRECTION gate — expense tags never survive on a credit (the "coffee
+     shop on an ACH deposit" bug), income tags (transfers/rewards) never on a
+     debit; `ml_backfill_rows` skips wrong-direction rows too (exercised on a
+     no-eligible-rows credit path, so it returns 0 without any network call).
 """
 
-from vault.derive.categorize import Registry, parse_rules
-from vault.derive.store import retag
+from vault.derive.categorize import Registry, parse_rules, default_registry
+from vault.derive.store import retag, ml_backfill_rows
 from vault.extract.transactions import TxnRow
 
 
@@ -28,13 +32,16 @@ def _has(tags: List[String], tag: String) -> Bool:
     return False
 
 
-def _row(var desc: String, var tags: List[String]) -> TxnRow:
-    """A minimal reconciled row for the retag path (only desc + tags matter)."""
+def _row_dir(
+    var desc: String, var tags: List[String], var direction: String
+) -> TxnRow:
+    """A minimal reconciled row for the retag path (only desc/tags/direction
+    matter here)."""
     return TxnRow(
         String("stmt.pdf"),  # falias
         String("2026-01-15"),  # date
         Float64(12.34),  # amount
-        String("debit"),  # direction
+        direction^,
         desc^,
         tags^,
         0,  # added_gen
@@ -45,6 +52,12 @@ def _row(var desc: String, var tags: List[String]) -> TxnRow:
         String(""),  # city
         String(""),  # zip
     )
+
+
+def _row(var desc: String, var tags: List[String]) -> TxnRow:
+    """A debit row (the common case) — the existing ref/ML tests are all debits.
+    """
+    return _row_dir(desc^, tags^, String("debit"))
 
 
 def main() raises:
@@ -118,6 +131,89 @@ def main() raises:
         (
             "no ML tag present → no group tag (and the ML rule never matches by"
             " keyword)"
+        ),
+    )
+
+    # ── (c) direction-gated tags: expense tags never land on income ─────────────
+    # The reported bug: an "ACH DEPOSIT / INTERNET TRANSFER" credit was tagged
+    # "coffee shop" (an expense category). retag must gate every tag by direction —
+    # a credit gets only income tags (transfers/rewards), a debit only expense.
+    var dreg = default_registry()
+
+    # The failing case: an ACH-deposit CREDIT whose descriptor ALSO contains a
+    # coffee keyword. It must get `transfers` (income, credit-side) and NOT
+    # `restaurant` (expense) — the expense tag is gated off the credit.
+    var drows = List[TxnRow]()
+    drows.append(
+        _row_dir(
+            String("ACH DEPOSIT INTERNET TRANSFER COFFEE ROASTERS"),
+            List[String](),
+            String("credit"),
+        )
+    )
+    # The SAME coffee merchant as a DEBIT (an actual purchase) still gets its
+    # expense tag — the gate doesn't over-reach.
+    drows.append(
+        _row_dir(
+            String("COFFEE ROASTERS #123 SEATTLE"),
+            List[String](),
+            String("debit"),
+        )
+    )
+    _ = retag(drows, dreg)
+    expect(
+        _has(drows[0].tags, "transfers")
+        and not _has(drows[0].tags, "restaurant"),
+        (
+            "ACH-deposit CREDIT → transfers (income), NEVER restaurant"
+            " (expense) — the reported bug"
+        ),
+    )
+    expect(
+        _has(drows[1].tags, "restaurant"),
+        "the same coffee merchant as a DEBIT still gets restaurant (expense)",
+    )
+
+    # A `transfers`/`rewards` keyword on a DEBIT (e.g. a card-payment transfer OUT)
+    # is gated off — income tags are credit-only under the current per-set split.
+    var xrows = List[TxnRow]()
+    xrows.append(
+        _row_dir(
+            String("ONLINE TRANSFER TO VISA CARD"),
+            List[String](),
+            String("debit"),
+        )
+    )
+    _ = retag(xrows, dreg)
+    expect(
+        not _has(xrows[0].tags, "transfers"),
+        "a `transfers` keyword on a DEBIT is gated off (income = credit-only)",
+    )
+
+    # ── (d) ML backfill is direction-gated: an expense ML rule skips credits ─────
+    # An expense ML rule (tag not in the income set) must never classify a credit —
+    # with ONLY credit rows there are no eligible descriptions, so ml_backfill_rows
+    # returns 0 WITHOUT reaching the network (no server in this unit test).
+    var mlonly = Registry(
+        parse_rules(String("gym : is this a gym or fitness studio?\n"))
+    )
+    var creditrows = List[TxnRow]()
+    creditrows.append(
+        _row_dir(
+            String("PLANET FITNESS DEPOSIT"),
+            List[String](),
+            String("credit"),
+        )
+    )
+    var no_alias = List[String]()
+    var ml_gated = ml_backfill_rows(
+        creditrows, mlonly, String("http://127.0.0.1:0/v1"), no_alias
+    )
+    expect(
+        ml_gated == 0 and len(creditrows[0].tags) == 0,
+        (
+            "expense ML rule skips a credit row → 0 changed, no tag, no network"
+            " call"
         ),
     )
 

@@ -28,6 +28,8 @@ from vault.derive.categorize import (
     tag_descriptions,
     rules_canon,
     registry_to_text,
+    filter_tags_by_direction,
+    tag_allows_direction,
 )
 from vault.derive.classify import (
     classify_batch,
@@ -278,6 +280,12 @@ def retag(mut rows: List[TxnRow], reg: Registry) raises -> Int:
         # carried-over ML tags) to a monotonic fixpoint — this is where group
         # categories (`essentials = @groceries, @utilities`) are materialised.
         reg.derive_ref_tags(rows[i].desc, new_tags)
+        # Direction gate (the SINGLE guard): drop every tag whose income/expense
+        # side doesn't match this row's direction — an expense tag never survives
+        # on a credit (the "coffee shop" on an ACH deposit bug), an income tag
+        # never on a debit. Applied to the fully-derived set (keyword ∪ carried ML
+        # ∪ refs), so it also purges a mis-directed cached ML tag on a plain retag.
+        new_tags = filter_tags_by_direction(new_tags^, rows[i].direction)
         if not _tags_equal(rows[i].tags, new_tags):
             var r = rows[i].copy()
             r.tags = new_tags^
@@ -324,6 +332,10 @@ def ml_backfill_rows(
                 continue
             if contains(rows[t].tags, r.tag):
                 continue  # already tagged (cached from a prior pass)
+            # Direction gate: an expense ML rule never classifies a credit (and an
+            # income ML rule never a debit). Filtering here also cuts model calls.
+            if not tag_allows_direction(r.tag, rows[t].direction):
+                continue
             idxs.append(t)
             descs.append(rows[t].desc.copy())
         if len(descs) == 0:
@@ -694,7 +706,14 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
             var idxs = List[Int]()
             var descs = List[String]()
             for t in range(len(rows)):
-                if rows[t].added_gen == g and not contains(rows[t].tags, r.tag):
+                # Direction gate: skip rows whose direction doesn't match the
+                # rule's side (expense→debit, income→credit) — never classify a
+                # credit for an expense ML rule, and fewer model calls.
+                if (
+                    rows[t].added_gen == g
+                    and not contains(rows[t].tags, r.tag)
+                    and tag_allows_direction(r.tag, rows[t].direction)
+                ):
                     idxs.append(t)
                     descs.append(rows[t].desc.copy())
             if len(descs) > 0:
@@ -1251,7 +1270,12 @@ def preview_categories(text: String) raises -> String:
         examples.append(List[String]())
         non_examples.append(List[String]())
     for t in range(len(trows)):
-        var tg = reg.tags_for(trows[t].desc)  # deterministic only
+        # Deterministic matches, then the SAME direction gate retag applies, so the
+        # preview counts match what a re-tag would actually write (no expense tag on
+        # a credit).
+        var tg = filter_tags_by_direction(
+            reg.tags_for(trows[t].desc), trows[t].direction
+        )
         for i in range(len(reg.rules)):
             if contains(tg, reg.rules[i].tag):
                 counts[i] += 1
