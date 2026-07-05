@@ -4,7 +4,7 @@
   import ChatPanel from "$lib/components/ChatPanel.svelte";
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import StatsPanel from "$lib/components/StatsPanel.svelte";
-  import SystemPanel from "$lib/components/SystemPanel.svelte";
+  import OperationsPanel from "$lib/components/OperationsPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
   import { fmtEta, shortId } from "$lib/format";
@@ -79,15 +79,16 @@
   let busy = $state(false);
   let session: Session | undefined;
   // The active tab is driven by the URL ([[tab]] optional-param route): "/" → chat,
-  // "/vault" → vault, "/stats" → stats, "/system" → system. One component serves all
-  // tabs, so switching is a same-route param change (no remount) — the chat survives.
-  const view = $derived<"chat" | "vault" | "stats" | "system" | "tags">(
+  // "/vault" → vault, "/stats" → stats, "/operations" → operations. One component
+  // serves all tabs, so switching is a same-route param change (no remount) — the chat
+  // survives. "/system" is kept as an alias for the old System tab → Operations now.
+  const view = $derived<"chat" | "vault" | "stats" | "operations" | "tags">(
     page.params.tab === "vault"
       ? "vault"
       : page.params.tab === "stats"
         ? "stats"
-        : page.params.tab === "system"
-          ? "system"
+        : page.params.tab === "operations" || page.params.tab === "system"
+          ? "operations"
           : page.params.tab === "tags"
             ? "tags"
             : "chat",
@@ -726,11 +727,13 @@
       <a class:active={view === "chat"} href="/">Chat</a>
       <a class:active={view === "vault" || view === "tags"} href="/vault">Vault</a>
       {#if isDemo}
-        <!-- The public demo has no System tab, so Stats stays top-level. -->
+        <!-- The public demo has no Operations tab, so Stats stays top-level. -->
         <a class:active={view === "stats"} href="/stats">Stats</a>
       {:else}
-        <!-- Real install: Stats + Logs + Backfill live under one System tab. -->
-        <a class:active={view === "system" || view === "stats"} href="/system">System</a>
+        <!-- Real install: one Operations tab = the machine-activity page (Now, Controls,
+             History, System, Backfill). Stats (per-question timing) stays alongside it. -->
+        <a class:active={view === "operations"} href="/operations">Operations</a>
+        <a class:active={view === "stats"} href="/stats">Stats</a>
       {/if}
     </nav>
     <!-- The website's top-right set: docs, the org, the discussion board, and chat. -->
@@ -788,15 +791,11 @@
     {:else if view === "tags"}
       <!-- /tags deep-links (tag pills) open the Vault → Tags sub-tab. -->
       <VaultPanel demo={isDemo} initialSub="tags" />
-    {:else if view === "system"}
-      <SystemPanel demo={isDemo} initialSub="backfill" />
+    {:else if view === "operations"}
+      <!-- The single machine-activity page: Now, Controls, History, System, Backfill. -->
+      <OperationsPanel demo={isDemo} />
     {:else if view === "stats"}
-      <!-- Demo keeps a dedicated Stats tab; the real app opens System on its Stats sub-tab. -->
-      {#if isDemo}
-        <StatsPanel />
-      {:else}
-        <SystemPanel demo={isDemo} initialSub="stats" />
-      {/if}
+      <StatsPanel />
     {:else}
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />
     {/if}
@@ -884,8 +883,8 @@
     {#if !isDemo && idxRunning}
       <a
         class="metric link"
-        href="/vault"
-        title="Indexing in progress — click to open Vault → Operations"
+        href="/operations"
+        title="Indexing in progress — click to open Operations"
       >
         <span class="mlabel">Index</span>
         {#if idxTotal && idxTotal > 0 && idxCurrent !== null}{idxCurrent}/{idxTotal}{:else}running{/if}
@@ -894,8 +893,8 @@
     {#if !isDemo && bkPending > 0}
       <a
         class="metric link"
-        href="/system"
-        title="AI-tag backfill in progress — click to open System → Backfill"
+        href="/operations"
+        title="AI-tag backfill in progress — click to open Operations → Backfill"
       >
         <span class="mlabel">Backfill</span>
         {#if bkEta && bkEta > 0}~{fmtEta(bkEta)}{:else}{bkPending} left{/if}

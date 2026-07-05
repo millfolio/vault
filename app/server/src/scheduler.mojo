@@ -84,6 +84,37 @@ def split_payload(payload: String) raises -> List[String]:
     return out^
 
 
+def basename(p: String) -> String:
+    """The last path component of `p` (after the final '/'); `p` itself if it has no
+    slash. Trailing-slash paths yield '' — acceptable for a display label."""
+    var parts = p.split("/")
+    if len(parts) == 0:
+        return p
+    return String(parts[len(parts) - 1])
+
+
+def short_payload(kind: String, payload: String) raises -> String:
+    """A compact, path-free rendering of a work item's payload for the UI queue view:
+    an `index` item → the file's basename; `finalize` → 'N files'; `index-prepare` →
+    the base folder's basename; `backfill`/other → the payload unchanged (already a
+    short scope). Keeps absolute on-device paths out of the queue endpoint."""
+    var parts = split_payload(payload)
+    if kind == KIND_FINALIZE:
+        var n = len(parts) - 1
+        if n < 0:
+            n = 0
+        return String(n) + (" file" if n == 1 else " files")
+    if kind == KIND_INDEX:
+        if len(parts) >= 2:
+            return basename(String(parts[len(parts) - 1]))
+        return basename(payload)
+    if kind == KIND_PREPARE:
+        if len(parts) >= 1:
+            return basename(String(parts[0]))
+        return payload
+    return payload
+
+
 # ── /api/index/status derived from the queue ───────────────────────────────────
 
 

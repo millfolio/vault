@@ -75,6 +75,7 @@ from scheduler import (
     EnqSpec,
     index_run_plan,
     split_payload,
+    short_payload,
     index_active,
     index_pending_files,
     index_current,
@@ -1054,6 +1055,12 @@ struct Api(Copyable, Handler, Movable):
             return _cors(ok_json(_index_status_json()))
         if path == "/api/operations":
             return self.handle_operations()
+        # The work-queue contents (running + pending) so Operations can show what's
+        # queued behind the running job. Read-only; empty in the demo.
+        if path == "/api/orchestrator/queue":
+            if _is_demo():
+                return _cors(ok_json('{"items":[]}'))
+            return _cors(ok_json(_orchestrator_queue_json()))
         if path == "/api/index/folders":
             return _cors(ok_json(_tracked_folders_json()))
         if req.method == Method.POST and path == "/api/index/reindex":
@@ -3014,6 +3021,40 @@ def _wq_list_safe() -> List[WorkItem]:
         return wq_list()
     except:
         return List[WorkItem]()
+
+
+def _orchestrator_queue_json() raises -> String:
+    """GET /api/orchestrator/queue → {"items":[…]} — the work-queue contents (pending
+    + running) so Operations can show what's queued behind the running job. Ordered
+    running-first (the active job), then pending in run-order (priority, then FIFO —
+    the order `wq_list` returns). Payloads are shortened to a basename/count so no
+    absolute on-device path leaks. Read-only."""
+    var items = wq_list()
+    var out = String('{"items":[')
+    var first = True
+    # Two passes: running items first (the active job), then pending, each preserving
+    # wq_list's priority/FIFO order.
+    for pass_ix in range(2):
+        var want_running = pass_ix == 0
+        for i in range(len(items)):
+            var is_running = items[i].state == "running"
+            if is_running != want_running:
+                continue
+            if not first:
+                out += ","
+            first = False
+            out += '{"id":' + String(items[i].id)
+            out += ',"kind":' + json_escape(items[i].kind)
+            out += ',"payload":' + json_escape(
+                short_payload(items[i].kind, items[i].payload)
+            )
+            out += ',"prio":' + String(items[i].prio)
+            out += ',"state":' + json_escape(items[i].state)
+            out += ',"pid":' + String(items[i].pid)
+            out += ',"startedTs":' + String(items[i].started_ts)
+            out += "}"
+    out += "]}"
+    return out
 
 
 def _index_read_state() -> String:

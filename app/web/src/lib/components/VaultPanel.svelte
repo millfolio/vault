@@ -5,7 +5,6 @@
   import { untrack } from "svelte";
   import SubTabs from "./SubTabs.svelte";
   import TagsPanel from "./TagsPanel.svelte";
-  import OperationsPanel from "./OperationsPanel.svelte";
   import DefineTagModal from "./DefineTagModal.svelte";
   import {
     unlockAmounts as revealUnlock,
@@ -130,10 +129,11 @@
 
   // fmtLoc / fmtDate / fmtMoney / fmtBytes live in $lib/format (pure + unit-tested).
 
-  // Records | Tags | Files | Operations sub-view switch inside the Vault tab.
-  let sub = $state<"files" | "records" | "tags" | "operations">(
+  // Records | Tags | Files sub-view switch inside the Vault tab. (Operations moved to
+  // its own top-level tab — the machine-activity page.)
+  let sub = $state<"files" | "records" | "tags">(
     untrack(() =>
-      initialSub === "tags" || initialSub === "files" || initialSub === "operations"
+      initialSub === "tags" || initialSub === "files"
         ? initialSub
         : "records",
     ),
@@ -733,15 +733,12 @@
           { id: "records", label: "Records" },
           { id: "tags", label: "Tags" },
           { id: "files", label: "Files" },
-          { id: "operations", label: "Operations" },
         ]}
         active={sub}
-        onselect={(id) => (id === "records" ? showRecords() : (sub = id as "files" | "tags" | "operations"))}
+        onselect={(id) => (id === "records" ? showRecords() : (sub = id as "files" | "tags"))}
       />
       {#if sub === "tags"}
         <TagsPanel {demo} embedded onreindex={() => (sub = "files")} />
-      {:else if sub === "operations"}
-        <OperationsPanel {demo} />
       {:else if sub === "files"}
       {#if !mock && !demo}
       <div class="indexcard">

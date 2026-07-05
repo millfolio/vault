@@ -15,6 +15,8 @@ from scheduler import (
     EnqSpec,
     index_run_plan,
     split_payload,
+    basename,
+    short_payload,
     index_active,
     index_pending_files,
     index_current,
@@ -161,6 +163,30 @@ def main() raises:
         parse_pending_total('{"pendingTotal":0}') == 0, "pendingTotal 0 → idle"
     )
     fails += expect(parse_pending_total('{"status":"idle"}') == 0, "absent → 0")
+
+    # ── payload shortening (for /api/orchestrator/queue) ───────────────────────
+    fails += expect(basename("/v/sub/a.csv") == "a.csv", "basename strips dirs")
+    fails += expect(basename("a.csv") == "a.csv", "basename no-slash → itself")
+    fails += expect(
+        short_payload(KIND_INDEX, "/v\t/v/sub/a.csv") == "a.csv",
+        "index payload → file basename",
+    )
+    fails += expect(
+        short_payload(KIND_FINALIZE, "/v\t/v/a.csv\t/v/b.pdf") == "2 files",
+        "finalize payload → 'N files'",
+    )
+    fails += expect(
+        short_payload(KIND_FINALIZE, "/v\t/v/a.csv") == "1 file",
+        "finalize with one file → '1 file' (singular)",
+    )
+    fails += expect(
+        short_payload(KIND_PREPARE, "/v/sub") == "sub",
+        "prepare payload → base basename",
+    )
+    fails += expect(
+        short_payload(KIND_BACKFILL, "groceries") == "groceries",
+        "backfill payload passes through (already a short scope)",
+    )
 
     if fails == 0:
         print("scheduler_test: ALL PASS")
