@@ -60,6 +60,7 @@ from vault.derive.tags import (
     read_categories,
     effective_tags,
     effective_tag_descriptions,
+    load_txn_rows,
 )
 from vault.derive.store import (
     tags_report_json,
@@ -94,6 +95,8 @@ from events import (
 from store import (
     ask_record_line,
     history_records_array,
+    operation_record_line,
+    operations_records_array,
     delete_ask_records,
     system_json,
 )
@@ -961,7 +964,10 @@ struct Api(Copyable, Handler, Movable):
         if req.method == Method.POST and path == "/api/index":
             return self.handle_index(req)
         if path == "/api/index/status":
+            _finalize_index_op()  # record a just-settled run the moment it's seen
             return _cors(ok_json(_index_status_json()))
+        if path == "/api/operations":
+            return self.handle_operations()
         if path == "/api/index/folders":
             return _cors(ok_json(_tracked_folders_json()))
         if req.method == Method.POST and path == "/api/index/reindex":
@@ -1104,6 +1110,24 @@ struct Api(Copyable, Handler, Movable):
         except:
             pass  # missing file → empty history
         return _cors(ok_json('{"records":' + history_records_array(raw) + "}"))
+
+    def handle_operations(self) raises -> Response:
+        """GET /api/operations → {"operations":[…]} — the durable history of COMPLETED
+        index / reindex / backfill runs (operations.jsonl), newest-first and capped at
+        the last 100. Same JSONL-comma-join pattern as /api/history (no server-side
+        parse). Empty in the public demo (synthetic, read-only — nothing to index)."""
+        if _is_demo():
+            return _cors(ok_json('{"operations":[]}'))
+        _finalize_index_op()  # fold in a just-settled index run before serving
+        var raw = String("")
+        try:
+            with open(_operations_path(), "r") as f:
+                raw = f.read()
+        except:
+            pass  # missing file → empty list
+        return _cors(
+            ok_json('{"operations":' + operations_records_array(raw, 100) + "}")
+        )
 
     def handle_history_delete(self, req: Request) raises -> Response:
         """POST /api/history/delete {"q": …} → remove that question's records from
@@ -1540,7 +1564,8 @@ struct Api(Copyable, Handler, Movable):
                 break
         if not seen:
             union.append(p.copy())
-        if not _start_index_detached(union):
+        _finalize_index_op()  # attribute any prior settled run before we overwrite
+        if not _start_index_detached(union, "index"):
             return _cors(bad_request('{"error":"could not start indexing"}'))
         return _cors(ok_json('{"ok":true,"state":"indexing"}'))
 
@@ -1584,7 +1609,8 @@ struct Api(Copyable, Handler, Movable):
                     )
         except:
             pass  # no/empty body → re-index all tracked
-        if not _start_index_detached(tracked):
+        _finalize_index_op()  # attribute any prior settled run before we overwrite
+        if not _start_index_detached(tracked, "reindex"):
             return _cors(bad_request('{"error":"could not start indexing"}'))
         return _cors(ok_json('{"ok":true,"state":"indexing"}'))
 
@@ -1854,14 +1880,41 @@ def _backfill_worker(arg: _OpaquePtr) -> _OpaquePtr:
     that honors the pause deadline (a live question is never delayed) and returns 0
     when paused, locked, or nothing is pending. Naps briefly between active slices,
     longer when idle (so a freshly-created tag starts within a few seconds). A pthread
-    start routine must NEVER raise — swallow everything."""
+    start routine must NEVER raise — swallow everything.
+
+    A backfill "session" = a contiguous stretch of slices that actually tagged rows;
+    when it drains (a slice returns 0 after the session tagged something), we append
+    ONE `backfill` operation for the whole session (start→now, rows tagged) to the
+    operations log. Idle polls that never tag anything record nothing."""
+    var session_started = Int64(0)  # 0 = no active backfill session
+    var session_tagged = 0
     while True:
         var nap_us = 3000000  # ~3s idle poll for newly-pending work
         try:
-            if ml_backfill_slice(_engine_url()) > 0:
+            var changed = ml_backfill_slice(_engine_url())
+            if changed > 0:
+                if session_started == 0:
+                    session_started = _epoch_s()
+                session_tagged += changed
                 # Throttle between active slices per the user's priority — low leaves
                 # long GPU-idle gaps (laptop stays usable), high runs near back-to-back.
                 nap_us = nap_ms_for_priority(get_priority()) * 1000
+            elif session_started != 0:
+                # A run just drained (this slice tagged nothing, but the session did)
+                # → record it once, then reset. Skipped in the demo (invisible there).
+                if not _is_demo():
+                    _append_operation(
+                        String("backfill"),
+                        session_started,
+                        _epoch_s(),
+                        String("done"),
+                        String("AI-tag backfill complete"),
+                        -1,  # files: n/a
+                        -1,  # txns: n/a
+                        session_tagged,
+                    )
+                session_started = 0
+                session_tagged = 0
         except:
             pass
         _usleep(nap_us)
@@ -2616,6 +2669,148 @@ def _index_status_json() raises -> String:
     )
 
 
+# ── Operations history (operations.jsonl) ─────────────────────────────────────
+# A durable, append-only log of COMPLETED index/reindex/backfill runs — the same
+# on-device JSONL pattern as asks.jsonl. The detached indexer is a shell chain the
+# server doesn't directly observe finishing (it only flips the `.index.state`
+# file), so we record an index/reindex op LAZILY: whenever a caller first observes
+# the state has settled (done|error) with the run's pending marker still present,
+# we append one record and atomically claim the marker (rename) so concurrent
+# pollers record the run exactly ONCE. Backfill runs are recorded by the worker
+# itself, which does observe each drain.
+
+
+def _operations_path() -> String:
+    """Where completed operations accumulate (JSONL) — durable, on-device beside
+    asks.jsonl. MILLFOLIO_OPS_FILE overrides."""
+    return String(
+        getenv("MILLFOLIO_OPS_FILE", _config_dir() + "/operations.jsonl")
+    )
+
+
+def _pending_op_path() -> String:
+    """Marker written when a detached index/reindex run STARTS (its type + start
+    epoch), read back once the run settles to build the operation record."""
+    return _config_dir() + "/.index.op"
+
+
+def _write_pending_op(kind: String, started: Int64):
+    """Stamp the pending-operation marker for a just-launched index/reindex run."""
+    _write_small(
+        _pending_op_path(),
+        String('{"type":')
+        + json_escape(kind)
+        + ',"started":'
+        + String(started)
+        + "}",
+    )
+
+
+def _append_operation(
+    kind: String,
+    started: Int64,
+    finished: Int64,
+    status: String,
+    detail: String,
+    files: Int,
+    txns: Int,
+    tagged: Int,
+):
+    """Append ONE completed-operation record to operations.jsonl (best-effort; never
+    raises). Negative counts are omitted (see `operation_record_line`)."""
+    var line = operation_record_line(
+        kind, started, finished, status, detail, files, txns, tagged
+    )
+    try:
+        with open(_operations_path(), "a") as f:
+            f.write(line + "\n")  # JSONL — one record per line
+        _chmod(_operations_path(), 0o600)  # owner-only: mirrors asks.jsonl
+    except:
+        log("[operations] append failed (non-fatal)")
+
+
+def _indexed_file_count() -> Int:
+    """Number of indexed FILE rows in manifest.tsv (mirrors handle_vault's parse).
+    -1 when there's no manifest / a parse error — so the count is simply omitted."""
+    var path = _config_dir() + "/manifest.tsv"
+    if not isfile(path):
+        return -1
+    try:
+        var text: String
+        with open(path, "r") as f:
+            text = f.read()
+        var lines = text.split("\n")
+        var n = 0
+        for i in range(len(lines)):
+            var line = String(lines[i])
+            if line.byte_length() == 0:
+                continue
+            var cols = line.split("\t")
+            if String(cols[0]) == "#meta":
+                continue
+            if len(cols) < 7:  # file row: alias name kind size sha id_start chunks
+                continue
+            n += 1
+        return n
+    except:
+        return -1
+
+
+def _stored_txn_count() -> Int:
+    """Count of stored, reconciled transactions (-1 when unreadable → omitted)."""
+    try:
+        return len(load_txn_rows())
+    except:
+        return -1
+
+
+def _finalize_index_op():
+    """If a detached index/reindex run has SETTLED (state done|error) and its pending
+    marker is still present, record ONE operation for it and clear the marker. The
+    marker is claimed with an atomic rename so that whichever caller (a status poll,
+    a GET /api/operations, or the next run's start) wins records the run exactly
+    once. Best-effort; never raises."""
+    if not exists(_pending_op_path()):
+        return
+    var state = _index_read_state()
+    if state != "done" and state != "error":
+        return  # still indexing / idle — nothing settled to record yet
+    # Atomically claim the marker: the winner of the rename finalizes it.
+    var claimed = _pending_op_path() + ".claiming"
+    var op = _cstr(_pending_op_path())
+    var cl = _cstr(claimed)
+    var rc = external_call["rename", c_int](op, cl)
+    op.free()
+    cl.free()
+    if Int(rc) != 0:
+        return  # another caller already claimed it (or it vanished)
+    var kind = String("index")
+    var started = Int64(0)
+    try:
+        var text: String
+        with open(claimed, "r") as f:
+            text = f.read()
+        var j = loads(text)
+        kind = String(j["type"].string_value())
+        started = j["started"].int_value()
+    except:
+        pass
+    _append_operation(
+        kind,
+        started,
+        _epoch_s(),
+        state,
+        _index_progress(),
+        _indexed_file_count(),
+        _stored_txn_count(),
+        -1,  # tagged: n/a for an index run
+    )
+    try:
+        remove(claimed)
+    except:
+        pass
+
+
 @fieldwise_init
 struct _Tracked(Copyable, Movable):
     """The tracked-folders registry, split into parallel lists: `paths[i]` was last
@@ -2709,7 +2904,7 @@ def _sh_squote(s: String) raises -> String:
     return out^
 
 
-def _start_index_detached(paths: List[String]) -> Bool:
+def _start_index_detached(paths: List[String], kind: String = "index") -> Bool:
     """Start the DETACHED `millfolio index <paths…>` over the whole tracked union (no
     --force → incremental: unchanged files are skipped), flipping the state file
     indexing→done (error on any failure); output captured to the log. Stamps every
@@ -2760,6 +2955,9 @@ def _start_index_detached(paths: List[String]) -> Bool:
         pass
     _write_small(state, "indexing")
     _write_small(log, "")
+    # Record this run's identity so the operations log can attribute it once the
+    # detached chain settles the state file (see `_finalize_index_op`).
+    _write_pending_op(kind, _epoch_s())
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)
     cc.free()

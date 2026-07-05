@@ -59,6 +59,61 @@ def history_records_array(raw: String) -> String:
     return "[" + recs + "]"
 
 
+def operation_record_line(
+    kind: String,
+    started: Int64,
+    finished: Int64,
+    status: String,
+    detail: String,
+    files: Int,
+    txns: Int,
+    tagged: Int,
+) -> String:
+    """ONE self-contained JSON record (no trailing newline) for the operations-
+    history store (`operations.jsonl`): a completed index / reindex / backfill run,
+    with its start/finish epochs, outcome, and a human detail line. The optional
+    counts (files, txns, tagged) are emitted only when `>= 0` — a negative means
+    "not applicable to this kind of operation". The writer appends the `\\n` that
+    makes the file JSONL."""
+    var line = String("{")
+    line += '"type":' + json_escape(kind)
+    line += ',"started":' + String(started)
+    line += ',"finished":' + String(finished)
+    line += ',"status":' + json_escape(status)
+    line += ',"detail":' + json_escape(detail)
+    if files >= 0:
+        line += ',"files":' + String(files)
+    if txns >= 0:
+        line += ',"txns":' + String(txns)
+    if tagged >= 0:
+        line += ',"tagged":' + String(tagged)
+    line += "}"
+    return line
+
+
+def operations_records_array(raw: String, cap: Int) -> String:
+    """The operations JSONL → a NEWEST-FIRST JSON array body `[<obj>,…]`, capped at
+    the `cap` most-recent records (mirrors `history_records_array`, but bounded so a
+    long-lived install doesn't return an unbounded list). Each non-blank line is
+    already a valid object → comma-join verbatim. Empty input → `[]`."""
+    var recs = String("")
+    var first = True
+    var kept = 0
+    var lines = raw.split("\n")
+    for i in range(len(lines) - 1, -1, -1):
+        if kept >= cap:
+            break
+        var ln = String(lines[i]).strip()
+        if ln.byte_length() == 0:
+            continue
+        if not first:
+            recs += ","
+        recs += ln
+        first = False
+        kept += 1
+    return "[" + recs + "]"
+
+
 def delete_ask_records(raw: String, q: String) raises -> String:
     """Return the JSONL history with every record for question `q` removed — backs
     POST /api/history/delete (the recent-questions panel dedups by question, so a
