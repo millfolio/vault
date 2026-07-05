@@ -733,11 +733,12 @@
         <a class:active={view === "system" || view === "stats"} href="/system">System</a>
       {/if}
     </nav>
-    <!-- The website's top-right trio: docs, the org, and the discussion board. -->
+    <!-- The website's top-right set: docs, the org, the discussion board, and chat. -->
     <nav class="links">
       <a href="https://millfolio.app/docs" target="_blank" rel="noopener">Docs</a>
       <a href="https://github.com/millfolio" target="_blank" rel="noopener">github.com/millfolio ↗</a>
       <a href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener" title="Join the discussion">Community ↗</a>
+      <a href="https://discord.gg/ZrWcStMtE4" target="_blank" rel="noopener" title="Join the Discord">Discord ↗</a>
     </nav>
   </header>
   {#if showOnboarding}
