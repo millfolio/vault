@@ -1,10 +1,11 @@
 name: test
 
-# Pure-Mojo unit-test suite: SHA-256 KATs, M/D date folding (iso_date), the
-# VAULT run-sandbox source_dir grant, the EgressGuard, and budget accounting.
-# These need only the Mojo toolchain (via pixi) — no sibling repos and no FFI
-# shims — so this job is fast and hermetic. `pixi run test` is the same target a
-# developer runs locally.
+# Pure-Mojo unit-test suite (`pixi run test` — the same target a developer runs
+# locally). The derive tests (store / missing-defaults) import the ML classify
+# path, which pulls in `flare` (HTTP) + the other vendored Mojo libs, so this job
+# checks out vault under `vault/` alongside its siblings — mirroring the `../<lib>`
+# `-I` layout the pixi tasks use. (It used to be sibling-free; store.mojo now
+# imports `vault.derive.classify`, so the libs are required to compile the tests.)
 on:
   push:
     branches: [main]
@@ -16,8 +17,28 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
+        with: { path: vault }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/flare, path: flare }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/json, path: json }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/lancedb.mojo, path: lancedb.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/pdftotext.mojo, path: pdftotext.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/zlib.mojo, path: zlib.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/csv.mojo, path: csv.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/docx.mojo, path: docx.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/jinja2.mojo, path: jinja2.mojo }
+      - uses: actions/checkout@v6
+        with: { repository: millfolio/logging.mojo, path: logging.mojo }
       - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
-          manifest-path: pixi.toml
+          manifest-path: vault/pixi.toml
       - name: Run the pure-Mojo test suite
+        working-directory: vault
         run: pixi run test
