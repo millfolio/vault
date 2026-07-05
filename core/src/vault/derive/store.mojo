@@ -1213,7 +1213,8 @@ def tags_report_json() raises -> String:
 
 def transactions_json(include_amounts: Bool = True) raises -> String:
     """`{"transactions":[{"file","date","year","amount":N|null,"direction","desc",
-    "tags":[…]}]}` over the stored transactions in as-stored order — the payload the
+    "merchant","country","state","tags":[…]}]}` over the stored transactions in
+    as-stored order — the payload the
     app server's GET /api/transactions returns for the Vault → Records view. `amount`
     is a bare JSON number (non-negative magnitude); the sign is in `direction`
     (`"debit"` = money out, `"credit"` = money in).
@@ -1236,7 +1237,14 @@ def transactions_json(include_amounts: Bool = True) raises -> String:
         else:
             out += ',"amount":null'
         out += ',"direction":' + _json_str(r.direction)
-        out += ',"desc":' + _json_str(r.desc) + ',"tags":['
+        out += ',"desc":' + _json_str(r.desc)
+        # Deterministic location split computed at index time (parse_location):
+        # merchant = cleaned brand, country = ISO3, state = US 2-letter. Sparse —
+        # only card-style descriptors carry them (transfers/checking rows are "").
+        out += ',"merchant":' + _json_str(r.merchant)
+        out += ',"country":' + _json_str(r.country)
+        out += ',"state":' + _json_str(r.state)
+        out += ',"tags":['
         for k in range(len(r.tags)):
             if k > 0:
                 out += ","
