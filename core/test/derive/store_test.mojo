@@ -16,7 +16,7 @@ rows + registry passed in. Guarantees:
 """
 
 from vault.derive.categorize import Registry, parse_rules, default_registry
-from vault.derive.store import retag, ml_backfill_rows
+from vault.derive.store import retag, ml_backfill_rows, note_backfilled_tag
 from vault.extract.transactions import TxnRow
 
 
@@ -215,6 +215,30 @@ def main() raises:
             "expense ML rule skips a credit row → 0 changed, no tag, no network"
             " call"
         ),
+    )
+
+    # ── (e) backfill tag-attribution: report a tag only when it tagged a row ─────
+    # `note_backfilled_tag` is the pure attribution `_ml_drain_locked`/
+    # `ml_backfill_slice` use to name WHICH AI tags a backfill session applied (the
+    # Operations "AI-tag backfill complete: <tags>" detail). A tag is reported iff
+    # the rule's running change count grew this call, and only once (deduped).
+    var reported = List[String]()
+    note_backfilled_tag(reported, String("gym"), 0, 2)  # 0→2: tagged → reported
+    expect(
+        len(reported) == 1 and reported[0] == "gym",
+        "note_backfilled_tag: a rule whose change count grew IS reported",
+    )
+    note_backfilled_tag(reported, String("gym"), 2, 3)  # grew again, same tag
+    expect(len(reported) == 1, "the same tag is not reported twice (deduped)")
+    note_backfilled_tag(reported, String("dining"), 3, 5)  # a second grown tag
+    expect(
+        len(reported) == 2 and reported[1] == "dining",
+        "a second, distinct grown tag is added",
+    )
+    note_backfilled_tag(reported, String("coffee"), 5, 5)  # no growth → skip
+    expect(
+        len(reported) == 2,
+        "a rule that changed nothing this call is NOT reported (no false name)",
     )
 
     print("ok: all store tests passed")

@@ -667,7 +667,21 @@ def _pending_gens(rows: List[TxnRow], mdg: Int) -> List[Int]:
     return gens^
 
 
-def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
+def note_backfilled_tag(
+    mut tags: List[String], tag: String, changed_before: Int, changed_after: Int
+):
+    """Record `tag` as one the backfill just applied — but ONLY when this rule's
+    running change count actually grew (a rule that classified only negatives this
+    slice added no tag, so it must not be reported), and only once (dedup). Backs
+    the Operations "AI-tag backfill complete: <tags>" detail. Pure — no model, no
+    I/O — so the attribution is unit-tested directly."""
+    if changed_after > changed_before and not contains(tags, tag):
+        tags.append(tag.copy())
+
+
+def _ml_drain_locked(
+    base_url: String, max_gen_groups: Int, mut added_tags: List[String]
+) raises -> Int:
     """The core drain (caller holds the lock). Applies the deterministic tags
     first (preserving cached ML tags), then for each ML rule classifies the
     PENDING generations (`added_gen > done_gen`) in ascending order, adds the tag
@@ -675,8 +689,9 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
     time. `max_gen_groups > 0` bounds how many generation-batches run this call
     (the between-questions worker passes 1); 0 drains everything (the CLI). Rows
     that already carry the tag are skipped (their positives are cached), so a
-    re-pass only re-does what a generation genuinely needs. Returns rows changed.
-    """
+    re-pass only re-does what a generation genuinely needs. Returns rows changed;
+    appends to `added_tags` the NAME of every ML tag that gained a row this call
+    (deduped) so the caller can name them in the Operations log."""
     var reg = load_registry()
     var rows = load_txn_rows()
     var markers = load_ledger()
@@ -699,6 +714,9 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
             if mdg == GEN_ABSENT:
                 upsert_marker(markers, r.tag, cur, max_gen)
             continue
+        var before_rule = (
+            changed  # rows this rule tags this call → its name is reported
+        )
         for gi in range(len(gens)):
             if max_gen_groups > 0 and groups_used >= max_gen_groups:
                 break
@@ -730,6 +748,7 @@ def _ml_drain_locked(base_url: String, max_gen_groups: Int) raises -> Int:
                 groups_used += 1
             # Everything with added_gen <= g is now backfilled for this rule.
             upsert_marker(markers, r.tag, cur, g)
+        note_backfilled_tag(added_tags, r.tag, before_rule, changed)
     if changed > 0:
         write_txn_rows(rows)
     save_ledger(markers)
@@ -745,7 +764,10 @@ def ml_backfill(base_url: String) raises -> Int:
     if not try_lock():
         return 0
     try:
-        var changed = _ml_drain_locked(base_url, 0)
+        var tags = List[
+            String
+        ]()  # tag names (unused here) — CLI reports rows only
+        var changed = _ml_drain_locked(base_url, 0, tags)
         unlock()
         return changed
     except e:
@@ -758,12 +780,23 @@ def ml_backfill_slice(base_url: String) raises -> Int:
     between-questions worker. Non-blocking try-lock (skip if the CLI holds it) and
     honors the pause deadline, so it can never delay a question. Returns rows
     changed (0 when paused, locked, or nothing pending)."""
+    var tags = List[String]()
+    return ml_backfill_slice(base_url, tags)
+
+
+def ml_backfill_slice(
+    base_url: String, mut added_tags: List[String]
+) raises -> Int:
+    """As `ml_backfill_slice(base_url)`, but also appends to `added_tags` the NAME
+    of every AI tag that gained a row this slice (deduped) — the worker unions these
+    across a session to name them in the Operations "AI-tag backfill complete" line.
+    """
     if is_paused():
         return 0
     if not try_lock():
         return 0
     try:
-        var changed = _ml_drain_locked(base_url, 1)
+        var changed = _ml_drain_locked(base_url, 1, added_tags)
         unlock()
         return changed
     except e:
