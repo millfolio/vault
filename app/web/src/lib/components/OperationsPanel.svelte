@@ -83,11 +83,16 @@
       ops = ((await res.json()).operations ?? []) as Operation[];
       mock = false;
     } catch (e) {
+      // A JSON parse failure surfaces as a SyntaxError (WebKit: "The string did not
+      // match the expected pattern") — the server now skips malformed operations
+      // lines, but degrade gracefully to a friendly line rather than the raw string.
       error = ctrl.signal.aborted
         ? "timed out"
-        : e instanceof Error
-          ? e.message
-          : String(e);
+        : e instanceof SyntaxError
+          ? "the server response was unreadable"
+          : e instanceof Error
+            ? e.message
+            : String(e);
     } finally {
       clearTimeout(timer);
       loading = false;

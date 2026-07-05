@@ -9,6 +9,7 @@ the expected data + log paths. Pure functions → fully deterministic, no fixtur
 from store import (
     ask_record_line,
     history_records_array,
+    operations_records_array,
     delete_ask_records,
     system_json,
     parse_progress_counter,
@@ -67,6 +68,39 @@ def main() raises:
     expect(p3 < p2 and p2 < p1, "newest-first ordering (3,2,1)")
     expect_eq(history_records_array(""), "[]", "empty file → []")
     expect_eq(history_records_array("\n  \n\n"), "[]", "blank-only → []")
+
+    # ── operations_records_array: newest-first, capped, drops malformed lines ────
+    var ops_raw = (
+        '{"type":"index","ts":1,"status":"done"}\n'
+        + '{"type":"index","ts":2,"star'  # torn write — no closing brace
+        + "\n"
+        + "garbage not json\n"  # legacy / junk line
+        + '{"type":"index","ts":3,"status":"error"}\n'
+    )
+    var ops = operations_records_array(ops_raw, 100)
+    _ = loads(
+        '{"operations":' + ops + "}"
+    )  # ONE bad line must not break the array
+    expect(ops.find('"ts":1') != -1, "good record ts:1 kept")
+    expect(ops.find('"ts":3') != -1, "good record ts:3 kept")
+    expect(ops.find('"ts":2') == -1, "torn/partial record dropped")
+    expect(ops.find("garbage") == -1, "non-JSON junk line dropped")
+    var op3 = ops.find('"ts":3')
+    var op1 = ops.find('"ts":1')
+    expect(op3 < op1, "operations newest-first (3 before 1)")
+    expect_eq(operations_records_array("", 100), "[]", "empty ops → []")
+    expect_eq(
+        operations_records_array("bad\n{oops\n", 100),
+        "[]",
+        "all-malformed ops → [] (still valid JSON)",
+    )
+    # cap keeps only the N most recent (newest-first)
+    var capped = operations_records_array('{"ts":1}\n{"ts":2}\n{"ts":3}\n', 2)
+    expect(
+        capped.find('"ts":3') != -1 and capped.find('"ts":2') != -1,
+        "cap keeps newest 2",
+    )
+    expect(capped.find('"ts":1') == -1, "cap drops the oldest")
 
     # ── delete_ask_records: drop a question's records, exact match (no prefix bleak) ─
     var hraw = (

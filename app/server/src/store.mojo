@@ -130,11 +130,22 @@ def operation_record_line(
     return line
 
 
+def _is_json_object_line(ln: String) -> Bool:
+    """A lightweight, dependency-free structural check that `ln` is a self-contained
+    JSON object — enough that comma-joining it into `[…]` won't make the whole array
+    invalid. A torn write (`{"type":"index","star`) fails the `}` suffix; a garbage
+    or legacy line fails the `{` prefix. `ln` must already be stripped + non-empty.
+    """
+    return ln.startswith("{") and ln.endswith("}")
+
+
 def operations_records_array(raw: String, cap: Int) -> String:
     """The operations JSONL → a NEWEST-FIRST JSON array body `[<obj>,…]`, capped at
     the `cap` most-recent records (mirrors `history_records_array`, but bounded so a
-    long-lived install doesn't return an unbounded list). Each non-blank line is
-    already a valid object → comma-join verbatim. Empty input → `[]`."""
+    long-lived install doesn't return an unbounded list). SKIPS any line that isn't a
+    self-contained JSON object — a single torn/partial write (e.g. from a crash mid-
+    index) or a legacy record must not make the whole array invalid JSON and wedge the
+    Operations panel. Empty input → `[]`."""
     var recs = String("")
     var first = True
     var kept = 0
@@ -142,9 +153,11 @@ def operations_records_array(raw: String, cap: Int) -> String:
     for i in range(len(lines) - 1, -1, -1):
         if kept >= cap:
             break
-        var ln = String(lines[i]).strip()
+        var ln = String(String(lines[i]).strip())
         if ln.byte_length() == 0:
             continue
+        if not _is_json_object_line(ln):
+            continue  # torn/partial/garbage line → drop rather than corrupt the array
         if not first:
             recs += ","
         recs += ln
