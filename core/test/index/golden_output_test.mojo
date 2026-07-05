@@ -59,7 +59,7 @@ comptime TRANSACTIONS_SRC = "core/src/vault/extract/transactions.mojo"
 # Set from a first run (the test PRINTS the computed value when the constant is
 # "" — see the fingerprint block in main()).
 comptime EXPECTED_LOCATION_FP = (
-    "4de99cc2f1d35ad14731c5aa931038c4bbdd45420d5cf91f9c47d95f692b516b"
+    "542356856ca44ae371c523804832af26f532c6c42394ce1c6c7a2b07d8eaaf23"
 )
 comptime EXPECTED_TRANSACTIONS_FP = (
     "ba3001c9c853ab1c27e1a9f27244a2f0d640e397dd5b83645a61bee5a8d95b4f"
@@ -95,6 +95,16 @@ def _golden_csv() raises -> List[List[String]]:
             String("-100.00"),
         ]
     )
+    # A refund row whose descriptor carries a trailing `(return)` annotation: the
+    # persisted `.desc` keeps it, but parse_location strips it to recover the geo.
+    rows.append(
+        [
+            String("03/20/2026"),
+            String("WHOLE FOODS MKT SEATTLE WA USA (return)"),
+            String("Purchase"),
+            String("-12.34"),
+        ]
+    )
     return rows^
 
 
@@ -119,7 +129,7 @@ def _golden_statement() raises -> String:
 def main() raises:
     # ── CSV path: csv_transactions + parse_location, EXACT per-row output ──────
     var ct = csv_transactions(_golden_csv())
-    assert_equal(len(ct), 2, BUMP_MSG + " [csv row count]")
+    assert_equal(len(ct), 3, BUMP_MSG + " [csv row count]")
 
     # Row 0 — LOCATED: STARBUCKS STORE 04821 SEATTLE WA USA, a $4.50 purchase.
     assert_equal(ct[0].date, "1/15", BUMP_MSG + " [csv[0].date]")
@@ -152,6 +162,23 @@ def main() raises:
     )
     assert_equal(loc1.state, "", BUMP_MSG + " [loc1.state]")
     assert_equal(loc1.country, "", BUMP_MSG + " [loc1.country]")
+
+    # Row 2 — REFUND with a trailing `(return)` annotation. The persisted `.desc`
+    # keeps the FULL original string; parse_location strips the parenthetical so
+    # the trailing geo tokens (WA / USA) parse and the merchant stays the brand.
+    assert_equal(
+        ct[2].desc,
+        "WHOLE FOODS MKT SEATTLE WA USA (return)",
+        BUMP_MSG + " [csv[2].desc keeps (return)]",
+    )
+    var loc2 = parse_location(ct[2].desc)
+    assert_equal(
+        loc2.merchant,
+        "WHOLE FOODS MKT SEATTLE",
+        BUMP_MSG + " [loc2.merchant]",
+    )
+    assert_equal(loc2.state, "WA", BUMP_MSG + " [loc2.state]")
+    assert_equal(loc2.country, "USA", BUMP_MSG + " [loc2.country]")
 
     # ── PDF/text path: extract_transactions + statement_year + parse_location ──
     var ext = extract_transactions(_golden_statement())

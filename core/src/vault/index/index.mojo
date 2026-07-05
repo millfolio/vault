@@ -76,7 +76,8 @@ comptime EMBED_BATCH = 64  # chunks per /v1/embeddings request
 # auto-forces a full rebuild on a mismatch. A MISSING marker reads as 0, so every
 # index built before this mechanism landed counts as older and rebuilds once.
 # v1: `.merchant`/`.state`/`.country` location fields filled by `parse_location`.
-comptime INDEX_PROCESSING_VERSION = 1
+# v2: parse_location: strip trailing parenthetical annotations (e.g. `(return)`).
+comptime INDEX_PROCESSING_VERSION = 2
 
 
 @fieldwise_init

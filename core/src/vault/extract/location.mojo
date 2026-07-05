@@ -230,6 +230,42 @@ def _markers() -> List[String]:
     ]
 
 
+def _strip_trailing_paren(desc: String) raises -> String:
+    """Strip a single TRAILING parenthetical annotation — a `(...)` group at the
+    very end of the descriptor (optionally preceded by whitespace) — so a bank's
+    appended refund/return marker (`(return)`, `(reversal)`, `(pending)`, …)
+    doesn't displace the trailing geo tokens the heuristic reads.
+
+    Only a CLEAN trailing group is removed: the descriptor must end in `)` and
+    contain a matching `(`; a mid-string paren inside a merchant name (the group
+    isn't the last non-space content) is left untouched, and a stray `)` with no
+    `(` is left alone. If stripping would empty the descriptor, the original
+    (trimmed) string is returned instead.
+    """
+    var s = String(String(desc).strip())
+    var b = s.as_bytes()
+    var n = len(b)
+    # Must end with ')' to be a trailing parenthetical.
+    if n == 0 or Int(b[n - 1]) != 41:  # ')'
+        return s^
+    # The matching '(' is the last '(' before the trailing ')'.
+    var open_idx = -1
+    for i in range(n - 1):
+        if Int(b[i]) == 40:  # '('
+            open_idx = i
+    if open_idx < 0:
+        return s^  # a ')' with no '(' → not a clean group, leave it.
+    # Rebuild the prefix [0, open_idx) and re-trim (drops the space before '(').
+    var out = String("")
+    for i in range(open_idx):
+        out += chr(Int(b[i]))
+    var trimmed = String(out.strip())
+    # Never empty the descriptor out (a bare "(return)" has no brand to keep).
+    if trimmed.byte_length() == 0:
+        return s^
+    return trimmed^
+
+
 def _refine_merchant(var merch: String) raises -> String:
     """Clean up the raw merchant string: collapse repeated whitespace to single
     spaces and strip a residual TRAILING store/account digit-run token (e.g.
@@ -271,9 +307,12 @@ def parse_location(desc: String) raises -> Location:
     var states = _states()
     var markers = _markers()
 
-    var toks = _tokens(desc)
+    # Strip a trailing parenthetical annotation (e.g. a bank's `(return)` /
+    # `(reversal)` marker) so the geo tokens are trailing again; parse over that.
+    var cleaned = _strip_trailing_paren(desc)
+    var toks = _tokens(cleaned)
     if len(toks) == 0:
-        return Location(String(String(desc).strip()), String(""), String(""))
+        return Location(String(cleaned.strip()), String(""), String(""))
 
     var country = String("")
     var state = String("")

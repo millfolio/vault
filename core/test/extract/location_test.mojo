@@ -67,6 +67,35 @@ def main() raises:
         "merchant keeps the whole brand", f.merchant == "IN N OUT BURGER", ok
     )
 
+    # A trailing `(return)` annotation the bank appends must not displace the geo
+    # tokens: strip it, then parse merchant/state/country as usual.
+    var r = parse_location(String("WHOLE FOODS MKT SEATTLE WA USA (return)"))
+    ok = _expect("trailing (return) → state WA", r.state == "WA", ok)
+    ok = _expect("trailing (return) → country USA", r.country == "USA", ok)
+    # No store-number digit run here, so the city stays in the merchant (as the
+    # heuristic always does) — the point is the strip didn't corrupt it.
+    ok = _expect(
+        "trailing (return) → merchant WHOLE FOODS MKT SEATTLE",
+        r.merchant == "WHOLE FOODS MKT SEATTLE",
+        ok,
+    )
+
+    # A general trailing parenthetical (any word) is stripped — not just (return).
+    var rv = parse_location(String("TESCO STORES LONDON GBR (reversal)"))
+    ok = _expect("trailing (reversal) → country GBR", rv.country == "GBR", ok)
+    ok = _expect("trailing (reversal) → no US state", rv.state == "", ok)
+
+    # A LEGIT mid-string paren in a merchant name (the group is NOT the trailing
+    # content) is untouched, and the geo still parses.
+    var mp = parse_location(String("AT&T (WIRELESS) DALLAS TX USA"))
+    ok = _expect("mid-string paren → state TX", mp.state == "TX", ok)
+    ok = _expect("mid-string paren → country USA", mp.country == "USA", ok)
+    ok = _expect(
+        "mid-string paren kept in merchant",
+        mp.merchant == "AT&T (WIRELESS) DALLAS",
+        ok,
+    )
+
     # Empty / whitespace descriptor → empty everything, no crash.
     var g = parse_location(String("   "))
     ok = _expect(
