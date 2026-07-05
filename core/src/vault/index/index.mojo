@@ -49,6 +49,7 @@ from vault.extract.transactions import (
     TxnRow,
     drop_aliases,
     dedupe_txns,
+    reconcile_txn_gens,
     select_txns,
     texts_for_alias,
 )
@@ -57,6 +58,7 @@ from vault.derive.store import (
     config_dir,
     load_registry,
     load_txn_rows,
+    load_ledger,
     write_txn_rows,
     retag,
     ml_backfill_rows,
@@ -686,7 +688,13 @@ def build_index(
         old = List[FileEntry]()
         next_id = 0
         next_alias = 0
-        next_gen = 1
+        # Do NOT reset `next_gen` — it must stay MONOTONIC across a full rebuild.
+        # Resetting it would stamp re-extracted rows below the ML-backfill ledger's
+        # `done_gen`, so a genuinely-new transaction added during the same rebuild
+        # would look already-covered and never get classified. Keeping the counter
+        # (from the loaded manifest; 1 on a clean machine) means unchanged rows are
+        # restored to their old generation by `reconcile_txn_gens` while new rows get
+        # a fresh, higher generation. See `reconcile_txn_gens` + `QUERY_FLOW.md`.
 
     # Current files (sorted, csv/pdf/md only) + their content hashes.
     var infos = manifest_for_files(allpaths)
@@ -799,6 +807,11 @@ def build_index(
     # Structured transactions live in their own side-table; evict the re-embedded +
     # removed files' rows, then re-extract the embedded ones below (in lockstep).
     var trows = load_txn_rows()
+    # Snapshot the previously-stored rows BEFORE the eviction/re-extract, so the
+    # freshly-extracted rows can be reconciled against them (unchanged rows reuse
+    # their old insertion generation + cached ML tags → the backfill doesn't re-run
+    # the whole vault on a full re-index). See `reconcile_txn_gens`.
+    var prev_rows = trows.copy()
     var txn_drop = removed_aliases.copy()
     for t in range(len(emb_alias)):
         txn_drop.append(emb_alias[t].copy())
@@ -955,6 +968,13 @@ def build_index(
             + String(pre_dedup - len(trows))
             + " duplicate transaction(s) across overlapping files"
         )
+    # Reconcile the freshly-extracted rows against the pre-index snapshot: an
+    # UNCHANGED transaction (same content fingerprint) reuses its prior insertion
+    # generation + cached ML tags. This is what keeps a full re-index (force /
+    # processing-version bump — where every file is re-embedded, so all rows are
+    # re-extracted with a fresh generation) from re-queuing the ENTIRE vault for ML
+    # backfill; only genuinely new / changed rows keep the fresh, higher generation.
+    _ = reconcile_txn_gens(trows, prev_rows)
     # Tag EVERY transaction (newly-extracted AND unchanged-file rows carried over)
     # from the current registry — one pure pass, the single source of tags.
     _ = retag(trows, reg)
@@ -965,7 +985,12 @@ def build_index(
     # failure (engine busy, chat model not serving) must never abort indexing.
     if len(emb_alias) > 0:
         try:
-            var ml_changed = ml_backfill_rows(trows, reg, base_url, emb_alias)
+            # Pass the ledger so rows the backfill already covers (unchanged rows
+            # whose generation `reconcile_txn_gens` restored) are skipped even though
+            # a full re-index puts every file in `emb_alias`.
+            var ml_changed = ml_backfill_rows(
+                trows, reg, base_url, emb_alias, load_ledger()
+            )
             if ml_changed > 0:
                 write_txn_rows(trows)
                 print(

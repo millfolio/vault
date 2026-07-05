@@ -201,6 +201,24 @@ back-dated statement indexed today gets a HIGH `added_gen` (it was inserted late
 → correctly seen as pending, even though its date is old. A date high-water-mark
 would silently skip it — wrong.
 
+**Re-index reconciliation — unchanged rows keep their generation.** A full
+re-index (an explicit `--force`, an index-processing-version bump, or a changed
+source dir) re-extracts EVERY transaction and would otherwise stamp each with a
+fresh, higher `added_gen`, leaving them all `> done_gen` → the ledger would treat
+the entire vault as pending and re-run the whole ML backfill (thousands of model
+calls) even though nothing changed. To prevent this, `build_index` snapshots the
+previously-stored rows and, after re-extraction, calls
+`reconcile_txn_gens(new, prev)`: a freshly-extracted row whose content fingerprint
+(`date + year + desc + amount + direction` — file-independent) matches a prior row
+REUSES that row's `added_gen` and cached tags. Matched with multiplicity (each
+prior row reused once). So an unchanged row keeps its old generation `<= done_gen`
+→ skipped; a genuinely new / changed row keeps the fresh generation → pending →
+classified. This is why `next_gen` is NOT reset on a full rebuild — it must stay
+monotonic so a new row added during the rebuild still lands ABOVE `done_gen`. The
+inline index-time ML pass (`ml_backfill_rows`) is also handed the ledger, so it
+skips any row already covered even when a full rebuild puts every file in its
+"newly-embedded" set.
+
 **The marker — `~/.config/millfolio/ml_ledger.tsv`**, header `# ml_ledger v1`
 (format versioning → discard + rebuild on mismatch). One line per ML rule:
 

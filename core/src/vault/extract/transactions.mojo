@@ -1417,6 +1417,70 @@ def dedupe_txns(rows: List[TxnRow]) raises -> List[TxnRow]:
     return out^
 
 
+def reconcile_txn_gens(
+    mut rows: List[TxnRow], prev: List[TxnRow]
+) raises -> Int:
+    """Preserve the insertion generation + cached tags of UNCHANGED transactions
+    across a re-index — the fix that stops a full re-index from re-running the whole
+    ML-tag backfill.
+
+    A full re-index (an explicit `--force`, an index-processing-version bump, or a
+    changed source dir) re-extracts every transaction and would stamp each with a
+    FRESH insertion generation (`added_gen`), leaving them all `> done_gen` for
+    every ML rule → the ledger sees the entire vault as pending → thousands of
+    needless model calls, even though nothing changed. This reconciles the freshly-
+    extracted `rows` against `prev` (the previously-stored rows): for each fresh row
+    that has the SAME content fingerprint as a prior row — `date + year + desc +
+    amount + direction`, the classification-relevant identity (see
+    `_txn_fingerprint`; deliberately FILE-INDEPENDENT, so a statement re-imported
+    under a new alias still matches) — reuse that prior row's `added_gen` and carry
+    over its tags. Because an unchanged row keeps its old generation `<= done_gen`,
+    the ledger correctly treats it as already-backfilled → the drain skips it.
+
+    Matched with MULTIPLICITY: each `prev` row is reused at most once, so N identical
+    charges reuse N prior generations and a genuinely-new (N+1)-th copy keeps its
+    fresh generation. A fresh row whose descriptor / amount / date / direction
+    CHANGED matches nothing → keeps the fresh generation → `> done_gen` → correctly
+    re-classified. Returns the number of rows reconciled (matched to a prior row).
+
+    Pure — the subsequent `retag` pass normalizes the carried-over tags (re-derives
+    deterministic tags, keeps only ML tags of still-active rules, applies the
+    direction gate), so carrying the whole prior tag list here is safe."""
+    # Bucket the prior rows by fingerprint, preserving their order, so a fingerprint
+    # that occurred N times maps to N prior rows we can reuse one at a time.
+    var buckets = Dict[String, List[Int]]()
+    for i in range(len(prev)):
+        var fp = _txn_fingerprint(prev[i])
+        if fp in buckets:
+            var b = buckets[fp].copy()
+            b.append(i)
+            buckets[fp] = b^
+        else:
+            var b = List[Int]()
+            b.append(i)
+            buckets[fp] = b^
+    # Consume each bucket left-to-right: the k-th fresh copy of a fingerprint reuses
+    # the k-th prior copy; a copy past the prior count keeps its fresh generation.
+    var used = Dict[String, Int]()
+    var reused = 0
+    for r in range(len(rows)):
+        var fp = _txn_fingerprint(rows[r])
+        if fp not in buckets:
+            continue
+        var b = buckets[fp].copy()
+        var c = used[fp] if fp in used else 0
+        if c >= len(b):
+            continue
+        var pi = b[c]
+        used[fp] = c + 1
+        var row = rows[r].copy()
+        row.added_gen = prev[pi].added_gen
+        row.tags = prev[pi].tags.copy()
+        rows[r] = row^
+        reused += 1
+    return reused
+
+
 def _row_iso_date(r: TxnRow) raises -> String:
     """The row's date as a GUARANTEED ISO `"YYYY-MM-DD"` (combining the stored `year`
     with the raw `M/D` token via `iso_date`), or `""` when the year/date is unknown.

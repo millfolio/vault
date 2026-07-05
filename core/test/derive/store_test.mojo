@@ -16,8 +16,19 @@ rows + registry passed in. Guarantees:
 """
 
 from vault.derive.categorize import Registry, parse_rules, default_registry
-from vault.derive.store import retag, ml_backfill_rows, note_backfilled_tag
-from vault.extract.transactions import TxnRow
+from vault.derive.store import (
+    retag,
+    ml_backfill_rows,
+    note_backfilled_tag,
+    _pending_gens,
+)
+from vault.derive.ledger import (
+    RuleMarker,
+    qhash,
+    upsert_marker,
+    marker_done_gen,
+)
+from vault.extract.transactions import TxnRow, reconcile_txn_gens
 
 
 def expect(cond: Bool, what: String) raises:
@@ -206,8 +217,13 @@ def main() raises:
         )
     )
     var no_alias = List[String]()
+    var no_markers = List[RuleMarker]()
     var ml_gated = ml_backfill_rows(
-        creditrows, mlonly, String("http://127.0.0.1:0/v1"), no_alias
+        creditrows,
+        mlonly,
+        String("http://127.0.0.1:0/v1"),
+        no_alias,
+        no_markers,
     )
     expect(
         ml_gated == 0 and len(creditrows[0].tags) == 0,
@@ -239,6 +255,232 @@ def main() raises:
     expect(
         len(reported) == 2,
         "a rule that changed nothing this call is NOT reported (no false name)",
+    )
+
+    # ── (f) re-index reconcile: identical data → ZERO pending (the reported bug) ──
+    # A row builder with an explicit generation + tags, for the reconcile scenarios.
+    def _txnr(
+        var fa: String,
+        var date: String,
+        amt: Float64,
+        var dir: String,
+        var desc: String,
+        var tags: List[String],
+        gen: Int,
+    ) -> TxnRow:
+        return TxnRow(
+            fa^,
+            date^,
+            amt,
+            dir^,
+            desc^,
+            tags^,
+            gen,
+            2026,  # year
+            String(""),
+            String(""),
+            String(""),
+            String(""),
+            String(""),
+        )
+
+    # The stored vault after a backfill: three rows at insertion gens 1..3, two of
+    # them carrying the cached `coffee` ML tag (positives), one a cached negative.
+    var prev = List[TxnRow]()
+    prev.append(
+        _txnr(
+            "file_0",
+            "1/05",
+            5.0,
+            "debit",
+            "BLUE BOTTLE COFFEE",
+            [String("coffee")],
+            1,
+        )
+    )
+    prev.append(
+        _txnr("file_0", "1/06", 9.0, "debit", "SHELL GAS", List[String](), 2)
+    )
+    prev.append(
+        _txnr(
+            "file_1", "2/01", 4.0, "debit", "STARBUCKS", [String("coffee")], 3
+        )
+    )
+
+    # The `coffee` ML rule, backfilled THROUGH gen 3 (marker done_gen = 3).
+    var cur = qhash("is this a coffee shop?")
+    var markers = List[RuleMarker]()
+    upsert_marker(markers, "coffee", cur, 3)
+    var mdg = marker_done_gen(markers, "coffee", cur)
+    expect(mdg == 3, "marker records the vault backfilled through gen 3")
+
+    # A FULL re-index re-extracts every row with a FRESH, higher generation (7) and
+    # EMPTY tags (extraction is tag-agnostic). Before the fix these would all read as
+    # pending (added_gen 7 > done_gen 3) → the whole vault re-classifies.
+    def _fresh_identical() -> List[TxnRow]:
+        var f = List[TxnRow]()
+        f.append(
+            _txnr(
+                "file_0",
+                "1/05",
+                5.0,
+                "debit",
+                "BLUE BOTTLE COFFEE",
+                List[String](),
+                7,
+            )
+        )
+        f.append(
+            _txnr(
+                "file_0", "1/06", 9.0, "debit", "SHELL GAS", List[String](), 7
+            )
+        )
+        f.append(
+            _txnr(
+                "file_1", "2/01", 4.0, "debit", "STARBUCKS", List[String](), 7
+            )
+        )
+        return f^
+
+    var fresh = _fresh_identical()
+    var reused = reconcile_txn_gens(fresh, prev)
+    expect(reused == 3, "reconcile: all three unchanged rows match a prior row")
+    expect(
+        fresh[0].added_gen == 1
+        and fresh[1].added_gen == 2
+        and fresh[2].added_gen == 3,
+        "reconcile restores each row's PRIOR insertion generation",
+    )
+    expect(
+        _has(fresh[0].tags, "coffee") and _has(fresh[2].tags, "coffee"),
+        "reconcile carries over the cached ML tag onto the positives",
+    )
+    expect(
+        len(fresh[1].tags) == 0,
+        "the cached NEGATIVE carries no tag (its gen makes it already-covered)",
+    )
+    # THE FIX: with generations restored, nothing is past done_gen=3 → 0 pending.
+    var pend = _pending_gens(fresh, mdg)
+    expect(
+        len(pend) == 0,
+        (
+            "re-index of identical data → 0 pending generations (was 1 before"
+            " the fix)"
+        ),
+    )
+
+    # ── (g) a genuinely NEW row is pending; the unchanged one is not ─────────────
+    var fresh2 = List[TxnRow]()
+    fresh2.append(
+        _txnr(
+            "file_0",
+            "1/05",
+            5.0,
+            "debit",
+            "BLUE BOTTLE COFFEE",
+            List[String](),
+            7,
+        )
+    )  # unchanged
+    fresh2.append(
+        _txnr("file_0", "3/09", 6.0, "debit", "PEETS COFFEE", List[String](), 7)
+    )  # NEW
+    var reused2 = reconcile_txn_gens(fresh2, prev)
+    expect(
+        reused2 == 1, "reconcile: only the unchanged row matches a prior row"
+    )
+    expect(fresh2[0].added_gen == 1, "the unchanged row is restored to gen 1")
+    expect(
+        fresh2[1].added_gen == 7, "the genuinely-new row keeps the fresh gen 7"
+    )
+    var pend2 = _pending_gens(fresh2, mdg)
+    expect(
+        len(pend2) == 1 and pend2[0] == 7,
+        "exactly the new row's generation is pending → only it re-classifies",
+    )
+
+    # ── (h) a CHANGED descriptor is re-classified; unchanged rows are not ────────
+    var fresh3 = List[TxnRow]()
+    fresh3.append(
+        _txnr(
+            "file_0",
+            "1/05",
+            5.0,
+            "debit",
+            "BLUE BOTTLE COFFEE",
+            List[String](),
+            7,
+        )
+    )  # unchanged
+    fresh3.append(
+        _txnr(
+            "file_0",
+            "1/06",
+            9.0,
+            "debit",
+            "SHELL GAS STATION #42",
+            List[String](),
+            7,
+        )
+    )  # desc CHANGED
+    fresh3.append(
+        _txnr("file_1", "2/01", 4.0, "debit", "STARBUCKS", List[String](), 7)
+    )  # unchanged
+    var reused3 = reconcile_txn_gens(fresh3, prev)
+    expect(
+        reused3 == 2,
+        (
+            "reconcile: the two unchanged rows match; the changed descriptor"
+            " does not"
+        ),
+    )
+    expect(
+        fresh3[1].added_gen == 7 and len(fresh3[1].tags) == 0,
+        (
+            "the changed-descriptor row keeps the fresh gen + no cached tag →"
+            " re-classified"
+        ),
+    )
+    var pend3 = _pending_gens(fresh3, mdg)
+    expect(
+        len(pend3) == 1 and pend3[0] == 7,
+        "only the changed row's generation is pending",
+    )
+
+    # ── (i) multiplicity: N identical charges reuse N prior gens; the extra is new ─
+    var prevm = List[TxnRow]()
+    prevm.append(
+        _txnr("file_0", "4/02", 5.0, "debit", "COFFEE", [String("coffee")], 1)
+    )
+    prevm.append(
+        _txnr("file_0", "4/02", 5.0, "debit", "COFFEE", [String("coffee")], 2)
+    )
+    var freshm = List[TxnRow]()
+    freshm.append(
+        _txnr("file_0", "4/02", 5.0, "debit", "COFFEE", List[String](), 7)
+    )
+    freshm.append(
+        _txnr("file_0", "4/02", 5.0, "debit", "COFFEE", List[String](), 7)
+    )
+    freshm.append(
+        _txnr("file_0", "4/02", 5.0, "debit", "COFFEE", List[String](), 7)
+    )  # a genuine third
+    var reusedm = reconcile_txn_gens(freshm, prevm)
+    expect(
+        reusedm == 2,
+        (
+            "reconcile: only two prior copies exist → two reuse, the third"
+            " stays new"
+        ),
+    )
+    expect(
+        freshm[0].added_gen == 1
+        and freshm[1].added_gen == 2
+        and freshm[2].added_gen == 7,
+        (
+            "the extra identical charge keeps the fresh generation (correct"
+            " multiplicity)"
+        ),
     )
 
     print("ok: all store tests passed")

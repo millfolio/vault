@@ -311,6 +311,7 @@ def ml_backfill_rows(
     reg: Registry,
     base_url: String,
     restrict_aliases: List[String],
+    markers: List[RuleMarker],
 ) raises -> Int:
     """Apply the registry's ML rules to `rows` in place, via the on-device model
     (chat at `base_url`). For each ML rule, classify the descriptions of rows that
@@ -318,13 +319,25 @@ def ml_backfill_rows(
     newly-extracted files at index time, so existing rows aren't re-classified
     every pass) — and add the tag where the model answers yes. Returns the number
     of rows changed; no-op when the registry has no ML rules. Raises if the engine
-    chat is unreachable, so callers can treat the ML pass as best-effort."""
+    chat is unreachable, so callers can treat the ML pass as best-effort.
+
+    Rows the ledger already covers are skipped: a row with `added_gen <= done_gen`
+    for the rule's current question was classified in a prior pass (its verdict is
+    cached — positives in `.tags`, negatives implicit), so it must NOT be re-run.
+    This is what lets a full re-index (where `restrict_aliases` covers every file
+    because all were re-embedded) avoid re-classifying the unchanged rows whose
+    generation `reconcile_txn_gens` restored. A row at a fresh generation
+    (`> done_gen`, or a rule with an absent/stale marker → `done_gen = -1`) is
+    still classified. Pass an empty `markers` to disable the ledger gate."""
     var changed = 0
     var restrict = len(restrict_aliases) > 0
     for i in range(len(reg.rules)):
         ref r = reg.rules[i]
         if not r.is_ml():
             continue
+        # The ledger watermark for this rule at its CURRENT question — rows at or
+        # below it are already classified (cached), so they're skipped below.
+        var mdg = marker_done_gen(markers, r.tag, qhash(r.ml_prompt))
         var idxs = List[Int]()
         var descs = List[String]()
         for t in range(len(rows)):
@@ -332,6 +345,8 @@ def ml_backfill_rows(
                 continue
             if contains(rows[t].tags, r.tag):
                 continue  # already tagged (cached from a prior pass)
+            if rows[t].added_gen <= mdg:
+                continue  # the ledger already covers this generation (cached)
             # Direction gate: an expense ML rule never classifies a credit (and an
             # income ML rule never a debit). Filtering here also cuts model calls.
             if not tag_allows_direction(r.tag, rows[t].direction):
