@@ -382,7 +382,20 @@
   // The keyword we add for a record = its merchant description, with characters
   // that would break the categories.txt line format neutralised (commas separate
   // keywords; = / : are rule separators; tabs/newlines end the line).
-  const kwFromDesc = (s: string) => s.replace(/[,=:\t\n]/g, " ").replace(/\s+/g, " ").trim();
+  const cleanKw = (s: string) => s.replace(/[,=:\t\n]/g, " ").replace(/\s+/g, " ").trim();
+  // A GENERALIZABLE keyword for the tag rule: prefer the parsed merchant, so tagging a
+  // "SAFEWAY 85 WESTLAKE MALL DALY CITY 94015 CA USA" row matches EVERY SAFEWAY row —
+  // not just this one exact descriptor (which is why an add used to never backfill).
+  // Fall back to the descriptor's leading name, up to the first digit (where the
+  // street address usually begins).
+  const kwFromRow = (row: Txn) => {
+    const m = cleanKw(row.merchant ?? "");
+    if (m) return m;
+    const desc = cleanKw(row.desc ?? "");
+    const cut = desc.search(/\d/);
+    const head = (cut > 0 ? desc.slice(0, cut) : desc).trim();
+    return head || desc;
+  };
 
   // Rebuild categories.txt from the full tag list — the SAME format/path the Tags
   // editor uses (POST /api/categories), which merges into an existing rule safely
@@ -432,7 +445,7 @@
     if (addingTo || !addRow) return;
     const base = apiBase();
     if (base === null) return;
-    const kw = kwFromDesc(addRow.desc);
+    const kw = kwFromRow(addRow);
     if (!kw) { addMsg = "This record has no usable description."; return; }
     addingTo = true;
     addMsg = "";
