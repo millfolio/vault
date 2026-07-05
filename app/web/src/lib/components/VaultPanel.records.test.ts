@@ -115,4 +115,44 @@ describe("VaultPanel Records file cell (P1 regression)", () => {
     // The full raw descriptor stays available on hover.
     expect(merchant.getAttribute("title")).toBe("VERIZON WIRELESS PMT");
   });
+
+  it("truncates a long merchant-less descriptor without dropping amount/tags (P1 overflow)", async () => {
+    // A transfer/PayPal-style row with NO parsed merchant → falls back to the full
+    // raw desc. Under the fixed table layout the .merchant span (nowrap + ellipsis)
+    // clips instead of widening the table and pushing amount/tags off-screen.
+    const longDesc =
+      "PAYPAL TRANSFER *ONLINE PAYMENT REF 998877665544 ACH DEBIT WEB INITIATED — VERY LONG DESCRIPTOR THAT WOULD OVERFLOW";
+    const wide = {
+      transactions: [
+        {
+          file: "file_0",
+          date: "4/05",
+          year: 2026,
+          amount: 42.5,
+          direction: "debit",
+          desc: longDesc,
+          merchant: "",
+          country: "",
+          state: "",
+          tags: ["transfers"],
+        },
+      ],
+    };
+    stubFetch({ vault: VAULT, transactions: wide });
+    const { container } = render(VaultPanel, { props: { initialSub: "records" } });
+
+    await waitFor(() => {
+      expect(container.querySelector("td.desc .merchant")).not.toBeNull();
+    });
+    const merchant = container.querySelector("td.desc .merchant") as HTMLElement;
+    // Full descriptor lands in the truncating span (clipped by CSS, full text on hover).
+    expect(merchant.textContent).toContain("PAYPAL TRANSFER");
+    expect(merchant.getAttribute("title")).toBe(longDesc);
+    // Amount + tags still render in the same row — not shoved off by the wide desc.
+    expect(container.querySelector("td.amt")?.textContent).toContain("42.50");
+    expect(container.querySelector("td.tags .tagchip")?.textContent).toContain("transfers");
+    // The fixed-layout table constrains columns.
+    const table = container.querySelector("table.records") as HTMLTableElement;
+    expect(table.querySelector("colgroup col.c-desc")).not.toBeNull();
+  });
 });

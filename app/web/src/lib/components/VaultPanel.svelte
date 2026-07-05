@@ -1001,6 +1001,14 @@
             </div>
           {/if}
           <table class="records">
+            <colgroup>
+              <col class="c-date" />
+              <col class="c-desc" />
+              <col class="c-amt" />
+              <col class="c-tags" />
+              <col class="c-file" />
+              <col class="c-act" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Date</th>
@@ -2050,14 +2058,36 @@
     color: var(--ok);
   }
 
-  /* Records table */
+  /* Records table — fixed layout so the desc column takes the flexible remainder
+     and TRUNCATES (its .merchant ellipsis) instead of widening the table and
+     pushing amount/tags/file off-screen. Every other column gets a real width. */
+  .records {
+    table-layout: fixed;
+    width: 100%;
+  }
+  .records .c-date {
+    width: 96px;
+  }
+  .records .c-amt {
+    width: 104px;
+  }
+  .records .c-tags {
+    width: 160px;
+  }
+  .records .c-file {
+    width: 200px;
+  }
+  .records .c-act {
+    width: 58px;
+  }
+  /* .c-desc has no width → it absorbs the remaining space and its cell clips. */
   .records td.date {
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
   .records td.desc {
-    overflow-wrap: anywhere;
+    overflow: hidden;
   }
   .records td.amt {
     font-variant-numeric: tabular-nums;
@@ -2085,13 +2115,12 @@
     border-color: var(--accent);
     background: var(--surface-2);
   }
-  /* The File (source) cell: let the link use the column's width and, when the
+  /* The File (source) cell: the fixed .c-file column caps its width; when the
      name is too long, truncate on ONE line with an ellipsis (full name in the
-     title tooltip). max-width caps how much of the row it can claim; the inner
-     .fname does the clipping. No overflow-wrap here — that was forcing the link
-     to wrap inside the old 220px cap regardless of window width. */
+     title tooltip) via the inner .fname. No overflow-wrap here — that was
+     forcing the link to wrap regardless of window width. */
   .records td.rfile {
-    max-width: 260px;
+    overflow: hidden;
   }
   .records td.rfile .muted {
     font-size: 12px;
