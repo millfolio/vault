@@ -702,7 +702,6 @@
 
 <main>
   <header class="topbar">
-    <a class="brand" href={`https://${brandName}.app`} title={`Go to ${brandName}.app`}>{brandName}</a>
     <nav class="tabs">
       <a class:active={view === "chat"} href="/">Chat</a>
       <a class:active={view === "vault" || view === "tags"} href="/vault">Vault</a>
@@ -714,7 +713,12 @@
         <a class:active={view === "system" || view === "stats"} href="/system">System</a>
       {/if}
     </nav>
-    <a class="community" href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener" title="Join the discussion">Community ↗</a>
+    <!-- The website's top-right trio: docs, the org, and the discussion board. -->
+    <nav class="links">
+      <a href="https://millfolio.app/docs" target="_blank" rel="noopener">Docs</a>
+      <a href="https://github.com/millfolio" target="_blank" rel="noopener">github.com/millfolio ↗</a>
+      <a href="https://github.com/millfolio/millfolio/discussions" target="_blank" rel="noopener" title="Join the discussion">Community ↗</a>
+    </nav>
   </header>
   {#if showOnboarding}
     <section class="onboarding" aria-labelledby="onb-title">
@@ -892,19 +896,11 @@
   .topbar {
     display: flex;
     align-items: center;
-    gap: 18px;
+    flex-wrap: wrap; /* mobile: links wrap under the tabs, never overflow */
+    gap: 10px 18px;
     padding: 8px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
-  }
-  .brand {
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    color: inherit;
-    text-decoration: none;
-  }
-  .brand:hover {
-    color: var(--accent);
   }
   .tabs {
     display: flex;
@@ -929,15 +925,21 @@
     border-color: var(--border);
     color: var(--text);
   }
-  .community {
-    margin-left: auto; /* push to the top-right */
+  .links {
+    margin-left: auto; /* push the trio to the top-right */
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .links a {
     color: var(--text-dim);
     font-weight: 600;
     font-size: 13px;
     text-decoration: none;
     white-space: nowrap;
   }
-  .community:hover {
+  .links a:hover {
     color: var(--accent);
   }
   .single {
