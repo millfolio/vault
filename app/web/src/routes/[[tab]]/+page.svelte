@@ -4,7 +4,7 @@
   import ChatPanel from "$lib/components/ChatPanel.svelte";
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import StatsPanel from "$lib/components/StatsPanel.svelte";
-  import OperationsPanel from "$lib/components/OperationsPanel.svelte";
+  import OperationsView from "$lib/components/OperationsView.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
   import { fmtEta, shortId } from "$lib/format";
@@ -79,20 +79,32 @@
   let busy = $state(false);
   let session: Session | undefined;
   // The active tab is driven by the URL ([[tab]] optional-param route): "/" → chat,
-  // "/vault" → vault, "/stats" → stats, "/operations" → operations. One component
-  // serves all tabs, so switching is a same-route param change (no remount) — the chat
-  // survives. "/system" is kept as an alias for the old System tab → Operations now.
+  // "/vault" → vault, "/operations" → operations. One component serves all tabs, so
+  // switching is a same-route param change (no remount) — the chat survives.
+  //
+  // Operations now carries three sub-tabs (Operations | Stats | Logs). "/stats" and
+  // "/system" are kept as aliases that land on the right Operations sub-tab so old
+  // links + the status-bar chips don't break: "/stats" → the Stats sub-tab, "/system"
+  // → the Operations sub-tab (the old System info now lives under Operations/Logs).
+  // The public demo is the exception — it has no Operations tab, so "/stats" there
+  // still opens the standalone StatsPanel top-level.
   const view = $derived<"chat" | "vault" | "stats" | "operations" | "tags">(
     page.params.tab === "vault"
       ? "vault"
-      : page.params.tab === "stats"
-        ? "stats"
+      : page.params.tab === "tags"
+        ? "tags"
         : page.params.tab === "operations" || page.params.tab === "system"
           ? "operations"
-          : page.params.tab === "tags"
-            ? "tags"
+          : page.params.tab === "stats"
+            ? isDemo
+              ? "stats"
+              : "operations"
             : "chat",
   );
+  // Which Operations sub-tab a URL lands on: "/stats" → stats, everything else
+  // (/operations, /system) → the main Operations sub-tab. Used to re-key OperationsView
+  // so a URL change into a different sub-tab remounts it with a fresh initial value.
+  const opSub = $derived(page.params.tab === "stats" ? "stats" : "operations");
   // Run-queue position — shown as a floating bottom-right badge, not inline.
   let queueMsg = $state<string | null>(null);
   // The on-device model the server serves (bottom status bar). Empty under the
@@ -730,10 +742,10 @@
         <!-- The public demo has no Operations tab, so Stats stays top-level. -->
         <a class:active={view === "stats"} href="/stats">Stats</a>
       {:else}
-        <!-- Real install: one Operations tab = the machine-activity page (Now, Controls,
-             History, System, Backfill). Stats (per-question timing) stays alongside it. -->
+        <!-- Real install: one Operations tab = the machine-activity page, with
+             Operations | Stats | Logs sub-tabs (Now/Controls/History/System/Backfill,
+             per-question timing, and the on-disk data & log locations). -->
         <a class:active={view === "operations"} href="/operations">Operations</a>
-        <a class:active={view === "stats"} href="/stats">Stats</a>
       {/if}
     </nav>
     <!-- The website's top-right set: docs, the org, the discussion board, and chat. -->
@@ -792,9 +804,14 @@
       <!-- /tags deep-links (tag pills) open the Vault → Tags sub-tab. -->
       <VaultPanel demo={isDemo} initialSub="tags" />
     {:else if view === "operations"}
-      <!-- The single machine-activity page: Now, Controls, History, System, Backfill. -->
-      <OperationsPanel demo={isDemo} />
+      <!-- The machine-activity page with Operations | Stats | Logs sub-tabs. Re-key on
+           the URL-selected sub-tab so a /stats deep-link remounts onto the Stats sub-tab
+           (the wrapper captures its initial sub-tab once, like VaultPanel). -->
+      {#key opSub}
+        <OperationsView demo={isDemo} initialSub={opSub} />
+      {/key}
     {:else if view === "stats"}
+      <!-- Demo only — the standalone Stats page (the demo has no Operations tab). -->
       <StatsPanel />
     {:else}
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />

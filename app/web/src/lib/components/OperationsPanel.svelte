@@ -5,12 +5,12 @@
   //   Now       — the running job (index or backfill) + the queue behind it
   //   Controls  — global Pause + Priority (govern index AND backfill)
   //   History   — the durable operations log, failures surfaced
-  //   System    — GPU / mem / disk / model + where the data & logs live
+  //   System    — GPU / mem / disk / model (the data & log locations live in the
+  //               sibling Logs sub-tab, rendered by the OperationsView wrapper)
   //   Backfill  — per-AI-tag backfill progress, a detail of the running/last backfill
   // Backed by /api/{operations,index/status,orchestrator/queue,backfill/*,gpu,model,system}.
   import { onMount, onDestroy } from "svelte";
   import { opLabel, fmtDur, fmtEta } from "$lib/format";
-  import LogsPanel from "./LogsPanel.svelte";
 
   let { demo = false }: { demo?: boolean } = $props();
 
@@ -496,23 +496,20 @@
     </div>
   {/if}
 
-  <!-- ── System: GPU / mem / disk / model + where things live ───────────────── -->
-  {#if !demo}
+  <!-- ── System: GPU / mem / disk / model (data & log locations → Logs sub-tab) ─ -->
+  {#if !demo && (gpu || model)}
     <div class="block">
       <h3 class="bhead">System</h3>
-      {#if gpu || model}
-        <div class="stats">
-          {#if gpu}
-            <div class="stat"><span class="slabel">GPU</span><span class="sval">{gpu.util}%</span></div>
-            <div class="stat"><span class="slabel">Memory</span><span class="sval">{gpu.mem}%</span></div>
-            <div class="stat"><span class="slabel">Disk</span><span class="sval">{gpu.disk}%</span></div>
-          {/if}
-          {#if model}
-            <div class="stat wide"><span class="slabel">Model</span><span class="sval">{model}</span></div>
-          {/if}
-        </div>
-      {/if}
-      <LogsPanel {demo} />
+      <div class="stats">
+        {#if gpu}
+          <div class="stat"><span class="slabel">GPU</span><span class="sval">{gpu.util}%</span></div>
+          <div class="stat"><span class="slabel">Memory</span><span class="sval">{gpu.mem}%</span></div>
+          <div class="stat"><span class="slabel">Disk</span><span class="sval">{gpu.disk}%</span></div>
+        {/if}
+        {#if model}
+          <div class="stat wide"><span class="slabel">Model</span><span class="sval">{model}</span></div>
+        {/if}
+      </div>
     </div>
   {/if}
 </section>
