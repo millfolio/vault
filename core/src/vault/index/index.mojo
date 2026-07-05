@@ -627,6 +627,20 @@ def _embed_chunks(
     return vectors^
 
 
+def _skip_vector_store() -> Bool:
+    """TEST HOOK: skip ALL LanceDB vector-store I/O when embeddings are faked.
+
+    `MILLFOLIO_FAKE_EMBED` returns deterministic placeholder vectors (see
+    `_embed_chunks`) that carry no retrieval signal, so writing/searching them is
+    pointless. Skipping the store under that hook also frees the hermetic
+    index-parity tests (which assert only on manifest / transactions / chunks TSV
+    bytes, never on `index.db`) from needing the `liblancedbmojo` FFI dylib — the
+    thing whose `dlopen` fails in the checkout-only CI `test` job. Real indexing
+    never sets this flag, so the vector store is always written in production.
+    """
+    return getenv("MILLFOLIO_FAKE_EMBED", "") != ""
+
+
 # ── build (incremental) — factored into per-file steps + a finalize settle ─────
 # The indexer is now driven ONE FILE AT A TIME so the app-server orchestrator can
 # pause / yield to an interactive query between files (see app/server
@@ -888,10 +902,13 @@ def index_one_file(
             man.entries[oi].chunk_count,
         )
 
-    # This file needs (re-)embedding. Load the side state.
+    # This file needs (re-)embedding. Load the side state. Vector-store writes are
+    # DEFERRED: the delete predicates are collected here and applied (with the add +
+    # optimize) in one guarded block below, so the fake-embed test path never opens
+    # LanceDB — see `_skip_vector_store`.
     var st = _load_sidetable()
     var trows = load_txn_rows()
-    var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
+    var del_preds = List[String]()
     var did_delete = False
 
     var falias: String
@@ -901,7 +918,7 @@ def index_one_file(
         var os = man.entries[oi].id_start
         var oc = man.entries[oi].chunk_count
         if oc > 0:
-            store.delete(
+            del_preds.append(
                 String("id >= ") + String(os) + " AND id < " + String(os + oc)
             )
             did_delete = True
@@ -919,7 +936,7 @@ def index_one_file(
             has_orphan = True
             break
     if has_orphan:
-        store.delete(String("id >= ") + String(man.next_id))
+        del_preds.append(String("id >= ") + String(man.next_id))
         did_delete = True
         st = _drop_ge(st, man.next_id)
 
@@ -947,10 +964,17 @@ def index_one_file(
         st.aliases.append(falias.copy())
         st.texts.append(chunks[c].copy())
     var vectors = _embed_chunks(base_url, chunks)
-    store.add(ids, vectors)
+    if not _skip_vector_store():
+        var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
+        # Deletes (old range / orphans) first, then the fresh id range — the new ids
+        # are all >= next_id, so they survive the deletes (matches the pre-refactor
+        # order that ran each store op inline).
+        for p in range(len(del_preds)):
+            store.delete(del_preds[p])
+        store.add(ids, vectors)
+        if did_delete:
+            store.optimize()  # compact soft-delete tombstones
     man.next_id += len(chunks)
-    if did_delete:
-        store.optimize()  # compact soft-delete tombstones
 
     var entry = FileEntry(
         falias.copy(),
@@ -1013,7 +1037,7 @@ def finalize_index(files: List[String], base: String, base_url: String) raises:
         var st = _load_sidetable()
         st = _drop_ranges(st, del_starts, del_counts)
         _write_sidetable(st)
-        if exists(_db_uri()):
+        if exists(_db_uri()) and not _skip_vector_store():
             var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
             var did_delete = False
             for r in range(len(del_starts)):
