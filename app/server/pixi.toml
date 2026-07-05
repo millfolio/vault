@@ -44,7 +44,9 @@ build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../va
 test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../../json -o build/events-test && ./build/events-test" }
 # Unit-test the serial run-queue state file (runqueue.mojo) — flock + ticket invariants.
 test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I src -I ../../flare -o build/runqueue-test && rm -f /tmp/millfolio-runq-test /tmp/millfolio-runq-test.lock && MILLFOLIO_RUNQ_PATH=/tmp/millfolio-runq-test ./build/runqueue-test" }
+# Unit-test the disk-backed work queue (work_queue.mojo) — priority/FIFO/dedup/persistence.
+test-workqueue = { cmd = "mkdir -p build && mojo build test/work_queue_test.mojo -I src -I ../../flare -o build/workqueue-test && rm -f /tmp/millfolio-workq-test /tmp/millfolio-workq-test.lock /tmp/millfolio-workq-test.tmp && MILLFOLIO_WORKQ_PATH=/tmp/millfolio-workq-test ./build/workqueue-test" }
 # Unit-test the on-device JSON store builders (store.mojo) — ask history + /api/system.
 test-store = { cmd = "mkdir -p build && mojo build test/store_test.mojo -I src -I ../../json -o build/store-test && ./build/store-test" }
-# Full unit suite — what `moon run app-server:check` runs (events + run-queue + store).
-test-all = { depends-on = ["test", "test-runqueue", "test-store"] }
+# Full unit suite — what `moon run app-server:check` runs (events + run-queue + work-queue + store).
+test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-store"] }
