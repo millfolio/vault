@@ -120,9 +120,10 @@ struct Block(Copyable, Movable):
     var xs: List[String]  # x values (iso/category label); pie: slice labels
     var ys: List[Cell]  # y values (money column); pie: typed-money slice values
     # map (geo breakdown): `title` above is reused for the map title.
-    var map_level: String  # "country" (ISO3) | "state" (US 2-letter)
-    var codes: List[String]  # region codes, parallel to `mvals`
+    var map_level: String  # "country" ISO3 | "state" US-2 | "city" US-zip
+    var codes: List[String]  # region codes (city: the zip); parallel to `mvals`
     var mvals: List[Cell]  # typed money per region
+    var labels: List[String]  # display label per code (city name); "" = none
 
     def __init__(out self):
         self.kind = String("")
@@ -138,6 +139,7 @@ struct Block(Copyable, Movable):
         self.map_level = String("")
         self.codes = List[String]()
         self.mvals = List[Cell]()
+        self.labels = List[String]()
 
 
 struct Buf(Movable):
@@ -269,7 +271,9 @@ def _block_json(b: Block) raises -> String:
         return o^
     elif b.kind == "map":
         # A geo breakdown: one typed-money value per region code. `level` tells the
-        # client whether `code` is an ISO3 country or a US 2-letter state.
+        # client whether `code` is an ISO3 country, a US 2-letter state, or (city) a
+        # US zip that PLACES the bubble while an optional `label` (the city name)
+        # DISPLAYS it — the zip is clean/exact, the descriptor city name is messy.
         var o = String('{"kind":"map","title":') + _jstr(b.title)
         o += ',"level":' + _jstr(b.map_level)
         o += ',"points":['
@@ -277,7 +281,12 @@ def _block_json(b: Block) raises -> String:
             if i > 0:
                 o += ","
             o += '{"code":' + _jstr(b.codes[i]) + ',"value":'
-            o += _cell_json(b.mvals[i]) + "}"
+            o += _cell_json(b.mvals[i])
+            # Only emit `label` when set — country/state points carry none, so their
+            # point shape (and the pinned wire test) is unchanged.
+            if i < len(b.labels) and b.labels[i].byte_length() > 0:
+                o += ',"label":' + _jstr(b.labels[i])
+            o += "}"
         o += "]}"
         return o^
     elif b.kind == "pie":
@@ -377,11 +386,15 @@ def series(title: String, kind: String) raises -> SeriesRef:
 
 
 def geo_map(title: String, level: String) raises -> MapRef:
-    """Start a geo breakdown; `level` is `"country"` (codes are ISO3, e.g. `"USA"`)
-    or `"state"` (codes are US 2-letter, e.g. `"WA"`). Append regions with
-    `.place(code, money_val(total))`. Emit this for a spending-by-country / by-state
-    question — the CLIENT draws the choropleth; the program never chooses the view.
-    Group with the `Txn.country`/`Txn.state` fields (index-time, deterministic).
+    """Start a geo breakdown; `level` is `"country"` (codes are ISO3, e.g. `"USA"`),
+    `"state"` (codes are US 2-letter, e.g. `"WA"`), or `"city"` (US-only — the code
+    is a 5-digit `.zip` that PLACES the bubble and the third `.place(...)` arg is the
+    `.city` name that LABELS it). Append regions with `.place(code, money_val(total))`
+    (or `.place(zip, money_val(total), city)` for a city map). Emit this for a
+    spending-by-country / by-state / by-city question — the CLIENT draws the map; the
+    program never chooses the view. Group with the `Txn.country`/`Txn.state`/`Txn.city`
+    fields (index-time, deterministic); for a city map place by the representative
+    `.zip` of each city (e.g. its most common zip).
 
     Named `geo_map` (not `map`) because `map` is a Mojo prelude builtin
     (`std.iter.map`) that shadows a `from vault import *` name; the serialized block
@@ -473,13 +486,19 @@ struct PieRef(Copyable, Movable):
 @fieldwise_init
 struct MapRef(Copyable, Movable):
     """A handle to a map block; `.place(code, money_val(y))` appends one region's
-    typed-money total and re-emits. Chainable."""
+    typed-money total and re-emits. Chainable. The optional 3rd arg `label` gives a
+    display name for the code (a `"city"` map places by `.zip` but labels by
+    `.city`); it defaults to `""` so the 2-arg country/state call is unchanged.
+    """
 
     var idx: Int
 
-    def place(self, code: String, value: Cell) raises -> Self:
+    def place(
+        self, code: String, value: Cell, label: String = String("")
+    ) raises -> Self:
         var p = _bufptr()
         p[].blocks[self.idx].codes.append(code)
         p[].blocks[self.idx].mvals.append(value.copy())
+        p[].blocks[self.idx].labels.append(label)
         _emit()
         return self.copy()

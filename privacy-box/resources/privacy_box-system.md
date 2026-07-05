@@ -217,7 +217,7 @@ Emit data only when it genuinely adds to the answer; a plain reply still just us
 | `kpi(label, value)` | one headline number | a single total / count |
 | `table(headers)` + `.row([...])` | a labeled table | a ranked list (top merchants, spend per tag) |
 | `series(title, kind)` + `.point(x, y)` | an ordered breakdown | a per-month (`kind="time"`, x = ISO date) or per-category (`kind="category"`, x = label) breakdown |
-| `geo_map(title, level)` + `.place(code, value)` | a geo breakdown the client maps | a spending-**by-country** (`level="country"`, codes are ISO3) or **by-state** (`level="state"`, codes are US 2-letter) question |
+| `geo_map(title, level)` + `.place(code, value[, label])` | a geo breakdown the client maps | a spending-**by-country** (`level="country"`, codes are ISO3), **by-state** (`level="state"`, codes are US 2-letter), or **by-city** (`level="city"`, US-only — `code` is the representative `.zip`, the 3rd `.place` arg is the `.city` name that labels the bubble) question |
 | `pie(title)` + `.slice(label, value)` | a share-of-whole breakdown the client draws as a pie | **what share / what fraction / what percentage** of a total each part is — a spend split across a SMALL number of named parts (≤ ~8 tags/merchants/categories). Many parts → prefer `table`/`series(_, "category")`. |
 
 Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quantity,
@@ -240,7 +240,9 @@ Match the SHAPE to the question: a total/count → `kpi`; several headline
 numbers → several `kpi` tiles; a per-month/per-day trend → `series(_, "time")`; a
 per-category split → `series(_, "category")`; a ranked list → `table`; a
 spending-by-country/state (geo) breakdown → `geo_map(_, "country"/"state")` (the
-client draws the map — you never choose it); a **share-of-whole** split ("what
+client draws the map — you never choose it); a spending-**by-city** breakdown →
+`geo_map(_, "city")` placed by each city's representative `.zip` and labeled by its
+`.city` (US-only — see the by-city worked example); a **share-of-whole** split ("what
 share/fraction/percentage of my spending is each …") across a SMALL number of parts
 (≤ ~8) → `pie(_)` (the client computes the %s and draws it — many parts → `table`
 instead). `.row(...)`, `.point(...)`, `.place(...)` and `.slice(...)` chain
@@ -576,6 +578,65 @@ def main() raises:
     for c in range(len(codes)):
         # code is a plain String (ISO3); the value is ALWAYS money_val, never money().
         _ = gm.place(codes[c], money_val(totals[c]))
+```
+
+**"Which cities did I spend the most in? / spending by city"** (a US-only GEO breakdown → a `geo_map(_, "city")`; group on `Txn.city`, PLACE each bubble by the city's most-common `.zip`, LABEL it by the `.city` name)
+Group the debits by `.city` — SKIPPING rows with no city (`x.city == ""`). The map
+PLACES a bubble by ZIP (clean + exact), so per city also track the count of each
+`.zip` seen and pick the **modal** (most common) one — a city with a total but NO
+zip on any of its rows can't be mapped (it just won't appear on the map; the client
+still lists it). Then emit ONE `geo_map(title, "city")` with a
+`.place(zip, money_val(total), city)` per city. City-only (no zip) → fall back to a
+`table`. You never draw the map — the CLIENT renders it from the zips + labels.
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    var cities = List[String]()
+    var totals = List[Float64]()
+    var zips = List[List[String]]()      # per city: every .zip seen (to pick the modal one)
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit" or x.city == "":
+                continue                          # only located spending
+            var found = False
+            for c in range(len(cities)):
+                if cities[c] == x.city:
+                    totals[c] += x.amount
+                    if x.zip != "":
+                        zips[c].append(x.zip)
+                    found = True
+                    break
+            if not found:
+                cities.append(x.city)
+                totals.append(x.amount)
+                var zl = List[String]()
+                if x.zip != "":
+                    zl.append(x.zip)
+                zips.append(zl^)
+    if len(cities) == 0:
+        print_answer("I couldn't find any transactions with a city on them.")
+        return
+    result_text("Here's your spending by city.")
+    var gm = geo_map("Spending by city", "city")
+    for c in range(len(cities)):
+        # pick the MODAL zip for this city (most common) — that PLACES the bubble.
+        var best = String("")
+        var best_n = 0
+        for a in range(len(zips[c])):
+            var n = 0
+            for b in range(len(zips[c])):
+                if zips[c][b] == zips[c][a]:
+                    n += 1
+            if n > best_n:
+                best_n = n
+                best = zips[c][a]
+        if best == "":
+            continue                              # no zip → can't map this city
+        # code = the zip (placement); value = money_val; label = the city name.
+        _ = gm.place(best, money_val(totals[c]), cities[c])
 ```
 
 **"What share of my spending goes to each category?"** (a SHARE-OF-WHOLE split → a `pie`; sum debits per part, one `.slice(label, money_val(total))` per part)

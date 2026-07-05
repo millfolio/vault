@@ -130,6 +130,37 @@ def main() raises:
         ok,
     )
 
+    # ── Phase C2 — city map (placed by zip, labeled by city name) ───────────────
+    var cm = geo_map("Spending by city", "city")
+    _ = cm.place("94015", money_val(812.40), "Daly City")
+    _ = cm.place("10001", money_val(120.00), "New York")
+    var c2 = result_json()
+    ok = _expect(
+        "city map: level city",
+        _has(c2, '{"kind":"map","title":"Spending by city","level":"city"'),
+        ok,
+    )
+    ok = _expect(
+        "city point carries zip code + typed money + city label",
+        _has(
+            c2,
+            (
+                '{"code":"94015","value":{"type":"money","raw":812.4,"text":"$812.40"},"label":"Daly'
+                ' City"}'
+            ),
+        ),
+        ok,
+    )
+    # A 2-arg .place (country/state) still emits NO label key — backward-compatible.
+    ok = _expect(
+        "2-arg place emits no label (country/state unchanged)",
+        _has(
+            c2,
+            '{"code":"USA","value":{"type":"money","raw":4210.55,"text":"$4,210.55"}}',
+        ),
+        ok,
+    )
+
     # ── Phase D — pie block (share-of-whole breakdown) ──────────────────────────
     var pc = pie("Spend by category")
     _ = pc.slice("Groceries", money_val(812.40))
