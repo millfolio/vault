@@ -888,7 +888,11 @@ def build_index(
         var chunks = _chunk_text(body)
         # Print BEFORE the (slow) embed so a multi-page file isn't a silent stall.
         print(
-            "  "
+            "  ["
+            + String(t + 1)
+            + "/"
+            + String(len(emb_idx))
+            + "] "
             + falias
             + " ["
             + cur_kinds[i]
