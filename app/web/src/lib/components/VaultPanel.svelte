@@ -2106,6 +2106,8 @@
     font-size: 11px;
     padding: 1px 9px;
     color: var(--accent);
+    white-space: nowrap; /* keep a multi-word tag ("coffee shop") on one line — the
+                            pill widens instead of splitting + breaking the row */
   }
   a.rchip.tclick {
     text-decoration: none;
