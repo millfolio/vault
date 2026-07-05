@@ -1059,7 +1059,14 @@
                     {/if}
                   </td>
                   <td class="rfile">
-                    {#if !mock && fileFor(t.file)}
+                    <!-- Link whenever the row carries a plausible file alias — NOT
+                         gated on fileFor() matching info.files. Records only render
+                         once `info` is loaded (they live under {:else if info}), so a
+                         missing match means the txns.tsv alias didn't line up with the
+                         manifest; we still want the source link (openHit resolves the
+                         alias → viewer when it matches). Falls to plain text only for
+                         mock/sample data or a truly empty alias. -->
+                    {#if !mock && t.file}
                       <button type="button" class="filelink" onclick={() => openHit(t.file)} title={nameFor(t.file)}>
                         <span class="open" aria-hidden="true">↗</span><span class="fname">{nameFor(t.file)}</span>
                       </button>

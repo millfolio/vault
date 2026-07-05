@@ -4,3 +4,6 @@ build/
 .vite/
 *.tsbuildinfo
 .DS_Store
+
+# vitest coverage
+coverage/
