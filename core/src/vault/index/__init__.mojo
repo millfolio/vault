@@ -6,6 +6,9 @@ Re-exports the public surface of its modules so `from vault.index import …` an
 
 from vault.index.index import (
     build_index,
+    index_one_file,
+    finalize_index,
+    FileStepResult,
     search,
     file_chunks,
     file_transactions,

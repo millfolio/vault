@@ -16,6 +16,8 @@ from vault.index import (
     pdf_text,
     embed,
     build_index,
+    index_one_file,
+    finalize_index,
     search,
     Chunk,
     vault_files,
@@ -158,6 +160,30 @@ def main() raises:
         if len(roots) == 0:
             roots.append(_default_dir())  # no paths → the configured vault dir
         build_index(roots^, _embed_url(), force)
+    elif cmd == "index-file":
+        # Per-file entrypoint for the app-server orchestrator: index ONE file against
+        # the current persisted index and commit it (pausable between files).
+        #   millfolio index-file <base> <path>
+        # `base` is the vault source dir (a file's name is relative to it); a fresh
+        # rebuild / force decision is the orchestrator's, not this step's.
+        if len(args) < 4:
+            print("usage: millfolio index-file <base> <path>")
+            return
+        var base = String(args[2])
+        var res = index_one_file(String(args[3]), base, _embed_url())
+        print(String.write(res))
+    elif cmd == "index-finalize":
+        # Finalize entrypoint: the end-of-run settle after per-file steps — prune
+        # files no longer tracked, reconcile generations, retag, close the run.
+        #   millfolio index-finalize <base> <file1> [<file2> ...]
+        if len(args) < 3:
+            print("usage: millfolio index-finalize <base> [<file> ...]")
+            return
+        var base = String(args[2])
+        var files = List[String]()
+        for i in range(3, len(args)):
+            files.append(String(args[i]))
+        finalize_index(files, base, _embed_url())
     elif cmd == "search":
         if len(args) < 3:
             print('usage: millfolio search "<query>" [k] [--json]')

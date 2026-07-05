@@ -52,6 +52,8 @@ from vault.extract.transactions import (
     reconcile_txn_gens,
     select_txns,
     texts_for_alias,
+    txn_rows_to_tsv,
+    tsv_to_txn_rows,
 )
 from vault.extract.location import parse_location
 from vault.derive.store import (
@@ -574,7 +576,19 @@ def _embed_chunks(
     base_url: String, chunks: List[String]
 ) raises -> List[Float32]:
     """Embed `chunks` in batches of EMBED_BATCH; return the flat row-major vectors
-    (len == len(chunks) * EMBED_DIM)."""
+    (len == len(chunks) * EMBED_DIM).
+
+    TEST HOOK: when `MILLFOLIO_FAKE_EMBED` is set (non-empty), skip the network and
+    return deterministic unit vectors of the right shape. Only the chunk COUNT (not
+    the embedding VALUES) influences the manifest / side-table / transaction bytes,
+    so this lets the hermetic index-parity tests drive `build_index` /
+    `index_one_file` end-to-end without a live embeddings endpoint."""
+    if getenv("MILLFOLIO_FAKE_EMBED", "") != "":
+        var out = List[Float32]()
+        for _c in range(len(chunks)):
+            for d in range(EMBED_DIM):
+                out.append(Float32(1) if d == 0 else Float32(0))
+        return out^
     var vectors = List[Float32]()
     var start = 0
     while start < len(chunks):
@@ -613,7 +627,478 @@ def _embed_chunks(
     return vectors^
 
 
-# ── build (incremental) ───────────────────────────────────────────────────────
+# ── build (incremental) — factored into per-file steps + a finalize settle ─────
+# The indexer is now driven ONE FILE AT A TIME so the app-server orchestrator can
+# pause / yield to an interactive query between files (see app/server
+# ORCHESTRATOR.md §2.1). `build_index` is exactly:
+#     _prepare_index_run(base, force)          # fresh-reset decision (run-level)
+#     for f in files: index_one_file(f, base)  # embed ONE file, COMMIT it
+#     finalize_index(files, base)              # prune removed + reconcile + retag
+# Each `index_one_file` persists its manifest row + chunks + txn rows before it
+# returns, so a pause/crash between files leaves a CONSISTENT partial index a later
+# run resumes (the `#meta` counters — next_id / next_alias / next_gen — live in the
+# manifest, so they carry across steps). `finalize_index` is the end-of-run settle:
+# it prunes files no longer tracked, runs the dedupe + `reconcile_txn_gens` + retag
+# + ML-backfill pass, and closes the generation. Driving the whole directory
+# through this loop reproduces the old monolithic `build_index` byte-for-byte (same
+# manifest, same gens, same tags) — the parity net the index-steps test pins.
+
+
+@fieldwise_init
+struct FileStepResult(Copyable, Movable, Writable):
+    """What `index_one_file` did to one file. `action` is `"embedded"` (new or
+    content-changed → re-embedded), `"skipped"` (name + hash unchanged), or
+    `"unsupported"` (not a CSV/PDF/Markdown/DOCX). `falias` is the file's stable
+    alias; `chunk_count` the number of chunks it now has (0 for unsupported)."""
+
+    var action: String
+    var falias: String
+    var chunk_count: Int
+
+    def write_to(self, mut writer: Some[Writer]):
+        writer.write(
+            self.action, " ", self.falias, " (", self.chunk_count, " chunk(s))"
+        )
+
+
+def _has_str(xs: List[String], s: String) -> Bool:
+    for i in range(len(xs)):
+        if xs[i] == s:
+            return True
+    return False
+
+
+# ── prev-row stash (crash-safe reconcile input across per-file steps) ──────────
+# `reconcile_txn_gens` needs the FULL pre-run transaction set so an unchanged row
+# keeps its `added_gen` across a re-index. But per-file steps EVICT a changed /
+# removed file's old rows the moment they run (so a query between files never
+# double-counts), which would erase them from that pre-run set. So every eviction
+# APPENDS the evicted rows to a durable stash file; `finalize_index` reads it (∪
+# the still-present old rows) as `prev`, then clears it. The stash survives a pause
+# — that's what keeps the gen-reconciliation from regressing in the sliced model.
+
+
+def _prevstash_path() raises -> String:
+    return config_dir() + "/.index.pending_prev.tsv"
+
+
+def _append_prevstash(rows: List[TxnRow]) raises:
+    """Append evicted rows to the prev stash (read-modify-write; the stash only ever
+    holds one run's evicted rows, so it stays small)."""
+    if len(rows) == 0:
+        return
+    var prior = String("")
+    if exists(_prevstash_path()):
+        with open(_prevstash_path(), "r") as f:
+            prior = f.read()
+    with open(_prevstash_path(), "w") as f:
+        f.write(prior + txn_rows_to_tsv(rows))
+
+
+def _load_prevstash() raises -> List[TxnRow]:
+    if not exists(_prevstash_path()):
+        return List[TxnRow]()
+    var text: String
+    with open(_prevstash_path(), "r") as f:
+        text = f.read()
+    return tsv_to_txn_rows(text)
+
+
+def _clear_prevstash() raises:
+    if exists(_prevstash_path()):
+        remove(_prevstash_path())
+
+
+def _drop_ge(st: SideTable, threshold: Int) raises -> SideTable:
+    """A copy of `st` with every chunk whose id is >= `threshold` removed — the
+    crash cleanup: committed chunks always sit below `next_id`, so anything at or
+    above it is an orphan left by a per-file step that died before its manifest
+    commit."""
+    var ids = List[Int]()
+    var aliases = List[String]()
+    var texts = List[String]()
+    for i in range(len(st.ids)):
+        if st.ids[i] < threshold:
+            ids.append(st.ids[i])
+            aliases.append(st.aliases[i].copy())
+            texts.append(st.texts[i].copy())
+    return SideTable(ids^, aliases^, texts^)
+
+
+def _rows_for_aliases(
+    rows: List[TxnRow], aliases: List[String]
+) raises -> List[TxnRow]:
+    """The subset of `rows` whose alias is in `aliases` (the rows about to be
+    evicted — stashed so `finalize_index` can reconcile against them)."""
+    var out = List[TxnRow]()
+    for i in range(len(rows)):
+        if _has_str(aliases, rows[i].falias):
+            out.append(rows[i].copy())
+    return out^
+
+
+def _extract_txn_rows(
+    path: String, kind: String, body: String, falias: String, gen: Int
+) raises -> List[TxnRow]:
+    """The structured-transaction extraction for ONE file, stamped with insertion
+    generation `gen` and alias `falias`. CSV exports map columns directly (every row
+    is a record); PDF/text statements are trusted only when they RECONCILE against
+    the statement's own arithmetic. Tags are left empty here (the single retag pass
+    in `finalize_index` is the source of tags). Extracted identically to the old
+    monolithic embed loop, so the persisted rows are byte-for-byte the same."""
+    var rows = List[TxnRow]()
+    if kind == "csv":
+        var ctxns = csv_transactions(csv_rows(path))
+        for x in range(len(ctxns)):
+            ref ct = ctxns[x]
+            var loc = parse_location(ct.desc)
+            rows.append(
+                TxnRow(
+                    falias.copy(),
+                    ct.date.copy(),
+                    ct.amount,
+                    ct.direction.copy(),
+                    ct.desc.copy(),
+                    List[String](),
+                    gen,
+                    ct.year,
+                    loc.merchant.copy(),
+                    loc.country.copy(),
+                    loc.state.copy(),
+                    loc.city.copy(),
+                    loc.zip.copy(),
+                )
+            )
+    else:
+        # PDF/text: needs COLUMN-ALIGNED text; for PDFs re-extract layout-preserved
+        # (`body` is stream-order, good for chunks/search but not column direction).
+        var txn_src = readers.pdf_text_layout(path) if kind == "pdf" else body
+        var ext = extract_transactions(txn_src)
+        if ext.reconciled:
+            var syear = statement_year(txn_src)
+            for x in range(len(ext.txns)):
+                ref tx = ext.txns[x]
+                var loc = parse_location(tx.desc)
+                rows.append(
+                    TxnRow(
+                        falias.copy(),
+                        tx.date.copy(),
+                        tx.amount,
+                        tx.direction.copy(),
+                        tx.desc.copy(),
+                        List[String](),
+                        gen,
+                        syear,
+                        loc.merchant.copy(),
+                        loc.country.copy(),
+                        loc.state.copy(),
+                        loc.city.copy(),
+                        loc.zip.copy(),
+                    )
+                )
+    return rows^
+
+
+def _prepare_index_run(base: String, force: Bool) raises:
+    """Run-level setup BEFORE the per-file loop: decide whether this run must
+    rebuild from scratch (an explicit `--force`, a processing-version bump, no
+    manifest, or a changed source dir) and, if so, wipe the store / side-table /
+    manifest and re-establish an empty manifest at the SAME `next_gen` (preserved so
+    the ML-backfill ledger stays monotonic — see the old build's fresh block). The
+    incremental case leaves the existing manifest untouched. The prev stash is
+    cleared so a leaked stash from a crashed prior run can't leak into this one.
+    `transactions.tsv` is deliberately KEPT even on a fresh rebuild — the per-file
+    steps evict its rows into the stash so `reconcile_txn_gens` can still restore
+    unchanged rows' generations. The processing-version marker is stamped only by
+    `finalize_index`, after a fully successful run."""
+    var have_manifest = exists(_manifest_path())
+    var man = _load_manifest()
+    var stored_version = _read_procversion()
+    var effective_force = index_effective_force(stored_version, force)
+    if stored_version != INDEX_PROCESSING_VERSION:
+        print(
+            "index processing version changed (v"
+            + String(stored_version)
+            + " → v"
+            + String(INDEX_PROCESSING_VERSION)
+            + "): rebuilding all files"
+        )
+    var fresh = (
+        effective_force
+        or (not have_manifest)
+        or (len(man.entries) > 0 and man.source_dir != base)
+    )
+    _clear_prevstash()
+    if fresh:
+        var run_gen = (
+            man.next_gen
+        )  # preserve — MUST stay monotonic across rebuild
+        _rmtree(_db_uri())
+        if exists(_sidetable_path()):
+            remove(_sidetable_path())
+        if exists(_manifest_path()):
+            remove(_manifest_path())
+        # A valid empty manifest so the first `index_one_file` resumes from a clean,
+        # consistent state (ids/aliases reset to 0, source dir + open generation set).
+        _write_manifest(Manifest(List[FileEntry](), 0, 0, base, run_gen))
+
+
+def index_one_file(
+    path: String, base: String, base_url: String
+) raises -> FileStepResult:
+    """Ensure ONE file is indexed against the CURRENT persisted index, and COMMIT it.
+
+    Hashes `path`; if its name + content hash already match the manifest, it's a
+    no-op skip (no writes). Otherwise it embeds the file into a FRESH id range —
+    reusing the file's stable alias when the file changed, minting a new one when
+    it's new — appends its chunks (side-table + LanceDB) and its reconcile-validated
+    transaction rows (stamped the manifest's open generation), and rewrites the
+    manifest row LAST. Because the manifest (the authoritative `#meta` counters) is
+    written after the side-table + txn rows, a crash before that commit leaves the
+    file looking un-indexed, so a later run re-embeds it cleanly (any orphan chunks
+    at id >= next_id, or orphan rows under the alias, are purged first). Its old rows
+    are stashed for `finalize_index`'s generation reconcile. Returns what it did.
+    """
+    var infos = manifest_for_files([path])
+    if len(infos) == 0:
+        return FileStepResult(String("unsupported"), String(""), 0)
+    var kind = infos[0].kind.copy()
+    var size = infos[0].size
+    var name = _relpath(path, base)
+    var sha = sha256_file_hex(path)
+
+    var man = _load_manifest()
+    var run_gen = man.next_gen  # the OPEN insertion generation for this run
+    var oi = _find_by_name(man.entries, name)
+    if oi >= 0 and man.entries[oi].sha == sha:
+        # Unchanged (same name + same content hash) — nothing to do.
+        return FileStepResult(
+            String("skipped"),
+            man.entries[oi].falias.copy(),
+            man.entries[oi].chunk_count,
+        )
+
+    # This file needs (re-)embedding. Load the side state.
+    var st = _load_sidetable()
+    var trows = load_txn_rows()
+    var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
+    var did_delete = False
+
+    var falias: String
+    if oi >= 0:
+        # Changed: drop the old chunk range + reuse the stable alias.
+        falias = man.entries[oi].falias.copy()
+        var os = man.entries[oi].id_start
+        var oc = man.entries[oi].chunk_count
+        if oc > 0:
+            store.delete(
+                String("id >= ") + String(os) + " AND id < " + String(os + oc)
+            )
+            did_delete = True
+        st = _drop_ranges(st, [os], [oc])
+    else:
+        # New: mint a fresh alias.
+        falias = String("file_") + String(man.next_alias)
+        man.next_alias += 1
+
+    # Crash cleanup: purge any orphan chunks a died-mid-commit prior attempt left at
+    # id >= next_id (committed chunks are always below next_id).
+    var has_orphan = False
+    for i in range(len(st.ids)):
+        if st.ids[i] >= man.next_id:
+            has_orphan = True
+            break
+    if has_orphan:
+        store.delete(String("id >= ") + String(man.next_id))
+        did_delete = True
+        st = _drop_ge(st, man.next_id)
+
+    # Evict any rows already stored under this alias (a changed re-embed, a fresh
+    # rebuild reusing the alias, or a crashed prior attempt) and STASH them so the
+    # finalize reconcile still sees this file's pre-run rows.
+    var evicted = _rows_for_aliases(trows, [falias])
+    if len(evicted) > 0:
+        _append_prevstash(evicted)
+        trows = drop_aliases(trows, [falias])
+
+    # Extract this file's transactions (stamped the open generation) + its chunks.
+    var body = _file_text(path, kind)
+    var newrows = _extract_txn_rows(path, kind, body, falias, run_gen)
+    for r in range(len(newrows)):
+        trows.append(newrows[r].copy())
+
+    var chunks = _chunk_text(body)
+    var id_start = man.next_id
+    var ids = List[Int64]()
+    for c in range(len(chunks)):
+        var cid = man.next_id + c
+        ids.append(Int64(cid))
+        st.ids.append(cid)
+        st.aliases.append(falias.copy())
+        st.texts.append(chunks[c].copy())
+    var vectors = _embed_chunks(base_url, chunks)
+    store.add(ids, vectors)
+    man.next_id += len(chunks)
+    if did_delete:
+        store.optimize()  # compact soft-delete tombstones
+
+    var entry = FileEntry(
+        falias.copy(),
+        name.copy(),
+        kind.copy(),
+        size,
+        sha.copy(),
+        id_start,
+        len(chunks),
+    )
+    if oi >= 0:
+        man.entries[oi] = entry^
+    else:
+        man.entries.append(entry^)
+
+    # COMMIT — side-table + txn rows first, manifest LAST (its `#meta` counters are
+    # the authoritative record of what's committed).
+    man.source_dir = base
+    _write_sidetable(st)
+    write_txn_rows(trows)
+    _write_manifest(man)
+    return FileStepResult(String("embedded"), falias, len(chunks))
+
+
+def finalize_index(files: List[String], base: String, base_url: String) raises:
+    """The end-of-run settle after any number (0..N) of `index_one_file` steps —
+    idempotent and safe to call however many files ran. Prunes manifest entries (+
+    their chunks + txn rows) for files no longer in `files` (the tracked set), then
+    runs the SAME closing pass the old monolithic build did: dedupe cross-file
+    duplicate transactions, `reconcile_txn_gens` the freshly-extracted rows against
+    the pre-run set (so unchanged rows keep their generation + cached ML tags),
+    retag from the current registry, ML-backfill this run's new rows, close the
+    generation, and stamp the processing-version marker. Reproduces the old build's
+    output byte-for-byte when the whole directory was driven through the loop.
+    """
+    var man = _load_manifest()
+    var run_gen = man.next_gen
+
+    var tracked = List[String]()
+    for i in range(len(files)):
+        tracked.append(_relpath(files[i], base))
+
+    # ── prune files no longer tracked (removed since the last index) ────────────
+    var kept = List[FileEntry]()
+    var removed_aliases = List[String]()
+    var del_starts = List[Int]()
+    var del_counts = List[Int]()
+    for i in range(len(man.entries)):
+        ref e = man.entries[i]
+        if _has_str(tracked, e.name):
+            kept.append(e.copy())
+        else:
+            removed_aliases.append(e.falias.copy())
+            del_starts.append(e.id_start)
+            del_counts.append(e.chunk_count)
+
+    var trows = load_txn_rows()
+    if len(removed_aliases) > 0:
+        man.entries = kept^
+        var st = _load_sidetable()
+        st = _drop_ranges(st, del_starts, del_counts)
+        _write_sidetable(st)
+        if exists(_db_uri()):
+            var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
+            var did_delete = False
+            for r in range(len(del_starts)):
+                if del_counts[r] > 0:
+                    store.delete(
+                        String("id >= ")
+                        + String(del_starts[r])
+                        + " AND id < "
+                        + String(del_starts[r] + del_counts[r])
+                    )
+                    did_delete = True
+            if did_delete:
+                store.optimize()
+        # Evict removed files' rows — stash them so `prev` stays the full pre-run set.
+        var removed_rows = _rows_for_aliases(trows, removed_aliases)
+        if len(removed_rows) > 0:
+            _append_prevstash(removed_rows)
+        trows = drop_aliases(trows, removed_aliases)
+
+    # Did this run add any transactions? (rows at the open generation, pre-dedupe) —
+    # this is what advances the generation, mirroring the old `len(trows) > before`.
+    var has_new = False
+    var emb_aliases = List[String]()
+    for i in range(len(trows)):
+        if trows[i].added_gen == run_gen:
+            has_new = True
+            if not _has_str(emb_aliases, trows[i].falias):
+                emb_aliases.append(trows[i].falias.copy())
+
+    # `prev` = the FULL pre-run transaction set = the stash (evicted changed/removed
+    # rows) ∪ the still-present old rows (gen < the open generation). Built BEFORE the
+    # dedupe so it matches the old build's pre-dedupe snapshot.
+    var prev = _load_prevstash()
+    for i in range(len(trows)):
+        if trows[i].added_gen < run_gen:
+            prev.append(trows[i].copy())
+
+    var reg = load_registry()
+
+    # Dedupe cross-file duplicate transactions (same record in more than one file).
+    var pre_dedup = len(trows)
+    trows = dedupe_txns(trows)
+    if pre_dedup > len(trows):
+        print(
+            "  deduped "
+            + String(pre_dedup - len(trows))
+            + " duplicate transaction(s) across overlapping files"
+        )
+
+    # Reconcile the freshly-extracted rows against the pre-run set (unchanged rows
+    # reuse their prior generation + cached ML tags), then retag from the registry.
+    _ = reconcile_txn_gens(trows, prev)
+    _ = retag(trows, reg)
+    write_txn_rows(trows)
+
+    # Backfill ML-rule tags for THIS run's newly-extracted files (best-effort — a
+    # classify failure must never abort the index). Gated on `has_new`: with no new
+    # rows there is nothing to classify (the drain / worker owns any older backlog).
+    if has_new:
+        try:
+            var ml_changed = ml_backfill_rows(
+                trows, reg, base_url, emb_aliases, load_ledger()
+            )
+            if ml_changed > 0:
+                write_txn_rows(trows)
+                print(
+                    "  backfilled ML tags on "
+                    + String(ml_changed)
+                    + " transaction(s)"
+                )
+            ledger_note_backfilled(reg, trows, run_gen)
+        except e:
+            print("  (ML tag pass skipped: " + String(e) + ")")
+
+    # Close the generation only if this run added rows (so `next_gen` counts
+    # insertion epochs, not index runs), then persist the manifest + version marker.
+    if has_new:
+        man.next_gen = run_gen + 1
+    man.source_dir = base
+    _write_manifest(man)
+    _write_procversion()
+    _clear_prevstash()
+
+    var total_chunks = 0
+    for i in range(len(man.entries)):
+        total_chunks += man.entries[i].chunk_count
+    print(
+        "index updated — "
+        + String(len(man.entries))
+        + " file(s), "
+        + String(len(removed_aliases))
+        + " removed; "
+        + String(total_chunks)
+        + " chunk(s) total"
+    )
 
 
 def build_index(
@@ -635,7 +1120,11 @@ def build_index(
 
     Requires the inference-server embeddings endpoint live at `base_url`
     (e.g. http://127.0.0.1:8000/v1); a failed embed aborts with a clear error.
-    """
+
+    This is the whole-directory driver over the per-file entrypoints: a run-level
+    fresh-reset decision, then `index_one_file` for every candidate, then
+    `finalize_index`. Behaves identically to the old monolithic build (same manifest
+    bytes, same generations, same tags) — that parity is the safety net."""
     makedirs(config_dir(), exist_ok=True)
 
     # Normalise roots (drop trailing slashes), then derive the source base + the
@@ -649,54 +1138,8 @@ def build_index(
     var base = common_base(nroots)
     var allpaths = collect_index_paths(nroots)
 
-    var have_manifest = exists(_manifest_path())
-    var man = _load_manifest()
-    var old = man.entries.copy()
-    var next_id = man.next_id
-    var next_alias = man.next_alias
-    var next_gen = man.next_gen
-
-    # Auto-force a full rebuild when the extraction/parse/chunk PIPELINE changed even
-    # though file bytes (and thus the skip-hash) did not: compare the stored
-    # processing version to the current INDEX_PROCESSING_VERSION. A missing marker
-    # reads as 0, so a pre-mechanism index rebuilds once. Explicit `force` still wins.
-    var stored_version = _read_procversion()
-    var effective_force = index_effective_force(stored_version, force)
-    if stored_version != INDEX_PROCESSING_VERSION:
-        print(
-            "index processing version changed (v"
-            + String(stored_version)
-            + " → v"
-            + String(INDEX_PROCESSING_VERSION)
-            + "): rebuilding all files"
-        )
-
-    # Start clean when forced (explicit or version-mismatch), or there's no manifest
-    # (clean machine / upgrade from the pre-manifest format), or the vault dir changed
-    # — so ids/aliases can't collide with stale data.
-    var fresh = (
-        effective_force
-        or (not have_manifest)
-        or (len(old) > 0 and man.source_dir != base)
-    )
-    if fresh:
-        _rmtree(_db_uri())
-        if exists(_sidetable_path()):
-            remove(_sidetable_path())
-        if exists(_manifest_path()):
-            remove(_manifest_path())
-        old = List[FileEntry]()
-        next_id = 0
-        next_alias = 0
-        # Do NOT reset `next_gen` — it must stay MONOTONIC across a full rebuild.
-        # Resetting it would stamp re-extracted rows below the ML-backfill ledger's
-        # `done_gen`, so a genuinely-new transaction added during the same rebuild
-        # would look already-covered and never get classified. Keeping the counter
-        # (from the loaded manifest; 1 on a clean machine) means unchanged rows are
-        # restored to their old generation by `reconcile_txn_gens` while new rows get
-        # a fresh, higher generation. See `reconcile_txn_gens` + `QUERY_FLOW.md`.
-
-    # Current files (sorted, csv/pdf/md only) + their content hashes.
+    # The candidate file set (sorted, kind-filtered) — the tracked set finalize prunes
+    # against, and the files the loop drives one at a time.
     var infos = manifest_for_files(allpaths)
     print(
         "scanning "
@@ -705,320 +1148,29 @@ def build_index(
         + base
         + " for changes…"
     )
-    var cur_paths = List[String]()
-    var cur_names = List[String]()
-    var cur_kinds = List[String]()
-    var cur_sizes = List[Int]()
-    var cur_shas = List[String]()
+    var files = List[String]()
     for i in range(len(infos)):
-        ref fi = infos[i]
-        cur_paths.append(fi.path.copy())
-        # Identity = full name relative to the vault root (recursion-safe: two
-        # `report.pdf` in different subfolders stay distinct).
-        cur_names.append(_relpath(fi.path, base))
-        cur_kinds.append(fi.kind.copy())
-        cur_sizes.append(fi.size)
-        cur_shas.append(sha256_file_hex(fi.path))
-        # Name every file the scan found (the embed step below logs only the
-        # new/changed ones, so unchanged files would otherwise be invisible).
-        print("  • " + _relpath(fi.path, base) + " [" + fi.kind + "]")
-
-    # Diff current vs old (by name + hash).
-    var new_entries = List[
-        FileEntry
-    ]()  # unchanged carried over; embedded added below
-    var emb_idx = List[Int]()  # indices into cur_* needing embedding
-    var emb_alias = List[String]()  # the alias to assign each embedded file
-    var del_starts = List[Int]()
-    var del_counts = List[Int]()
-    var removed_aliases = List[
-        String
-    ]()  # files dropped entirely (for txn eviction)
-    var matched = List[Bool]()
-    for _ in range(len(old)):
-        matched.append(False)
-
-    for i in range(len(cur_names)):
-        var oi = _find_by_name(old, cur_names[i])
-        if oi >= 0:
-            matched[oi] = True
-            if old[oi].sha == cur_shas[i]:
-                new_entries.append(old[oi].copy())  # unchanged: keep as-is
-            else:
-                del_starts.append(old[oi].id_start)  # changed: drop old range,
-                del_counts.append(
-                    old[oi].chunk_count
-                )  # re-embed under same alias
-                emb_idx.append(i)
-                emb_alias.append(old[oi].falias.copy())
-        else:
-            emb_idx.append(i)  # new: fresh alias
-            emb_alias.append(String("file_") + String(next_alias))
-            next_alias += 1
-
-    for oi in range(len(old)):
-        if not matched[oi]:  # removed: drop its range
-            del_starts.append(old[oi].id_start)
-            del_counts.append(old[oi].chunk_count)
-            removed_aliases.append(old[oi].falias.copy())
-
-    # The effective tag registry (built-in defaults + the user's categories.txt),
-    # loaded once. Tagging is PURE — no model call, no re-embed — so we re-apply it
-    # to the stored transactions on EVERY index. That decouples categorization from
-    # embedding: editing categories.txt (or upgrading to a tags-aware build) re-tags
-    # on a plain `mill index`, with no forced re-embed.
-    var reg = load_registry()
-
-    if len(emb_idx) == 0 and len(del_starts) == 0:
-        # Embedding is up to date — but the category rules may have changed, so
-        # re-tag the stored transactions (cheap, pure) and persist if anything moved.
-        var only_trows = load_txn_rows()
-        var retagged = retag(only_trows, reg)
-        if retagged > 0:
-            write_txn_rows(only_trows)
+        files.append(infos[i].path.copy())
         print(
-            "index up to date — "
-            + String(len(new_entries))
-            + " file(s), "
-            + String(_total_chunks(new_entries))
-            + " chunk(s); "
-            + (
-                "re-applied category tags" if retagged
-                > 0 else "nothing changed"
-            )
-        )
-        return
-
-    var store = Store(_db_uri(), String(TABLE), EMBED_DIM)
-
-    # Delete changed/removed chunk ranges (by id predicate; cheaper than IN-lists).
-    for r in range(len(del_starts)):
-        if del_counts[r] > 0:
-            store.delete(
-                String("id >= ")
-                + String(del_starts[r])
-                + " AND id < "
-                + String(del_starts[r] + del_counts[r])
-            )
-
-    var st = _load_sidetable()
-    st = _drop_ranges(st, del_starts, del_counts)
-
-    # Structured transactions live in their own side-table; evict the re-embedded +
-    # removed files' rows, then re-extract the embedded ones below (in lockstep).
-    var trows = load_txn_rows()
-    # Snapshot the previously-stored rows BEFORE the eviction/re-extract, so the
-    # freshly-extracted rows can be reconciled against them (unchanged rows reuse
-    # their old insertion generation + cached ML tags → the backfill doesn't re-run
-    # the whole vault on a full re-index). See `reconcile_txn_gens`.
-    var prev_rows = trows.copy()
-    var txn_drop = removed_aliases.copy()
-    for t in range(len(emb_alias)):
-        txn_drop.append(emb_alias[t].copy())
-    trows = drop_aliases(trows, txn_drop)
-
-    print(
-        "embedding "
-        + String(len(emb_idx))
-        + " new/changed file(s)"
-        + (
-            " (the embedding model loads on first use — this can take a bit)…" if len(
-                old
-            )
-            == 0 else "…"
-        )
-    )
-
-    # All transactions extracted in THIS index run share one insertion generation
-    # (`cur_gen`); it advances only if the run actually adds rows, so the ledger
-    # sees each re-index of new statements as a distinct, higher generation.
-    var cur_gen = next_gen
-    var txns_before = len(trows)
-
-    # Embed only new + changed files; append to LanceDB + the side-table.
-    for t in range(len(emb_idx)):
-        var i = emb_idx[t]
-        var falias = emb_alias[t].copy()
-        var body = _file_text(cur_paths[i], cur_kinds[i])
-
-        # Extract structured transactions ONCE here, with whole-document context.
-        # Tags are filled by the single _retag pass before write (the one source of
-        # tags), so extraction here stays tag-agnostic.
-        if cur_kinds[i] == "csv":
-            # A CSV export is ALREADY structured → map its columns to records
-            # directly (no reconciliation; every data row is a transaction). Each
-            # row usually carries its own full date, so the year is per-row.
-            var ctxns = csv_transactions(csv_rows(cur_paths[i]))
-            for x in range(len(ctxns)):
-                ref ct = ctxns[x]
-                # Location split of the descriptor, computed ONCE here + persisted.
-                var loc = parse_location(ct.desc)
-                trows.append(
-                    TxnRow(
-                        falias.copy(),
-                        ct.date.copy(),
-                        ct.amount,
-                        ct.direction.copy(),
-                        ct.desc.copy(),
-                        List[String](),
-                        cur_gen,
-                        ct.year,
-                        loc.merchant.copy(),
-                        loc.country.copy(),
-                        loc.state.copy(),
-                        loc.city.copy(),
-                        loc.zip.copy(),
-                    )
-                )
-        else:
-            # PDF/text statements are UNSTRUCTURED — persist only those that
-            # RECONCILE against the statement's own arithmetic (running balance or
-            # printed totals). Unreconciled/none → nothing written, callers fall
-            # back to chunks. Needs COLUMN-ALIGNED text; for PDFs, re-extract
-            # layout-preserved (`body` is stream-order, good for chunks/search).
-            var txn_src = (
-                readers.pdf_text_layout(cur_paths[i]) if cur_kinds[i]
-                == "pdf" else body
-            )
-            var ext = extract_transactions(txn_src)
-            if ext.reconciled:
-                # The year lives in the statement header/period, not on the M/D
-                # rows — detect it once per document and stamp every row from it.
-                var syear = statement_year(txn_src)
-                for x in range(len(ext.txns)):
-                    ref tx = ext.txns[x]
-                    # Location split of the descriptor, computed ONCE here + persisted.
-                    var loc = parse_location(tx.desc)
-                    trows.append(
-                        TxnRow(
-                            falias.copy(),
-                            tx.date.copy(),
-                            tx.amount,
-                            tx.direction.copy(),
-                            tx.desc.copy(),
-                            List[String](),
-                            cur_gen,
-                            syear,
-                            loc.merchant.copy(),
-                            loc.country.copy(),
-                            loc.state.copy(),
-                            loc.city.copy(),
-                            loc.zip.copy(),
-                        )
-                    )
-
-        var chunks = _chunk_text(body)
-        # Print BEFORE the (slow) embed so a multi-page file isn't a silent stall.
-        print(
-            "  ["
-            + String(t + 1)
-            + "/"
-            + String(len(emb_idx))
-            + "] "
-            + falias
-            + " ["
-            + cur_kinds[i]
-            + "] "
-            + cur_names[i]
-            + " — "
-            + String(len(chunks))
-            + " chunk(s), embedding…"
-        )
-        var id_start = next_id
-        var ids = List[Int64]()
-        for c in range(len(chunks)):
-            var cid = next_id + c
-            ids.append(Int64(cid))
-            st.ids.append(cid)
-            st.aliases.append(falias.copy())
-            st.texts.append(chunks[c].copy())
-        var vectors = _embed_chunks(base_url, chunks)
-        store.add(ids, vectors)
-        next_id += len(chunks)
-        new_entries.append(
-            FileEntry(
-                falias.copy(),
-                cur_names[i].copy(),
-                cur_kinds[i].copy(),
-                cur_sizes[i],
-                cur_shas[i].copy(),
-                id_start,
-                len(chunks),
-            )
+            "  • " + _relpath(infos[i].path, base) + " [" + infos[i].kind + "]"
         )
 
-    # Deletes are soft tombstones; compact so storage/scan cost stay bounded.
-    if len(del_starts) > 0:
-        store.optimize()
-
-    # Advance the generation only if this run added transactions, so `next_gen`
-    # reflects the number of insertion epochs, not the number of index runs.
-    if len(trows) > txns_before:
-        next_gen = cur_gen + 1
-    _write_sidetable(st)
-    # Guard against double-counting: drop CROSS-FILE duplicate transactions (the same
-    # record in more than one file — overlapping CSV date ranges, a re-exported
-    # statement saved under a new name). Content-identical FILES are already skipped by
-    # the hash diff above; this catches the same records arriving via DIFFERENT files.
-    var pre_dedup = len(trows)
-    trows = dedupe_txns(trows)
-    if pre_dedup > len(trows):
-        print(
-            "  deduped "
-            + String(pre_dedup - len(trows))
-            + " duplicate transaction(s) across overlapping files"
-        )
-    # Reconcile the freshly-extracted rows against the pre-index snapshot: an
-    # UNCHANGED transaction (same content fingerprint) reuses its prior insertion
-    # generation + cached ML tags. This is what keeps a full re-index (force /
-    # processing-version bump — where every file is re-embedded, so all rows are
-    # re-extracted with a fresh generation) from re-queuing the ENTIRE vault for ML
-    # backfill; only genuinely new / changed rows keep the fresh, higher generation.
-    _ = reconcile_txn_gens(trows, prev_rows)
-    # Tag EVERY transaction (newly-extracted AND unchanged-file rows carried over)
-    # from the current registry — one pure pass, the single source of tags.
-    _ = retag(trows, reg)
-    write_txn_rows(trows)
-    # Backfill ML-rule tags (`<tag> : <question>`) for the NEWLY-extracted files
-    # via the on-device model — the fuzzy tail no keyword captures, paid once at
-    # index (carried-over rows keep their cached ML tags). Best-effort: a classify
-    # failure (engine busy, chat model not serving) must never abort indexing.
-    if len(emb_alias) > 0:
-        try:
-            # Pass the ledger so rows the backfill already covers (unchanged rows
-            # whose generation `reconcile_txn_gens` restored) are skipped even though
-            # a full re-index puts every file in `emb_alias`.
-            var ml_changed = ml_backfill_rows(
-                trows, reg, base_url, emb_alias, load_ledger()
+    _prepare_index_run(base, force)
+    for i in range(len(files)):
+        var res = index_one_file(files[i], base, base_url)
+        if res.action == "embedded":
+            print(
+                "  ["
+                + String(i + 1)
+                + "/"
+                + String(len(files))
+                + "] "
+                + res.falias
+                + " — "
+                + String(res.chunk_count)
+                + " chunk(s), embedded"
             )
-            if ml_changed > 0:
-                write_txn_rows(trows)
-                print(
-                    "  backfilled ML tags on "
-                    + String(ml_changed)
-                    + " transaction(s)"
-                )
-            # The freshly-inserted generation is now classified inline for every
-            # active ML rule → advance the ledger markers so the between-questions
-            # worker / `millfolio backfill` don't redo this generation's
-            # negatives (only advances rules with no older backlog).
-            ledger_note_backfilled(reg, trows, cur_gen)
-        except e:
-            print("  (ML tag pass skipped: " + String(e) + ")")
-    _write_manifest(Manifest(new_entries^, next_id, next_alias, base, next_gen))
-    # Stamp the processing version ONLY now that the build fully succeeded (manifest
-    # written) — a partial/aborted run above (e.g. the embed endpoint died) raised out
-    # before here, leaving the OLD marker so the next run still rebuilds.
-    _write_procversion()
-    print(
-        "index updated — "
-        + String(len(emb_idx))
-        + " file(s) embedded, "
-        + String(len(del_starts))
-        + " range(s) removed; "
-        + String(len(st.ids))
-        + " chunk(s) total"
-    )
+    finalize_index(files, base, base_url)
 
 
 # ── search ────────────────────────────────────────────────────────────────────

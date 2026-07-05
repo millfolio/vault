@@ -124,6 +124,15 @@ test-procversion = { cmd = "mkdir -p build && rm -rf build/procversion-data && M
 # and refresh the golden. Links the sibling libs like test-procversion (imports index.mojo);
 # runs from vault root so the fingerprint net can read the source files.
 test-golden = { cmd = "mkdir -p build && mojo build core/test/index/golden_output_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/golden-test && ./build/golden-test" }
+# Gate: the PER-FILE / finalize refactor — build_index factored into index_one_file
+# (one file, committed) + finalize_index (prune + reconcile + retag) so the app-server
+# orchestrator can pause between files. Drives the FULL index end-to-end (needs the
+# lancedb store) via the MILLFOLIO_FAKE_EMBED hook (deterministic unit vectors, no
+# embed endpoint), asserting: N per-file steps + finalize == one build_index BYTE-FOR-
+# BYTE (manifest/transactions/chunks), a single step leaves a consistent partial index,
+# and finalize prunes a removed file. Pinned MILLFOLIO_DATA_DIR (hermetic); links the
+# sibling libs like test-store (index.mojo pulls lancedb/flare/…).
+test-index-steps = { cmd = "mkdir -p build && rm -rf build/index-steps-data && MILLFOLIO_DATA_DIR=\"$PWD/build/index-steps-data\" MILLFOLIO_FAKE_EMBED=1 bash -c 'mojo build core/test/index/index_steps_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/index-steps-test && MILLFOLIO_DATA_DIR=\"$PWD/build/index-steps-data\" MILLFOLIO_FAKE_EMBED=1 ./build/index-steps-test'" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
@@ -160,4 +169,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
