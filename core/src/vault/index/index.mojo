@@ -69,6 +69,15 @@ comptime CHUNK_OVERLAP = 64  # codepoints carried into the next chunk for contex
 comptime TABLE = "chunks"
 comptime EMBED_BATCH = 64  # chunks per /v1/embeddings request
 
+# The extraction/parsing/chunking pipeline's PROCESSING version. BUMP this whenever
+# that logic changes (a new Txn field, a better PDF extractor, different chunking)
+# so existing indexes rebuild even though the file bytes — and thus the skip-hash —
+# are unchanged. `build_index` persists the last-built value in a marker file and
+# auto-forces a full rebuild on a mismatch. A MISSING marker reads as 0, so every
+# index built before this mechanism landed counts as older and rebuilds once.
+# v1: `.merchant`/`.state`/`.country` location fields filled by `parse_location`.
+comptime INDEX_PROCESSING_VERSION = 1
+
 
 @fieldwise_init
 struct Chunk(Copyable, Movable):
@@ -133,6 +142,46 @@ def _sidetable_path() raises -> String:
 
 def _manifest_path() raises -> String:
     return config_dir() + "/manifest.tsv"
+
+
+def _procversion_path() raises -> String:
+    """The processing-version marker — a tiny file next to manifest.tsv holding just
+    the integer version the index was last built under, so it moves with the store.
+    """
+    return config_dir() + "/.index.procversion"
+
+
+# ── processing version (auto-force a rebuild when the pipeline changes) ────────
+
+
+def _read_procversion() raises -> Int:
+    """The stored index processing version. A missing OR unreadable marker reads as
+    0 (older than any real version), so it triggers a one-time rebuild."""
+    if not exists(_procversion_path()):
+        return 0
+    try:
+        var text: String
+        with open(_procversion_path(), "r") as f:
+            text = f.read()
+        return _atoi(String(text.strip()))
+    except:
+        return 0
+
+
+def _write_procversion() raises:
+    """Stamp the CURRENT processing version. Call ONLY after a fully successful
+    build — an aborted/failed index must not stamp the new version, or it would
+    wrongly skip the rebuild it still owes on the next run."""
+    with open(_procversion_path(), "w") as f:
+        f.write(String(INDEX_PROCESSING_VERSION))
+
+
+def index_effective_force(stored_version: Int, force: Bool) -> Bool:
+    """Whether this run must rebuild-from-scratch even for byte-unchanged files:
+    an explicit `--force`, OR a stored processing version that differs from the
+    current INDEX_PROCESSING_VERSION (the extraction/parse/chunk logic changed).
+    """
+    return force or (stored_version != INDEX_PROCESSING_VERSION)
 
 
 # ── small helpers ─────────────────────────────────────────────────────────────
@@ -600,11 +649,26 @@ def build_index(
     var next_alias = man.next_alias
     var next_gen = man.next_gen
 
-    # Start clean when forced, or there's no manifest (clean machine / upgrade from
-    # the pre-manifest format), or the vault dir changed — so ids/aliases can't
-    # collide with stale data.
+    # Auto-force a full rebuild when the extraction/parse/chunk PIPELINE changed even
+    # though file bytes (and thus the skip-hash) did not: compare the stored
+    # processing version to the current INDEX_PROCESSING_VERSION. A missing marker
+    # reads as 0, so a pre-mechanism index rebuilds once. Explicit `force` still wins.
+    var stored_version = _read_procversion()
+    var effective_force = index_effective_force(stored_version, force)
+    if stored_version != INDEX_PROCESSING_VERSION:
+        print(
+            "index processing version changed (v"
+            + String(stored_version)
+            + " → v"
+            + String(INDEX_PROCESSING_VERSION)
+            + "): rebuilding all files"
+        )
+
+    # Start clean when forced (explicit or version-mismatch), or there's no manifest
+    # (clean machine / upgrade from the pre-manifest format), or the vault dir changed
+    # — so ids/aliases can't collide with stale data.
     var fresh = (
-        force
+        effective_force
         or (not have_manifest)
         or (len(old) > 0 and man.source_dir != base)
     )
@@ -904,6 +968,10 @@ def build_index(
         except e:
             print("  (ML tag pass skipped: " + String(e) + ")")
     _write_manifest(Manifest(new_entries^, next_id, next_alias, base, next_gen))
+    # Stamp the processing version ONLY now that the build fully succeeded (manifest
+    # written) — a partial/aborted run above (e.g. the embed endpoint died) raised out
+    # before here, leaving the OLD marker so the next run still rebuilds.
+    _write_procversion()
     print(
         "index updated — "
         + String(len(emb_idx))
