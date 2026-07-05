@@ -726,7 +726,7 @@
         onselect={(id) => (id === "records" ? showRecords() : (sub = id as "files" | "tags" | "operations"))}
       />
       {#if sub === "tags"}
-        <TagsPanel {demo} embedded />
+        <TagsPanel {demo} embedded onreindex={() => (sub = "files")} />
       {:else if sub === "operations"}
         <OperationsPanel {demo} />
       {:else if sub === "files"}

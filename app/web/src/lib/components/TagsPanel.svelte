@@ -6,7 +6,11 @@
   // A plain filter narrows the list; "+ New tag" opens the define modal; each row is
   // edited/deleted IN PLACE on hover (no separate edit mode). `embedded` = rendered
   // inside VaultPanel's body (which already pads), so we drop our own outer padding.
-  let { demo = false, embedded = false }: { demo?: boolean; embedded?: boolean } = $props();
+  let {
+    demo = false,
+    embedded = false,
+    onreindex,
+  }: { demo?: boolean; embedded?: boolean; onreindex?: () => void } = $props();
 
   type Tag = {
     name: string;
@@ -39,7 +43,69 @@
       loaded = true;
     }
   }
-  onMount(loadTags);
+
+  // ── upgrade nudge: built-in default tags missing from an edited categories.txt ─
+  // Once the user edits categories.txt it's authoritative and no longer auto-refreshes,
+  // so defaults added in a later version (transfers/rewards) never land. Offer them.
+  type DefaultTag = { name: string; description: string };
+  let missingDefaults = $state<DefaultTag[]>([]);
+  let addedDefaults = $state(false);
+  const DISMISS_KEY = "millfolio.dismissedDefaults";
+
+  function defaultsSetKey(list: DefaultTag[]): string {
+    return list
+      .map((t) => t.name)
+      .sort()
+      .join(",");
+  }
+
+  async function loadMissingDefaults() {
+    if (demo) return; // the demo's registry is fixed
+    try {
+      const r = await fetch(`${apiBase()}/api/tags/missing-defaults`);
+      if (!r.ok) return;
+      const list = ((await r.json()).tags ?? []) as DefaultTag[];
+      if (list.length === 0) return;
+      // Keyed on the exact set so a NEW default added later re-surfaces the banner.
+      const key = defaultsSetKey(list);
+      if (typeof localStorage !== "undefined" && localStorage.getItem(DISMISS_KEY) === key) return;
+      missingDefaults = list;
+    } catch {
+      /* a missing endpoint (older server) just means no nudge */
+    }
+  }
+
+  function dismissDefaults() {
+    try {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem(DISMISS_KEY, defaultsSetKey(missingDefaults));
+    } catch {
+      /* ignore */
+    }
+    missingDefaults = [];
+  }
+
+  async function addDefaults() {
+    try {
+      const r = await fetch(`${apiBase()}/api/tags/add-defaults`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ names: missingDefaults.map((t) => t.name) }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error();
+      missingDefaults = [];
+      addedDefaults = true;
+      await loadTags();
+    } catch {
+      saveMsg = "Couldn't add the default tags.";
+    }
+  }
+
+  onMount(() => {
+    loadTags();
+    loadMissingDefaults();
+  });
 
   // Filter the list by tag name.
   let filter = $state("");
@@ -153,6 +219,23 @@
   {:else if failed}
     <p class="muted">Tags unavailable — start millfolio with <code>mill start</code>.</p>
   {:else}
+    {#if !demo && missingDefaults.length > 0}
+      <div class="defbanner" role="status">
+        <span class="dbtext">
+          New default tags available: <strong>{missingDefaults.map((t) => t.name).join(", ")}</strong>.
+        </span>
+        <button type="button" class="btn primary sm" onclick={addDefaults}>Add them</button>
+        <button type="button" class="dbx" onclick={dismissDefaults} title="Dismiss" aria-label="Dismiss">✕</button>
+      </div>
+    {:else if !demo && addedDefaults}
+      <div class="defbanner ok" role="status">
+        <span class="dbtext">Added — re-index all to apply them to your existing transactions.</span>
+        {#if onreindex}
+          <button type="button" class="btn primary sm" onclick={() => onreindex?.()}>Re-index all</button>
+        {/if}
+        <button type="button" class="dbx" onclick={() => (addedDefaults = false)} title="Dismiss" aria-label="Dismiss">✕</button>
+      </div>
+    {/if}
     <div class="bar">
       <input class="filter" type="text" placeholder="Filter tags…" bind:value={filter} />
       {#if !demo}
@@ -271,6 +354,45 @@
   .savemsg {
     font-size: 12px;
     color: var(--ok);
+  }
+  /* Upgrade nudge banner: new built-in default tags available. */
+  .defbanner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding: 9px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    font-size: 12.5px;
+  }
+  .defbanner.ok {
+    border-color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 8%, transparent);
+  }
+  .defbanner .dbtext {
+    flex: 1;
+    min-width: 180px;
+    color: var(--text);
+  }
+  .btn.sm {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .dbx {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    padding: 2px 6px;
+    border-radius: var(--radius);
+  }
+  .dbx:hover {
+    color: var(--text);
   }
   .tagtable {
     width: 100%;

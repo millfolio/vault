@@ -76,6 +76,8 @@ from vault.derive.store import (
     nap_ms_for_priority,
     preview_ml_json,
     add_category,
+    missing_default_tags_json,
+    add_default_tags,
     verify_amount_password,
 )
 from vaultcfg import vault_dir as resolve_vault_dir
@@ -1070,6 +1072,10 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_tags_preview_ai(req)
         if path == "/api/tags/add":
             return self.handle_tags_add(req)
+        if path == "/api/tags/missing-defaults":
+            return self.handle_tags_missing_defaults()
+        if path == "/api/tags/add-defaults":
+            return self.handle_tags_add_defaults(req)
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -1705,6 +1711,33 @@ struct Api(Copyable, Handler, Movable):
             return _cors(bad_request('{"error":"empty name"}'))
         var changed = add_category(name, keywords, prompt)
         return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
+
+    def handle_tags_missing_defaults(self) raises -> Response:
+        """GET /api/tags/missing-defaults → {"tags":[{name,description},…]}: the
+        built-in default tags NOT present in the user's category set. Non-empty only
+        after an upgrade added a default the user's edited categories.txt never got
+        (e.g. `transfers`, `rewards`) — the Tags view offers to add them. Read-only."""
+        return _cors(
+            ok_json('{"tags":' + missing_default_tags_json() + "}")
+        )
+
+    def handle_tags_add_defaults(self, req: Request) raises -> Response:
+        """POST /api/tags/add-defaults {"names":[…]} → APPEND those built-in default
+        rules that are missing from categories.txt (preserving the user's edits) and
+        re-tag. Returns {"ok":true,"added":N}. A name that isn't a missing default is
+        ignored. Not available in the demo (its registry is fixed)."""
+        if _is_demo():
+            return _cors(_forbidden('{"error":"not available in demo"}'))
+        var names = List[String]()
+        try:
+            var j = loads(req.text())
+            var arr = j["names"]
+            for i in range(arr.array_count()):
+                names.append(String(arr[i].string_value()))
+        except:
+            return _cors(bad_request('{"error":"expected {names:[…]}"}'))
+        var added = add_default_tags(names)
+        return _cors(ok_json('{"ok":true,"added":' + String(added) + "}"))
 
     def handle_vault(self) raises -> Response:
         """The vault view: the INDEXED files + index stats, read from the engine's
