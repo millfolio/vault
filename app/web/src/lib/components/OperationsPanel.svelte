@@ -84,14 +84,27 @@
       loading = false;
       return;
     }
+    // The history read can hang while an index holds the config dir busy; cap it at
+    // 8s so a stuck request degrades to a small "couldn't load history" line rather
+    // than an infinite spinner (the running-index row renders independently below).
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
     try {
-      const res = await fetch(`${base}/api/operations`, { headers: { accept: "application/json" } });
+      const res = await fetch(`${base}/api/operations`, {
+        headers: { accept: "application/json" },
+        signal: ctrl.signal,
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       ops = ((await res.json()).operations ?? []) as Operation[];
       mock = false;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = ctrl.signal.aborted
+        ? "timed out"
+        : e instanceof Error
+          ? e.message
+          : String(e);
     } finally {
+      clearTimeout(timer);
       loading = false;
     }
   }
@@ -132,65 +145,68 @@
     <p class="banner">Sample data — open this from <code>mill start</code> (:10000) to see your real operations.</p>
   {/if}
 
-  {#if loading && ops === null}
-    <p class="muted">Loading…</p>
-  {:else if error}
-    <p class="banner warn">Couldn't load operations: {error}</p>
-  {:else}
-    <ul class="oplist">
-      {#if running}
-        <li class="op live">
-          <div class="line1">
-            <span class="type">Index</span>
-            <span class="badge running"><span class="spin" aria-hidden="true"></span>running</span>
-            <span class="when">now</span>
-          </div>
-          {#if idxStatus?.total && idxStatus.total > 0}
-            <div class="progress">
-              <div class="pbar" aria-hidden="true">
-                <div class="pfill" style={`width:${Math.min(100, ((idxStatus.current ?? 0) / idxStatus.total) * 100)}%`}></div>
-              </div>
-              <span class="pcount">{idxStatus.current ?? 0} of {idxStatus.total} files</span>
+  <ul class="oplist">
+    <!-- The live running-index row renders IMMEDIATELY from the /api/index/status
+         poll — never gated behind the (possibly slow) /api/operations history fetch,
+         so an active index shows "n of M" right away instead of "Loading…". -->
+    {#if running}
+      <li class="op live">
+        <div class="line1">
+          <span class="type">Index</span>
+          <span class="badge running"><span class="spin" aria-hidden="true"></span>running</span>
+          <span class="when">now</span>
+        </div>
+        {#if idxStatus?.total && idxStatus.total > 0}
+          <div class="progress">
+            <div class="pbar" aria-hidden="true">
+              <div class="pfill" style={`width:${Math.min(100, ((idxStatus.current ?? 0) / idxStatus.total) * 100)}%`}></div>
             </div>
-          {:else if idxStatus?.detail}
-            <p class="detail">{idxStatus.detail}</p>
+            <span class="pcount">{idxStatus.current ?? 0} of {idxStatus.total} files</span>
+          </div>
+        {:else if idxStatus?.detail}
+          <p class="detail">{idxStatus.detail}</p>
+        {/if}
+      </li>
+    {/if}
+
+    <!-- History states — independent of the running row. On a slow/hung fetch this
+         shows a spinner then degrades to a small line, never an infinite spinner. -->
+    {#if loading && ops === null}
+      <li class="loadingrow"><p class="muted">Loading history…</p></li>
+    {:else if error}
+      <li class="loadingrow"><p class="muted hint">Couldn't load history: {error}</p></li>
+    {:else if ops && ops.length > 0}
+      {#each ops as o, i (o.started + "-" + o.type + "-" + i)}
+        <li class="op">
+          <div class="line1">
+            <span class="type">{label(o.type)}</span>
+            {#if o.status === "done"}
+              <span class="badge ok">✓ done</span>
+            {:else if o.status === "error"}
+              <span class="badge err">✗ error</span>
+            {:else}
+              <span class="badge">{o.status}</span>
+            {/if}
+            <span class="dur">{fmtDur(o)}</span>
+            <span class="counts">
+              {#if typeof o.files === "number"}<span class="ct">{o.files} file{o.files === 1 ? "" : "s"}</span>{/if}
+              {#if typeof o.txns === "number"}<span class="ct">{o.txns.toLocaleString()} txns</span>{/if}
+              {#if typeof o.tagged === "number"}<span class="ct">{o.tagged.toLocaleString()} tagged</span>{/if}
+            </span>
+            <span class="when">{fmtWhen(o.started)}</span>
+          </div>
+          {#if o.detail}
+            <p class="detail">{o.detail}</p>
           {/if}
         </li>
-      {/if}
-
-      {#if ops && ops.length > 0}
-        {#each ops as o, i (o.started + "-" + o.type + "-" + i)}
-          <li class="op">
-            <div class="line1">
-              <span class="type">{label(o.type)}</span>
-              {#if o.status === "done"}
-                <span class="badge ok">✓ done</span>
-              {:else if o.status === "error"}
-                <span class="badge err">✗ error</span>
-              {:else}
-                <span class="badge">{o.status}</span>
-              {/if}
-              <span class="dur">{fmtDur(o)}</span>
-              <span class="counts">
-                {#if typeof o.files === "number"}<span class="ct">{o.files} file{o.files === 1 ? "" : "s"}</span>{/if}
-                {#if typeof o.txns === "number"}<span class="ct">{o.txns.toLocaleString()} txns</span>{/if}
-                {#if typeof o.tagged === "number"}<span class="ct">{o.tagged.toLocaleString()} tagged</span>{/if}
-              </span>
-              <span class="when">{fmtWhen(o.started)}</span>
-            </div>
-            {#if o.detail}
-              <p class="detail">{o.detail}</p>
-            {/if}
-          </li>
-        {/each}
-      {:else if !running}
-        <li class="empty">
-          <p class="muted">No operations yet.</p>
-          <p class="muted hint">Index a folder or run an AI-tag backfill and its runs will show up here.</p>
-        </li>
-      {/if}
-    </ul>
-  {/if}
+      {/each}
+    {:else if !running}
+      <li class="empty">
+        <p class="muted">No operations yet.</p>
+        <p class="muted hint">Index a folder or run an AI-tag backfill and its runs will show up here.</p>
+      </li>
+    {/if}
+  </ul>
 </section>
 
 <style>
@@ -295,6 +311,9 @@
   .empty {
     padding: 20px 0;
   }
+  .loadingrow {
+    padding: 12px 2px;
+  }
   .muted {
     color: var(--text-dim);
   }
@@ -310,10 +329,6 @@
     background: var(--surface-2);
     font-size: 12.5px;
     color: var(--text-dim);
-  }
-  .banner.warn {
-    border-color: var(--warn);
-    color: var(--warn);
   }
   .banner code {
     font-family: var(--mono);
