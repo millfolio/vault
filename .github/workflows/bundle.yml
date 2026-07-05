@@ -105,6 +105,9 @@ jobs:
           # key-gen fails in this multi-repo layout.
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
+      # package_bundle.sh runs `npm ci` for the web UI; the lock is generated with
+      # npm 11 and node 22 ships npm ~10.9, which rejects it ("Missing esbuild@…").
+      - run: npm install -g npm@11
 
       # protoc: lancedb.mojo's Rust FFI shim (lance-encoding) needs the protobuf
       # compiler at build time.
