@@ -144,6 +144,12 @@
   let bkPending = $state(0);
   let bkPriority = $state("");
   let bkEta = $state<number | null>(null);
+  // Running-index summary for the corner chip (from /api/index/status): live while
+  // an index job runs, showing `current/total` files once the embedding phase's
+  // `[n/M]` counter appears. Cleared the moment the job goes idle/done/error.
+  let idxRunning = $state(false);
+  let idxCurrent = $state<number | null>(null);
+  let idxTotal = $state<number | null>(null);
   const gpuRing: { t: number; v: number }[] = [];
   let bkLast: { pending: number; t: number } | null = null;
   const fmtEta = (s: number) =>
@@ -184,6 +190,23 @@
         }
         if (!bkLast || bkPending !== bkLast.pending) bkLast = { pending: bkPending, t };
         if (bkPending <= 0) bkEta = 0;
+      }
+    } catch {}
+    // Index: a live n/M summary while a folder-index job runs — cleared as soon as
+    // it settles (idle/done/error), so the chip is a brief background-op indicator.
+    try {
+      const r = await fetch("/api/index/status");
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.state === "indexing") {
+          idxRunning = true;
+          idxCurrent = typeof d.current === "number" ? d.current : null;
+          idxTotal = typeof d.total === "number" ? d.total : null;
+        } else {
+          idxRunning = false;
+          idxCurrent = null;
+          idxTotal = null;
+        }
       }
     } catch {}
   }
@@ -859,6 +882,16 @@
       <span class="model" title="on-device model answering your questions">
         <span class="dot" aria-hidden="true"></span>{modelName}
       </span>
+    {/if}
+    {#if !isDemo && idxRunning}
+      <a
+        class="metric link"
+        href="/vault"
+        title="Indexing in progress — click to open Vault → Operations"
+      >
+        <span class="mlabel">Index</span>
+        {#if idxTotal && idxTotal > 0 && idxCurrent !== null}{idxCurrent}/{idxTotal}{:else}running{/if}
+      </a>
     {/if}
     {#if !isDemo && bkPending > 0}
       <a
