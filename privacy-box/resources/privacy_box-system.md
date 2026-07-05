@@ -780,6 +780,16 @@ Mapping: "last 3 months" → `months_ago(3)`; "last 30 days" → `days_ago(30)`;
 The ONLY place a program touches an actual calendar date is these calls' return
 values — you never type one.
 
+**Empty time-filtered result → report the data's actual date range, don't just say "none".**
+When a relative-date filter matches ZERO transactions, a bare "I couldn't find
+any…" is confusing — the real reason is usually that the data lies OUTSIDE the
+window (e.g. statements from 2020, "last 6 months" = 2026). So while you scan,
+also track the min and max `Txn.date` across ALL available transactions, and when
+the filtered list is empty, have `print_answer` state that span so the answer
+explains WHY ("You have no transactions in the last 6 months — your statements
+span 2020-01 to 2020-12."). If there are literally no dated transactions at all,
+fall back to the plain "none" message.
+
 **"What are my expenses in the last 3 months?"** (relative window → `months_ago`, ISO compare)
 ```mojo
 from vault import *
@@ -788,11 +798,19 @@ def main() raises:
     var cutoff = months_ago(3)     # ISO "YYYY-MM-DD"; compares directly with t.date
     var total = 0.0
     var n = 0
+    var lo = ""                    # earliest / latest dates ACROSS ALL txns (ISO
+    var hi = ""                    # sorts lexically) → explains an empty window
     for i in range(len(files)):
         var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
         for t in range(len(txns)):
             ref x = txns[t]
-            if x.direction != "debit" or x.date == "":
+            if x.date == "":
+                continue
+            if lo == "" or x.date < lo:           # track the data's real span
+                lo = x.date
+            if hi == "" or x.date > hi:
+                hi = x.date
+            if x.direction != "debit":
                 continue
             if x.date >= cutoff:                  # within the last 3 months
                 total += x.amount
@@ -800,6 +818,9 @@ def main() raises:
     if n > 0:
         print_answer("You spent " + money(total) + " across " + String(n)
             + " transactions since " + cutoff + ".")
+    elif lo != "":                                # no matches, but data exists elsewhere
+        print_answer("You have no transactions in the last 3 months — your data"
+            + " spans " + lo + " to " + hi + ".")
     else:
         print_answer("I couldn't find any transactions in the last 3 months.")
 ```

@@ -58,6 +58,22 @@ unzip -q "$ZIPS/runner.zip"        -d "$STAGE/runner"
 unzip -q "$ZIPS/privacy_box.zip"   -d "$STAGE/privacy_box"
 unzip -q "$ZIPS/millfolio.zip"     -d "$STAGE/millfolio"
 unzip -q "$ZIPS/millfolio-app.zip" -d "$STAGE/app"
+
+# Stamp the release version into the bundle so the running server reads it from
+# bundleRoot/VERSION instead of shelling out to brew — correct for the Mac-app
+# install path too (no brew there). Source order: the tag build's GITHUB_REF_NAME
+# minus a leading "v" (matches the Homebrew formula version string, e.g.
+# "0.4.44-rc.4"), else `git describe`, else "dev".
+if [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+  BUNDLE_VERSION="${GITHUB_REF_NAME#v}"
+else
+  BUNDLE_VERSION="$(git -C "$VAULT" describe --tags --always 2>/dev/null || true)"
+  BUNDLE_VERSION="${BUNDLE_VERSION#v}"
+fi
+[[ -n "$BUNDLE_VERSION" ]] || BUNDLE_VERSION="dev"
+printf '%s\n' "$BUNDLE_VERSION" > "$STAGE/VERSION"
+echo "==> stamped bundle VERSION = $BUNDLE_VERSION" >&2
+
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr -X "$OUT" runner privacy_box millfolio app )
+( cd "$STAGE" && zip -qr -X "$OUT" runner privacy_box millfolio app VERSION )
 echo "==> wrote $OUT ($(du -h "$OUT" | cut -f1))" >&2
