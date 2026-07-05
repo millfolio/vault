@@ -1473,7 +1473,7 @@
      the left, the location sits muted at the right of the wide desc column. */
   .records .desc {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 10px;
   }
   .records .desc .merchant {
@@ -2064,6 +2064,12 @@
   .records {
     table-layout: fixed;
     width: 100%;
+  }
+  /* Vertically center every cell so the (flex) merchant column lines up with the
+     plain date/amount cells — a table cell defaults to baseline alignment, which
+     left the flex .desc content sitting a few px high. */
+  .records td {
+    vertical-align: middle;
   }
   .records .c-date {
     width: 96px;

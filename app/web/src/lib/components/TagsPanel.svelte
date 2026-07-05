@@ -264,7 +264,7 @@
                     <input class="ein wide" bind:value={eMl} placeholder="yes/no question" />
                   {:else}
                     <input class="ein wide" bind:value={eKw} placeholder="keywords, comma-separated" />
-                    <input class="ein wide" bind:value={eDesc} placeholder="scope note (optional)" />
+                    <input class="ein wide" bind:value={eDesc} placeholder="description" />
                   {/if}
                 </td>
                 <td class="num">{t.count}</td>
