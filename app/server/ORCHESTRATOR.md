@@ -38,7 +38,7 @@ background job touches the engine at a time; interactive queries take precedence
   ┌──────────────────┐        ┌──────────────────┐
   │ Index generator  │        │ Backfill         │
   │ (re-index req →  │        │ generator        │
-  │  one index item) │        │ (pending ML gens │
+  │  one item / file)│        │ (pending ML gens │
   └────────┬─────────┘        │  → backfill items)│
            │                  └────────┬─────────┘
            │  enqueue                  │  enqueue
@@ -76,7 +76,8 @@ so the orchestrator treats them uniformly.
 WorkItem {
   id:       string        # monotonic, stable across restart
   kind:     "index" | "backfill"
-  payload:  string        # index: the tracked-paths union / "reindex"|"index";
+  payload:  string        # index: ONE file to embed (path/alias); a final
+                          #   "finalize" item settles the manifest;
                           # backfill: the generation-group / rule scope to drain
   enq_at:   epoch_s       # for FIFO-within-priority + age
   prio:     int           # class priority (see §2.4); default by kind
@@ -84,9 +85,15 @@ WorkItem {
 ```
 
 - **Index generator** — the existing `POST /api/index` / `/api/reindex` handlers stop
-  spawning directly; they **enqueue one `index` item** (deduped: never two index
-  items queued at once — a second request coalesces). The current "an index job is
-  already running" guard becomes "an index item is queued or running."
+  spawning directly; they **enumerate the files (the tracked-paths union) and enqueue
+  one `index` item per file** (embed *this file* → its chunks + txn rows + manifest
+  row), plus a final **finalize** item that settles the manifest once all file items
+  complete. Per-file granularity is deliberate: the orchestrator re-checks
+  pause/priority **at each file boundary** — exactly like backfill between
+  generation-groups — so a re-index can be **paused, or yield to an interactive query,
+  between files** instead of only after the whole run. Re-requests coalesce/dedup by
+  file (never two items for the same file queued at once). The "an index job is already
+  running" guard becomes "index items are queued or running."
 - **Backfill generator** — instead of a free-running poll, the readiness signal
   (pending ML generations exist: `added_gen > done_gen` for some rule) **enqueues
   `backfill` items**, one per generation-group slice (mirrors today's
@@ -226,10 +233,12 @@ Each step is shippable on its own; we already did Phase 0.
 
 ## 5. Open questions
 
-- **Preemption granularity** — backfill is already sliced per generation-group, so the
-  natural preemption point is between slices. Index is a single long job; we do *not*
-  preempt it (queries yield to nothing, but a full re-index is user-initiated and
-  rare). Is between-slice yielding enough, or do we need mid-index query priority?
+- **Preemption granularity** — both generators are now sliced: backfill per
+  generation-group, **index per file**, so the orchestrator can pause or yield to a
+  query at each file boundary. The remaining edge is a **single very large file** (e.g.
+  the 554-chunk `Jan 01 2025 – Jul 01 2026.csv`): one file is still one indivisible
+  unit, so a pause can wait up to one big-file embed. If that proves too coarse, slice
+  within a file (per-chunk-batch); file granularity is the pragmatic default.
 - **Multi-host** — the demo runs a separate engine/host; the queue is per-install, so
   no change there, but worth confirming the marker's PID semantics on the demo's
   worker model.
