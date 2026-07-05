@@ -130,7 +130,29 @@ def main() raises:
         ok,
     )
 
-    # Phase B/C still carries the narrative + is still v:1.
+    # ── Phase D — pie block (share-of-whole breakdown) ──────────────────────────
+    var pc = pie("Spend by category")
+    _ = pc.slice("Groceries", money_val(812.40))
+    _ = pc.slice("Dining", money_val(203.75))
+    var d = result_json()
+    ok = _expect(
+        "pie block present with title",
+        _has(d, '{"kind":"pie","title":"Spend by category"'),
+        ok,
+    )
+    ok = _expect(
+        "pie slices carry label + typed money value",
+        _has(
+            d,
+            (
+                '"slices":[{"label":"Groceries","value":{"type":"money","raw":812.4,"text":"$812.40"}},'
+                '{"label":"Dining","value":{"type":"money","raw":203.75,"text":"$203.75"}}]'
+            ),
+        ),
+        ok,
+    )
+
+    # Phase B/C/D still carries the narrative + is still v:1.
     ok = _expect(
         "still v:1 with data", _has(c, '"v":1') and _has(c, '"data":['), ok
     )

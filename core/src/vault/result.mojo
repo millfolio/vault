@@ -18,6 +18,8 @@ Builders (all part of `from vault import *`):
     t.row(["Whole Foods", money_val(812.40)])
     var s = series("Spending by month", "time")                  # a time/category series
     s.point("2026-01-01", money_val(1203.10))
+    var pc = pie("Spend by category")                            # a share-of-whole pie
+    pc.slice("Groceries", money_val(812.40))
     hint("line")                                                 # OPTIONAL nudge
 
 TYPED-MONEY INVARIANT (the single most important payload rule): a money value
@@ -104,7 +106,7 @@ struct Block(Copyable, Movable):
     struct with a `kind` tag + a field per variant keeps serialization trivial and
     avoids a heterogeneous container."""
 
-    var kind: String  # "kpi" | "table" | "series" | "map"
+    var kind: String  # "kpi" | "table" | "series" | "map" | "pie"
     # kpi:
     var label: String
     var value: Cell
@@ -115,8 +117,8 @@ struct Block(Copyable, Movable):
     var title: String
     var series_kind: String  # "time" | "category"
     var hint: String  # optional presenter nudge ("line"/"bar"/…)
-    var xs: List[String]  # x values (iso date / category label)
-    var ys: List[Cell]  # y values (typed money column)
+    var xs: List[String]  # x values (iso/category label); pie: slice labels
+    var ys: List[Cell]  # y values (money column); pie: typed-money slice values
     # map (geo breakdown): `title` above is reused for the map title.
     var map_level: String  # "country" (ISO3) | "state" (US 2-letter)
     var codes: List[String]  # region codes, parallel to `mvals`
@@ -278,6 +280,20 @@ def _block_json(b: Block) raises -> String:
             o += _cell_json(b.mvals[i]) + "}"
         o += "]}"
         return o^
+    elif b.kind == "pie":
+        # A share-of-whole breakdown: one labeled, typed-money slice per part
+        # (reuses `xs` for slice labels + `ys` for the typed-money values — the same
+        # label+money shape as a category series). The CLIENT computes percentages
+        # from the raw values and draws the pie/donut; the program never draws.
+        var o = String('{"kind":"pie","title":') + _jstr(b.title)
+        o += ',"slices":['
+        for i in range(len(b.xs)):
+            if i > 0:
+                o += ","
+            o += '{"label":' + _jstr(b.xs[i]) + ',"value":'
+            o += _cell_json(b.ys[i]) + "}"
+        o += "]}"
+        return o^
     return String("{}")
 
 
@@ -380,6 +396,22 @@ def geo_map(title: String, level: String) raises -> MapRef:
     return MapRef(len(p[].blocks) - 1)
 
 
+def pie(title: String) raises -> PieRef:
+    """Start a titled SHARE-OF-WHOLE pie; append parts with `.slice(label,
+    money_val(total))`. Emit this for a "what share of my spending is each
+    category/merchant" question — a spend total split across a SMALL number of
+    named parts (≤ ~8). The CLIENT computes each part's percentage from the raw
+    values and draws the pie/donut; the program never chooses the view. For many
+    parts, prefer `bar`/`table` instead."""
+    var p = _bufptr()
+    var b = Block()
+    b.kind = String("pie")
+    b.title = title
+    p[].blocks.append(b^)
+    _emit()
+    return PieRef(len(p[].blocks) - 1)
+
+
 def hint(name: String) raises:
     """OPTIONAL — nudge the presenter's mark for the most recent series
     (`"line"`/`"bar"`/…). Honored when set, ignored when absent; the Phase-1
@@ -419,6 +451,21 @@ struct SeriesRef(Copyable, Movable):
         var p = _bufptr()
         p[].blocks[self.idx].xs.append(x)
         p[].blocks[self.idx].ys.append(y.copy())
+        _emit()
+        return self.copy()
+
+
+@fieldwise_init
+struct PieRef(Copyable, Movable):
+    """A handle to a pie block; `.slice(label, money_val(y))` appends one part's
+    label + typed-money value and re-emits. Chainable."""
+
+    var idx: Int
+
+    def slice(self, label: String, value: Cell) raises -> Self:
+        var p = _bufptr()
+        p[].blocks[self.idx].xs.append(label)
+        p[].blocks[self.idx].ys.append(value.copy())
         _emit()
         return self.copy()
 

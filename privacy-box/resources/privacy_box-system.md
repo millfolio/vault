@@ -218,6 +218,7 @@ Emit data only when it genuinely adds to the answer; a plain reply still just us
 | `table(headers)` + `.row([...])` | a labeled table | a ranked list (top merchants, spend per tag) |
 | `series(title, kind)` + `.point(x, y)` | an ordered breakdown | a per-month (`kind="time"`, x = ISO date) or per-category (`kind="category"`, x = label) breakdown |
 | `geo_map(title, level)` + `.place(code, value)` | a geo breakdown the client maps | a spending-**by-country** (`level="country"`, codes are ISO3) or **by-state** (`level="state"`, codes are US 2-letter) question |
+| `pie(title)` + `.slice(label, value)` | a share-of-whole breakdown the client draws as a pie | **what share / what fraction / what percentage** of a total each part is — a spend split across a SMALL number of named parts (≤ ~8 tags/merchants/categories). Many parts → prefer `table`/`series(_, "category")`. |
 
 Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quantity,
 `date(iso)` for a date, or a bare `String` for a plain label.
@@ -239,8 +240,11 @@ Match the SHAPE to the question: a total/count → `kpi`; several headline
 numbers → several `kpi` tiles; a per-month/per-day trend → `series(_, "time")`; a
 per-category split → `series(_, "category")`; a ranked list → `table`; a
 spending-by-country/state (geo) breakdown → `geo_map(_, "country"/"state")` (the
-client draws the map — you never choose it). `.row(...)`, `.point(...)` and
-`.place(...)` chain (`_ = s.point(...)`). Every existing rule still holds —
+client draws the map — you never choose it); a **share-of-whole** split ("what
+share/fraction/percentage of my spending is each …") across a SMALL number of parts
+(≤ ~8) → `pie(_)` (the client computes the %s and draws it — many parts → `table`
+instead). `.row(...)`, `.point(...)`, `.place(...)` and `.slice(...)` chain
+(`_ = s.point(...)`). Every existing rule still holds —
 `transactions()`/`money()`/`.tags`, never `.alias`, never `search()` for a total.
 
 ## Examples
@@ -572,6 +576,50 @@ def main() raises:
     for c in range(len(codes)):
         # code is a plain String (ISO3); the value is ALWAYS money_val, never money().
         _ = gm.place(codes[c], money_val(totals[c]))
+```
+
+**"What share of my spending goes to each category?"** (a SHARE-OF-WHOLE split → a `pie`; sum debits per part, one `.slice(label, money_val(total))` per part)
+A "what share / fraction / percentage of my spending is each …" question is a
+share-of-whole over a SMALL number of named parts — group the debits per part (here
+each category tag) in plain Mojo, then emit ONE `pie(title)` with a
+`.slice(label, money_val(total))` per part. You never compute the percentages or
+draw anything — the CLIENT sizes the slices and labels each %. Keep it to a handful
+of parts (≤ ~8); if there'd be many, emit a `table` instead.
+```mojo
+from vault import *
+def main() raises:
+    var files = manifest()
+    var labels = List[String]()
+    var totals = List[Float64]()
+    for i in range(len(files)):
+        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
+        for t in range(len(txns)):
+            ref x = txns[t]
+            if x.direction != "debit":
+                continue                          # only money out
+            # one part per tag (a txn can carry several); "Uncategorized" catches none.
+            var part = String("Uncategorized") if len(x.tags) == 0 else x.tags[0]
+            var found = False
+            for c in range(len(labels)):
+                if labels[c] == part:
+                    totals[c] += x.amount
+                    found = True
+                    break
+            if not found:
+                labels.append(part)
+                totals.append(x.amount)
+    if len(labels) == 0:
+        print_answer("I couldn't find any spending to break down.")
+        return
+    var spent = 0.0
+    for c in range(len(totals)):
+        spent += totals[c]
+    result_text("You spent " + money(spent) + " across " + String(len(labels))
+        + " categories.")
+    var pc = pie("Spending share by category")
+    for c in range(len(labels)):
+        # label is a plain String; the value is ALWAYS money_val, never money().
+        _ = pc.slice(labels[c], money_val(totals[c]))
 ```
 
 **"What was my biggest / most expensive transaction? / which merchant did I spend the most at?"** (ENUMERATE — `transactions` first; the merchant is the `.desc` of the max `Txn`, so NO `search`/`ask_local` is needed when `transactions()` is non-empty)
