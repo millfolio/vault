@@ -1947,6 +1947,35 @@ def _usleep(usec: Int):
     _ = external_call["usleep", Int](Int(usec))
 
 
+def _contains_str(haystack: List[String], needle: String) -> Bool:
+    """Membership test for a String list (dedup helper — non-raising)."""
+    for i in range(len(haystack)):
+        if haystack[i] == needle:
+            return True
+    return False
+
+
+def _backfill_detail(tags: List[String]) raises -> String:
+    """The Operations detail for a drained backfill session: the AI tag NAME(s) it
+    applied, e.g. "AI-tag backfill complete: coffee shop, dining". Capped so a broad
+    run doesn't produce an unwieldy line; falls back to the static text when no names
+    were captured (older path / nothing reported)."""
+    if len(tags) == 0:
+        return String("AI-tag backfill complete")
+    var cap = 6
+    var shown = len(tags)
+    if shown > cap:
+        shown = cap
+    var out = String("AI-tag backfill complete: ")
+    for i in range(shown):
+        if i > 0:
+            out += ", "
+        out += tags[i]
+    if len(tags) > cap:
+        out += ", …"
+    return out^
+
+
 def _backfill_worker(arg: _OpaquePtr) -> _OpaquePtr:
     """Detached background thread — drains pending AI-tag backfill in bounded
     slices so an AI tag backfills ON ITS OWN (no open browser needed) WITHOUT
@@ -1962,14 +1991,28 @@ def _backfill_worker(arg: _OpaquePtr) -> _OpaquePtr:
     operations log. Idle polls that never tag anything record nothing."""
     var session_started = Int64(0)  # 0 = no active backfill session
     var session_tagged = 0
+    var session_tags = List[String]()  # union of tag NAMES tagged this session
     while True:
         var nap_us = 3000000  # ~3s idle poll for newly-pending work
+        # The on-device engine serves BOTH embeddings (indexing) and classification
+        # (backfill); running both saturates it and can STALL the index so it never
+        # writes its manifest (the "Index — running forever, no manifest" bug). Yield
+        # to an in-flight index: skip this slice entirely, nap, and re-poll — WITHOUT
+        # touching the session accounting (a pause is not a drain, so it records no
+        # op). Backfill resumes on the next poll once the index state settles.
+        if _index_running():
+            _usleep(nap_us)
+            continue
         try:
-            var changed = ml_backfill_slice(_engine_url())
+            var slice_tags = List[String]()
+            var changed = ml_backfill_slice(_engine_url(), slice_tags)
             if changed > 0:
                 if session_started == 0:
                     session_started = _epoch_s()
                 session_tagged += changed
+                for i in range(len(slice_tags)):
+                    if not _contains_str(session_tags, slice_tags[i]):
+                        session_tags.append(slice_tags[i].copy())
                 # Throttle between active slices per the user's priority — low leaves
                 # long GPU-idle gaps (laptop stays usable), high runs near back-to-back.
                 nap_us = nap_ms_for_priority(get_priority()) * 1000
@@ -1982,13 +2025,14 @@ def _backfill_worker(arg: _OpaquePtr) -> _OpaquePtr:
                         session_started,
                         _epoch_s(),
                         String("done"),
-                        String("AI-tag backfill complete"),
+                        _backfill_detail(session_tags),
                         -1,  # files: n/a
                         -1,  # txns: n/a
                         session_tagged,
                     )
                 session_started = 0
                 session_tagged = 0
+                session_tags = List[String]()
         except:
             pass
         _usleep(nap_us)
@@ -2695,11 +2739,36 @@ def _index_log_path() -> String:
     return _config_dir() + "/.index.log"  # captured indexer output
 
 
+def _index_pid_path() -> String:
+    return _config_dir() + "/.index.pid"  # detached index worker's PID
+
+
 def _tracked_paths_path() -> String:
     return _config_dir() + "/indexed-paths.json"  # the tracked-folders registry
 
 
-def _index_read_state() -> String:
+def _index_read_pid() -> Int:
+    """The detached index worker's PID (the backgrounded subshell that runs the
+    indexer), or -1 when unknown (no pid file / unparsable)."""
+    try:
+        var s: String
+        with open(_index_pid_path(), "r") as f:
+            s = f.read()
+        return Int(String(s.strip()))
+    except:
+        return -1
+
+
+def _pid_alive(pid: Int) -> Bool:
+    """kill(pid, 0) liveness: 0 → the process exists; nonzero (ESRCH) → it's gone.
+    The indexer is our own child so EPERM never applies — a clean 0 means alive."""
+    if pid <= 0:
+        return False
+    return Int(external_call["kill", c_int](Int32(pid), c_int(0))) == 0
+
+
+def _index_read_state_raw() -> String:
+    """The state file verbatim (idle|indexing|done|error), no liveness reconciling."""
     try:
         var s: String
         with open(_index_state_path(), "r") as f:
@@ -2709,9 +2778,59 @@ def _index_read_state() -> String:
         return String("idle")
 
 
+def _index_read_state() -> String:
+    """Index state, reconciled against worker liveness. If the file still says
+    `indexing` but the recorded worker PID is provably DEAD, the detached run
+    crashed/was killed before it could settle the file (the "Index — running" row
+    that never clears + the missing manifest bug) → report `error` so the row
+    clears and a fresh Re-index can start. We used the PID (not a timestamp
+    heartbeat) because the spawn writes the backgrounded subshell's `$!` and it
+    stays alive for the whole run — a direct, race-free liveness signal. Only a
+    provably-dead PID overrides; a missing pid file or a live PID stays `indexing`
+    (a false "still running" is safer than falsely clearing a live run)."""
+    var s = _index_read_state_raw()
+    if s == "indexing":
+        var pid = _index_read_pid()
+        if pid > 0 and not _pid_alive(pid):
+            return String("error")
+    return s^
+
+
 def _index_running() -> Bool:
-    """True while an index job is genuinely in flight."""
+    """True only while an index job is GENUINELY in flight. `_index_read_state()`
+    reconciles a stale `indexing` marker against the worker's PID liveness, so a
+    crashed/killed run reads back as `error` here — this is the single source of
+    truth for both the "already running" guard (which would otherwise block a fresh
+    Re-index forever) and the status display."""
     return _index_read_state() == "indexing"
+
+
+def _reconcile_index_state_on_boot():
+    """At server startup, heal a stale `indexing` marker so a crashed or
+    force-stopped run can't wedge the vault (blocking a fresh Re-index) or show a
+    phantom "running" row forever — it even survives a `stop`/`start` on disk. A
+    genuinely-detached index CAN outlive a server restart (`</dev/null &`), so we
+    KEEP `indexing` only when the recorded PID is still alive; a dead PID — or NO
+    PID captured at all (a legacy marker, or the owning process is simply gone after
+    a restart) — is reset to idle and its pending-op + pid markers cleared. Biased
+    conservative only where a live run could still exist. Best-effort; never raises.
+    """
+    if _index_read_state_raw() != "indexing":
+        return
+    var pid = _index_read_pid()
+    if pid > 0 and _pid_alive(pid):
+        return  # a detached run survived the restart — leave it running
+    _write_small(_index_state_path(), "idle")
+    try:
+        if exists(_pending_op_path()):
+            remove(_pending_op_path())
+    except:
+        pass
+    try:
+        if exists(_index_pid_path()):
+            remove(_index_pid_path())
+    except:
+        pass
 
 
 def _index_progress() -> String:
@@ -3027,7 +3146,13 @@ def _start_index_detached(paths: List[String], kind: String = "index") -> Bool:
         + state
         + "' || printf error > '"
         + state
-        + "' ) </dev/null &"
+        # `& printf %s "$!"` after backgrounding records the subshell's PID — it
+        # lives for the whole run, so a stuck `indexing` state can be reconciled
+        # against its liveness (see `_index_read_state`). `$!` is the last job
+        # backgrounded, i.e. this subshell.
+        + "' ) </dev/null & printf %s \"$!\" > '"
+        + _index_pid_path()
+        + "'"
     )
     # Record the tracked set (all indexed now) BEFORE launching, so a poll of
     # /api/index/folders right after start already reflects the new path.
@@ -3048,6 +3173,14 @@ def _start_index_detached(paths: List[String], kind: String = "index") -> Bool:
     try:
         if exists(_pending_op_path()):
             remove(_pending_op_path())
+    except:
+        pass
+    # Drop any stale pid from a prior run BEFORE flipping the state to `indexing`,
+    # so a poll in the gap can't reconcile this fresh run against a dead old PID.
+    # The subshell writes its own pid just below (system() returns after that).
+    try:
+        if exists(_index_pid_path()):
+            remove(_index_pid_path())
     except:
         pass
     _write_small(state, "indexing")
@@ -3935,6 +4068,10 @@ def main() raises:
         )  # owner-only: holds stats/asks/history + demo tokens
     except:
         pass
+
+    # Heal a stale `indexing` marker left by a crashed/force-stopped run so a fresh
+    # Re-index isn't blocked and no phantom "running" row lingers (see the helper).
+    _reconcile_index_state_on_boot()
 
     # Ensure the local-capability secret exists (0600) so the native menu-bar app's
     # Touch-ID unlock can bridge to a reveal token. Skipped in the demo (no gate).
