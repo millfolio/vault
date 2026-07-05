@@ -54,6 +54,40 @@ from orchestrator import (
 from transport import DeltaSink
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
 
+# The disk-backed work queue + the pure scheduling seams: the orchestrator loop runs
+# ALL background engine work (indexing + AI-tag backfill) through this one queue, one
+# job at a time, honoring a global pause + priority (see ORCHESTRATOR.md §2.3–2.5).
+from work_queue import (
+    WorkItem,
+    wq_enqueue,
+    wq_peek,
+    wq_take,
+    wq_done,
+    wq_fail,
+    wq_list,
+    wq_running,
+    wq_reset,
+    PRIO_INDEX,
+    PRIO_FINALIZE,
+    PRIO_BACKFILL,
+)
+from scheduler import (
+    EnqSpec,
+    index_run_plan,
+    split_payload,
+    index_active,
+    index_pending_files,
+    index_current,
+    query_active,
+    should_reconcile,
+    parse_pending_total,
+    is_index_kind,
+    KIND_PREPARE,
+    KIND_INDEX,
+    KIND_FINALIZE,
+    KIND_BACKFILL,
+)
+
 # The LanceDB-free registry/tags/retag store — the SAME functions the `millfolio`
 # CLI uses, so the Tags panel + category editor run in-process (no engine spawn).
 from vault.derive.tags import (
@@ -71,6 +105,7 @@ from vault.derive.store import (
     backfill_dedup_json,
     ml_backfill_slice,
     set_pause,
+    is_paused,
     get_priority,
     set_priority,
     nap_ms_for_priority,
@@ -79,6 +114,16 @@ from vault.derive.store import (
     missing_default_tags_json,
     add_default_tags,
     verify_amount_password,
+)
+# Filesystem enumeration for the index generator (compute the source base + the
+# candidate-file union the orchestrator enqueues one item per). manifest.mojo is
+# self-contained (std only — no LanceDB), so importing it keeps the server's
+# weight-free, LanceDB-free build intact; the LanceDB-touching index steps
+# (prepare/index-file/finalize) run as subprocesses via MILLFOLIO_RUN_SCRIPT.
+from vault.index.manifest import (
+    common_base,
+    collect_index_paths,
+    manifest_for_files,
 )
 from vaultcfg import vault_dir as resolve_vault_dir
 from sandbox import _spawn_capture
@@ -1062,11 +1107,14 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_backfill_status()
         if path == "/api/backfill/run":
             return self.handle_backfill_run()
-        if path == "/api/backfill/pause":
+        # Pause + priority are now ORCHESTRATOR-GLOBAL (govern index AND backfill).
+        # `/api/orchestrator/*` are the canonical routes; the `/api/backfill/*` ones
+        # remain as thin aliases (both hit the same global controller) for one release.
+        if path == "/api/orchestrator/pause" or path == "/api/backfill/pause":
             return self.handle_backfill_pause(req)
-        if path == "/api/backfill/resume":
+        if path == "/api/orchestrator/resume" or path == "/api/backfill/resume":
             return self.handle_backfill_resume()
-        if path == "/api/backfill/priority":
+        if path == "/api/orchestrator/priority" or path == "/api/backfill/priority":
             return self.handle_backfill_priority(req)
         if path == "/api/tags/preview-ai":
             return self.handle_tags_preview_ai(req)
@@ -1611,8 +1659,7 @@ struct Api(Copyable, Handler, Movable):
                 break
         if not seen:
             union.append(p.copy())
-        _finalize_index_op()  # attribute any prior settled run before we overwrite
-        if not _start_index_detached(union, "index"):
+        if not _start_index_run(union, "index"):
             return _cors(bad_request('{"error":"could not start indexing"}'))
         return _cors(ok_json('{"ok":true,"state":"indexing"}'))
 
@@ -1656,8 +1703,7 @@ struct Api(Copyable, Handler, Movable):
                     )
         except:
             pass  # no/empty body → re-index all tracked
-        _finalize_index_op()  # attribute any prior settled run before we overwrite
-        if not _start_index_detached(tracked, "reindex"):
+        if not _start_index_run(tracked, "reindex"):
             return _cors(bad_request('{"error":"could not start indexing"}'))
         return _cors(ok_json('{"ok":true,"state":"indexing"}'))
 
@@ -1976,66 +2022,229 @@ def _backfill_detail(tags: List[String]) raises -> String:
     return out^
 
 
-def _backfill_worker(arg: _OpaquePtr) -> _OpaquePtr:
-    """Detached background thread — drains pending AI-tag backfill in bounded
-    slices so an AI tag backfills ON ITS OWN (no open browser needed) WITHOUT
-    blocking the request reactor. `ml_backfill_slice` is a non-blocking try-lock
-    that honors the pause deadline (a live question is never delayed) and returns 0
-    when paused, locked, or nothing is pending. Naps briefly between active slices,
-    longer when idle (so a freshly-created tag starts within a few seconds). A pthread
-    start routine must NEVER raise — swallow everything.
+def _getpid() -> Int:
+    """This server process's pid — stamped as the running item's worker pid. The loop
+    runs each item SYNCHRONOUSLY (an in-process slice, or a blocking child), so while
+    an item is running this process is alive; if the server dies, an un-detached child
+    dies with it — so server-pid liveness == item liveness (see `_reconcile_stale`)."""
+    return Int(external_call["getpid", Int32]())
 
-    A backfill "session" = a contiguous stretch of slices that actually tagged rows;
-    when it drains (a slice returns 0 after the session tagged something), we append
-    ONE `backfill` operation for the whole session (start→now, rows tagged) to the
-    operations log. Idle polls that never tag anything record nothing."""
+
+def _reconcile_stale():
+    """Crash recovery (loop head + on boot): a `running` work item whose recorded
+    worker pid is provably DEAD is orphaned — its run died mid-flight. Generalizes the
+    old `_reconcile_index_state_on_boot` PID-liveness guard to the whole queue.
+
+    A dead backfill item is simply dropped (the old free-poll recorded nothing for an
+    interrupted slice). A dead index-family item orphans the WHOLE index run: drop every
+    index/prepare/finalize item, settle the state to `error`, and record one failed
+    `index`/`reindex` op so Operations shows it plainly instead of a phantom running row.
+    Best-effort; never raises (a pthread start routine must not)."""
+    try:
+        var items = wq_list()
+        var index_orphaned = False
+        for i in range(len(items)):
+            if items[i].state != "running":
+                continue
+            if should_reconcile(items[i].state, _pid_alive(items[i].pid)):
+                if is_index_kind(items[i].kind):
+                    index_orphaned = True
+                else:
+                    _ = wq_fail(items[i].id, String("worker pid dead"))
+        if index_orphaned:
+            for i in range(len(items)):
+                if is_index_kind(items[i].kind):
+                    _ = wq_fail(items[i].id, String("index run orphaned"))
+            _write_small(_index_state_path(), "error")
+            _finalize_index_op()  # attribute the failed run from its pending marker
+    except:
+        pass
+
+
+def _run_index_child(subcmd: String, tail_args: List[String]) -> Bool:
+    """Run a LanceDB-touching index step as a blocking child via MILLFOLIO_RUN_SCRIPT
+    (`/bin/bash <run_script> <subcmd> <args…>`), output appended to the index log. The
+    loop blocks here so exactly one job touches the engine at a time. Full environ is
+    inherited (the embedding endpoint is reachable), unlike the sandboxed codegen path.
+    Returns True on a clean exit (status 0)."""
+    var run_script = String(getenv("MILLFOLIO_RUN_SCRIPT", "").strip())
+    if run_script == "":
+        return False
+    var cmd: String
+    try:
+        cmd = String("/bin/bash ") + _sh_squote(run_script) + " " + subcmd
+        for i in range(len(tail_args)):
+            cmd += " " + _sh_squote(tail_args[i])
+        cmd += " >> " + _sh_squote(_index_log_path()) + " 2>&1"
+    except:
+        return False
+    var cc = _cstr(cmd)
+    var rc = external_call["system", Int32](cc)  # BLOCKS (no trailing &)
+    cc.free()
+    return Int(rc) == 0
+
+
+def _orchestrator_worker(arg: _OpaquePtr) -> _OpaquePtr:
+    """The single background scheduler loop (ORCHESTRATOR.md §2.3). Replaces the old
+    free-poll `_backfill_worker`: it owns ALL background engine work — indexing AND
+    AI-tag backfill — draining the disk-backed work queue ONE item at a time so index
+    and backfill can never contend for the engine again (the §1 stall is structurally
+    impossible). Honors a GLOBAL pause + priority (both kinds), and yields to any
+    interactive chat/ask. A pthread start routine must NEVER raise — swallow everything.
+
+    A backfill "session" = a contiguous stretch of slices that tagged rows; when it
+    drains (a slice tags nothing after the session tagged something) we append ONE
+    `backfill` op for the whole session — same accounting as the old worker, now driven
+    by queue items instead of a free poll."""
     var session_started = Int64(0)  # 0 = no active backfill session
     var session_tagged = 0
     var session_tags = List[String]()  # union of tag NAMES tagged this session
     while True:
-        var nap_us = 3000000  # ~3s idle poll for newly-pending work
-        # The on-device engine serves BOTH embeddings (indexing) and classification
-        # (backfill); running both saturates it and can STALL the index so it never
-        # writes its manifest (the "Index — running forever, no manifest" bug). Yield
-        # to an in-flight index: skip this slice entirely, nap, and re-poll — WITHOUT
-        # touching the session accounting (a pause is not a drain, so it records no
-        # op). Backfill resumes on the next poll once the index state settles.
-        if _index_running():
-            _usleep(nap_us)
-            continue
+        var idle_us = nap_ms_for_priority_safe() * 1000
         try:
-            var slice_tags = List[String]()
-            var changed = ml_backfill_slice(_engine_url(), slice_tags)
-            if changed > 0:
-                if session_started == 0:
-                    session_started = _epoch_s()
-                session_tagged += changed
-                for i in range(len(slice_tags)):
-                    if not _contains_str(session_tags, slice_tags[i]):
-                        session_tags.append(slice_tags[i].copy())
-                # Throttle between active slices per the user's priority — low leaves
-                # long GPU-idle gaps (laptop stays usable), high runs near back-to-back.
-                nap_us = nap_ms_for_priority(get_priority()) * 1000
-            elif session_started != 0:
-                # A run just drained (this slice tagged nothing, but the session did)
-                # → record it once, then reset. Skipped in the demo (invisible there).
-                if not _is_demo():
-                    _append_operation(
-                        String("backfill"),
-                        session_started,
-                        _epoch_s(),
-                        String("done"),
-                        _backfill_detail(session_tags),
-                        -1,  # files: n/a
-                        -1,  # txns: n/a
-                        session_tagged,
-                    )
-                session_started = 0
-                session_tagged = 0
-                session_tags = List[String]()
+            # 1. crash recovery — orphaned running items from a dead process.
+            _reconcile_stale()
+            # 2. GLOBAL pause — halts index AND backfill (queries are never paused).
+            if is_paused():
+                _usleep(500000)  # 0.5s tick
+                continue
+            # 3. yield to an interactive chat/ask holding (or waiting on) the engine.
+            var ht = runq_peek()
+            if query_active(ht[0], ht[1]):
+                _usleep(200000)  # 0.2s — re-check soon
+                continue
+            # 4. pick the next item (prio: index/finalize before backfill; FIFO within).
+            var item_opt = wq_peek()
+            if not item_opt:
+                # Nothing queued → let the backfill generator enqueue if ML work pends.
+                _maybe_enqueue_backfill()
+                _usleep(idle_us)
+                continue
+            var item = item_opt.value().copy()
+            # 5. run exactly ONE item — take it (write the running marker) then dispatch.
+            if not wq_take(item.id, _getpid(), _epoch_s()):
+                continue  # lost the race (shouldn't happen — single loop)
+            if item.kind == KIND_BACKFILL:
+                var slice_tags = List[String]()
+                var changed = ml_backfill_slice(_engine_url(), slice_tags)
+                _ = wq_done(item.id)
+                if changed > 0:
+                    if session_started == 0:
+                        session_started = _epoch_s()
+                    session_tagged += changed
+                    for i in range(len(slice_tags)):
+                        if not _contains_str(session_tags, slice_tags[i]):
+                            session_tags.append(slice_tags[i].copy())
+                elif session_started != 0:
+                    # Drained — record the session once, then reset (skip in the demo).
+                    if not _is_demo():
+                        _append_operation(
+                            String("backfill"),
+                            session_started,
+                            _epoch_s(),
+                            String("done"),
+                            _backfill_detail(session_tags),
+                            -1,
+                            -1,
+                            session_tagged,
+                        )
+                    session_started = 0
+                    session_tagged = 0
+                    session_tags = List[String]()
+            else:
+                _run_index_item(item)
+            _usleep(idle_us)
         except:
-            pass
-        _usleep(nap_us)
+            _usleep(idle_us)
+
+
+def nap_ms_for_priority_safe() -> Int:
+    """`nap_ms_for_priority(get_priority())` with a fallback (the loop's nap, in ms)."""
+    try:
+        return nap_ms_for_priority(get_priority())
+    except:
+        return 1200
+
+
+def _run_index_item(item: WorkItem):
+    """Dispatch one index-family item. prepare/index-file/finalize each run as a blocking
+    child (crash-isolated, engine-reachable); on any failure the whole run is aborted:
+    the remaining index-family items are dropped, the state settles to `error`, and one
+    failed op is recorded. On the finalize step's success the run settles to `done` and
+    its op is attributed from the pending marker. Never raises."""
+    try:
+        var fields = split_payload(item.payload)
+        if len(fields) == 0:
+            _ = wq_done(item.id)
+            return
+        var base = fields[0].copy()
+        var ok = False
+        if item.kind == KIND_PREPARE:
+            ok = _run_index_child(String("index-prepare"), [base])
+        elif item.kind == KIND_INDEX:
+            # Progress line for the status bar: [k/M] name (M = this run's file total).
+            var total = _read_runtotal()
+            var current = index_current(total, wq_list())
+            var name = String(fields[1]) if len(fields) >= 2 else base
+            try:
+                with open(_index_log_path(), "a") as f:
+                    f.write(
+                        "["
+                        + String(current)
+                        + "/"
+                        + String(total)
+                        + "] "
+                        + name
+                        + "\n"
+                    )
+            except:
+                pass
+            var pth = String(fields[1]) if len(fields) >= 2 else base
+            ok = _run_index_child(String("index-file"), [base, pth])
+        elif item.kind == KIND_FINALIZE:
+            var fargs = List[String]()
+            fargs.append(base)
+            for i in range(1, len(fields)):
+                fargs.append(fields[i].copy())
+            ok = _run_index_child(String("index-finalize"), fargs)
+        if ok:
+            _ = wq_done(item.id)
+            if item.kind == KIND_FINALIZE:
+                # The run settled cleanly — record the index/reindex op.
+                _write_small(_index_state_path(), "done")
+                _finalize_index_op()
+        else:
+            _abort_index_run(item.kind + " step failed")
+    except:
+        _abort_index_run(String("index step error"))
+
+
+def _abort_index_run(reason: String):
+    """A failed index step aborts the run: drop the remaining index-family items, settle
+    the state to `error`, and attribute the failed op from the pending marker."""
+    try:
+        var items = wq_list()
+        for i in range(len(items)):
+            if is_index_kind(items[i].kind):
+                _ = wq_fail(items[i].id, reason)
+        _write_small(_index_state_path(), "error")
+        _finalize_index_op()
+    except:
+        pass
+
+
+def _maybe_enqueue_backfill():
+    """The backfill generator (ORCHESTRATOR.md §2.1): when the queue is idle, enqueue
+    ONE `backfill` slice item iff the readiness signal shows pending ML generations —
+    nothing when idle. Dedup on (backfill, "slice") keeps at most one queued. The old
+    free-poll ran a slice every tick regardless; this only queues real work."""
+    try:
+        if parse_pending_total(backfill_status_json()) > 0:
+            _ = wq_enqueue(
+                String(KIND_BACKFILL), String("slice"), _epoch_s(), PRIO_BACKFILL
+            )
+    except:
+        pass
 
 
 def _progress_label(line: String) raises -> String:
@@ -2778,59 +2987,57 @@ def _index_read_state_raw() -> String:
         return String("idle")
 
 
+def _index_runtotal_path() -> String:
+    return _config_dir() + "/.index.runtotal"  # file count for the current index run
+
+
+def _read_runtotal() -> Int:
+    """The current index run's total file count (stamped by the generator at enqueue),
+    for the `[k/M]` progress bar. 0 when absent/unparsable."""
+    try:
+        var s: String
+        with open(_index_runtotal_path(), "r") as f:
+            s = f.read()
+        return Int(String(s.strip()))
+    except:
+        return 0
+
+
+def _write_runtotal(n: Int):
+    _write_small(_index_runtotal_path(), String(n))
+
+
+def _wq_list_safe() -> List[WorkItem]:
+    """`wq_list()` for non-raising callers (status/state derivation) — [] on any error.
+    """
+    try:
+        return wq_list()
+    except:
+        return List[WorkItem]()
+
+
 def _index_read_state() -> String:
-    """Index state, reconciled against worker liveness. If the file still says
-    `indexing` but the recorded worker PID is provably DEAD, the detached run
-    crashed/was killed before it could settle the file (the "Index — running" row
-    that never clears + the missing manifest bug) → report `error` so the row
-    clears and a fresh Re-index can start. We used the PID (not a timestamp
-    heartbeat) because the spawn writes the backgrounded subshell's `$!` and it
-    stays alive for the whole run — a direct, race-free liveness signal. Only a
-    provably-dead PID overrides; a missing pid file or a live PID stays `indexing`
-    (a false "still running" is safer than falsely clearing a live run)."""
-    var s = _index_read_state_raw()
-    if s == "indexing":
-        var pid = _index_read_pid()
-        if pid > 0 and not _pid_alive(pid):
-            return String("error")
-    return s^
+    """Index state, DERIVED FROM THE WORK QUEUE. While any index-family item
+    (prepare/index/finalize) is queued or running, an index run is in flight →
+    `indexing`. Otherwise the settled outcome is the `.index.state` file the
+    orchestrator writes on the finalize step (`done`/`error`), else `idle`. Orphaned
+    runs are cleared by `_reconcile_stale`, so a dead run reads back settled — no
+    phantom "running" row, no PID guard needed here anymore."""
+    if index_active(_wq_list_safe()):
+        return String("indexing")
+    var raw = _index_read_state_raw()
+    # A leftover "indexing" file (an older build, or a run whose items were
+    # reconciled away) is NOT active per the queue → report idle, never a phantom row.
+    if raw == "indexing":
+        return String("idle")
+    return raw^
 
 
 def _index_running() -> Bool:
-    """True only while an index job is GENUINELY in flight. `_index_read_state()`
-    reconciles a stale `indexing` marker against the worker's PID liveness, so a
-    crashed/killed run reads back as `error` here — this is the single source of
-    truth for both the "already running" guard (which would otherwise block a fresh
-    Re-index forever) and the status display."""
-    return _index_read_state() == "indexing"
-
-
-def _reconcile_index_state_on_boot():
-    """At server startup, heal a stale `indexing` marker so a crashed or
-    force-stopped run can't wedge the vault (blocking a fresh Re-index) or show a
-    phantom "running" row forever — it even survives a `stop`/`start` on disk. A
-    genuinely-detached index CAN outlive a server restart (`</dev/null &`), so we
-    KEEP `indexing` only when the recorded PID is still alive; a dead PID — or NO
-    PID captured at all (a legacy marker, or the owning process is simply gone after
-    a restart) — is reset to idle and its pending-op + pid markers cleared. Biased
-    conservative only where a live run could still exist. Best-effort; never raises.
+    """True while an index run is in flight — an index/prepare/finalize item is queued
+    or running. The single source of truth for the "already running" guard and status.
     """
-    if _index_read_state_raw() != "indexing":
-        return
-    var pid = _index_read_pid()
-    if pid > 0 and _pid_alive(pid):
-        return  # a detached run survived the restart — leave it running
-    _write_small(_index_state_path(), "idle")
-    try:
-        if exists(_pending_op_path()):
-            remove(_pending_op_path())
-    except:
-        pass
-    try:
-        if exists(_index_pid_path()):
-            remove(_index_pid_path())
-    except:
-        pass
+    return index_active(_wq_list_safe())
 
 
 def _index_progress() -> String:
@@ -2856,13 +3063,23 @@ def _index_status_json() raises -> String:
     carries a `[n/M]` per-file counter (the embedding phase), `current`/`total` are
     included so the UI can show an "n of M files" bar; they're omitted otherwise
     (scanning phase, non-file lines, done/idle)."""
+    var state = _index_read_state()
     var detail = _index_progress()
-    var counter = parse_progress_counter(detail)
-    var out = String('{"state":') + json_escape(_index_read_state())
+    var out = String('{"state":') + json_escape(state)
     out += ',"detail":' + json_escape(detail)
-    if counter[1] > 0:
-        out += ',"current":' + String(counter[0])
-        out += ',"total":' + String(counter[1])
+    # current/total = the queue-derived "n of M files": M is this run's file total
+    # (stamped at enqueue); n = files started-or-done = M − pending index items.
+    if state == "indexing":
+        var total = _read_runtotal()
+        if total > 0:
+            out += ',"current":' + String(index_current(total, wq_list()))
+            out += ',"total":' + String(total)
+    else:
+        # Settled: fall back to any [n/M] counter still in the last progress line.
+        var counter = parse_progress_counter(detail)
+        if counter[1] > 0:
+            out += ',"current":' + String(counter[0])
+            out += ',"total":' + String(counter[1])
     out += "}"
     return out
 
@@ -3109,89 +3326,71 @@ def _sh_squote(s: String) raises -> String:
     return out^
 
 
-def _start_index_detached(paths: List[String], kind: String = "index") -> Bool:
-    """Start the DETACHED `millfolio index <paths…>` over the whole tracked union (no
-    --force → incremental: unchanged files are skipped), flipping the state file
-    indexing→done (error on any failure); output captured to the log. Stamps every
-    path in `paths` as the tracked set with `lastIndexed = now` (they're all indexed
-    in this run). False when the run-script isn't configured or no paths were given.
-    """
+def _norm_roots(paths: List[String]) raises -> List[String]:
+    """Drop trailing slashes (except a bare `/`) — mirrors `build_index`'s root
+    normalization so the server computes the SAME source base the indexer would."""
+    var out = List[String]()
+    for i in range(len(paths)):
+        var r = String(paths[i])
+        while r.byte_length() > 1 and r.endswith("/"):
+            r = String(r[byte = : r.byte_length() - 1])
+        out.append(r^)
+    return out^
+
+
+def _start_index_run(paths: List[String], kind: String) -> Bool:
+    """The index generator (ORCHESTRATOR.md §2.1): instead of spawning a detached
+    monolithic `millfolio index`, ENUMERATE the tracked-paths union into its candidate
+    files and enqueue one `index` work item per file (dedup coalesces repeats), bracketed
+    by a `index-prepare` first and a `finalize` last. The orchestrator loop then drains
+    them ONE at a time, re-checking pause/priority + yielding to queries between files.
+
+    Computes the source base + file set with the SAME helpers the indexer uses
+    (`common_base`/`collect_index_paths`/`manifest_for_files`) so per-file names match.
+    Stamps every path as tracked (`lastIndexed = now`), resets the run log, records the
+    file total (for the `[k/M]` bar) and the pending-op marker (kind index|reindex).
+    False when the run-script isn't configured or no paths were given."""
     var run_script = String(getenv("MILLFOLIO_RUN_SCRIPT", "").strip())
     if run_script == "" or len(paths) == 0:
         return False
-    var state = _index_state_path()
-    var log = _index_log_path()
-    var args = String("")
     try:
-        for i in range(len(paths)):
-            args += " " + _sh_squote(paths[i])
-    except:
-        return False
-    # printf/echo always succeed, so the chain flips indexing→done and any real
-    # failure short-circuits to the trailing `|| printf error`.
-    var cmd = (
-        "( printf indexing > '"
-        + state
-        + "' && echo 'Indexing…' > '"
-        + log
-        + "'"
-        + " && /bin/bash '"
-        + run_script
-        + "' index"
-        + args
-        + " >> '"
-        + log
-        + "' 2>&1"
-        + " && printf done > '"
-        + state
-        + "' || printf error > '"
-        + state
-        # `& printf %s "$!"` after backgrounding records the subshell's PID — it
-        # lives for the whole run, so a stuck `indexing` state can be reconciled
-        # against its liveness (see `_index_read_state`). `$!` is the last job
-        # backgrounded, i.e. this subshell.
-        + "' ) </dev/null & printf %s \"$!\" > '"
-        + _index_pid_path()
-        + "'"
-    )
-    # Record the tracked set (all indexed now) BEFORE launching, so a poll of
-    # /api/index/folders right after start already reflects the new path.
-    try:
-        var now = String(_epoch_s())
+        var nroots = _norm_roots(paths)
+        var base = common_base(nroots)
+        var infos = manifest_for_files(collect_index_paths(nroots))
+        var files = List[String]()
+        for i in range(len(infos)):
+            files.append(infos[i].path.copy())
+
+        # Record the tracked set (all indexed now) so a poll of /api/index/folders
+        # right after start already reflects the new path.
+        var now = _epoch_s()
         var epochs = List[String]()
         for _ in range(len(paths)):
-            epochs.append(now)
+            epochs.append(String(now))
         _write_tracked(paths, epochs)
+
+        # Attribute any prior settled run before this one overwrites its markers, then
+        # reset the run log, stamp the file total + this run's pending-op identity.
+        _finalize_index_op()
+        _write_small(_index_log_path(), "")
+        _write_runtotal(len(files))
+        # A stale pending marker from a never-finalized prior run would leak its
+        # `started` into this run's finalize (the bogus-duration bug) — drop it first.
+        try:
+            if exists(_pending_op_path()):
+                remove(_pending_op_path())
+        except:
+            pass
+        _write_pending_op(kind, now)
+
+        # Enqueue prepare → per-file index → finalize (all at `now`; id order runs them
+        # prepare-first, finalize-last). Dedup keeps a re-request from double-queuing.
+        var plan = index_run_plan(base, files)
+        for i in range(len(plan)):
+            _ = wq_enqueue(plan[i].kind, plan[i].payload, now, plan[i].prio)
+        return True
     except:
-        pass
-    # Fresh start: a pending marker still on disk HERE is a STALE one from a prior
-    # run that never finalized (an incremental/instant run on an earlier runtime, or
-    # a crash). Drop it BEFORE we touch the state file so a concurrent poll can't
-    # finalize that old run with a late `finished` epoch — a stale `started` leaking
-    # into a fresh finalize is the "434m 58s" bogus-duration bug. This run stamps its
-    # own marker with the current epoch just below.
-    try:
-        if exists(_pending_op_path()):
-            remove(_pending_op_path())
-    except:
-        pass
-    # Drop any stale pid from a prior run BEFORE flipping the state to `indexing`,
-    # so a poll in the gap can't reconcile this fresh run against a dead old PID.
-    # The subshell writes its own pid just below (system() returns after that).
-    try:
-        if exists(_index_pid_path()):
-            remove(_index_pid_path())
-    except:
-        pass
-    _write_small(state, "indexing")
-    _write_small(log, "")
-    # Record this run's identity so the operations log can attribute it once the
-    # detached chain settles the state file (see `_finalize_index_op`).
-    _write_pending_op(kind, _epoch_s())
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-    return True
+        return False
 
 
 def _autofetch_default() -> Bool:
@@ -4037,18 +4236,11 @@ def on_connect(mut conn: WsConnection) raises:
         )
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")
-        # Between-questions worker: with the run slot already released, opportunistically
-        # advance ML-tag backfill by ONE bounded generation-batch. Try-locked +
-        # pause-aware + best-effort (a down engine just no-ops), so it can never delay
-        # a question or fail the turn. Usually a fast no-op (nothing pending); it only
-        # does real work when there's a backlog (a newly-added AI rule, or first run
-        # after upgrade).
-        try:
-            var mchanged = ml_backfill_slice(_engine_url())
-            if mchanged > 0:
-                log("[backfill] slice tagged " + String(mchanged) + " txn(s)")
-        except e:
-            log("[backfill] slice skipped: " + String(e))
+        # AI-tag backfill is NOT run inline here anymore: the work orchestrator owns ALL
+        # background engine work (one job at a time), so firing a slice from the query
+        # path would bypass its serialization and re-introduce index/backfill contention.
+        # With the run slot released, the orchestrator picks up any pending backfill on
+        # its next idle tick.
     except e:
         conn.send_text(error_event(String(e)))
         if ticket >= 0:
@@ -4069,9 +4261,10 @@ def main() raises:
     except:
         pass
 
-    # Heal a stale `indexing` marker left by a crashed/force-stopped run so a fresh
-    # Re-index isn't blocked and no phantom "running" row lingers (see the helper).
-    _reconcile_index_state_on_boot()
+    # Crash recovery: reconcile any work items a prior (now-dead) process left marked
+    # running — an orphaned index run settles to `error` and clears; the work queue
+    # itself survives the restart and RESUMES its pending items (see the loop below).
+    _reconcile_stale()
 
     # Ensure the local-capability secret exists (0600) so the native menu-bar app's
     # Touch-ID unlock can bridge to a reveal token. Skipped in the demo (no gate).
@@ -4130,18 +4323,17 @@ def main() raises:
             ),
             sep="",
         )
-    # Background AI-tag backfill: a DETACHED thread drains pending classification
-    # in bounded slices so an AI tag backfills on its own (survives a closed browser)
-    # WITHOUT blocking the reactor. Best-effort — backfill also runs at index time
-    # and via the System → Backfill panel, so a spawn failure isn't fatal.
+    # The work orchestrator: ONE detached scheduler loop drains the disk-backed work
+    # queue — ALL background engine work (indexing + AI-tag backfill) — a single job at
+    # a time, honoring the global pause + priority and yielding to interactive queries.
+    # This replaces both the free-poll backfill thread and the direct index-spawn, so
+    # index and backfill can never contend for the engine (see ORCHESTRATOR.md §2.3).
     try:
-        var mth = ThreadHandle.spawn[_backfill_worker](_null_ptr())
+        var mth = ThreadHandle.spawn[_orchestrator_worker](_null_ptr())
         mth.detach()
-        print("  background backfiller: on (AI tags backfill automatically)")
+        print("  work orchestrator: on (indexing + AI-tag backfill, one at a time)")
     except:
-        print(
-            "  background backfiller: could not start (index-time still works)"
-        )
+        print("  work orchestrator: could not start (index-time backfill still works)")
     # Background weight provisioner: ensure the required embedding model + a default
     # chat model are present (both no-ops when cached), so indexing/search + chat work
     # out of the box after a weights-free install; then kickstart the engine to serve

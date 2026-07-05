@@ -48,5 +48,8 @@ test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I
 test-workqueue = { cmd = "mkdir -p build && mojo build test/work_queue_test.mojo -I src -I ../../flare -o build/workqueue-test && rm -f /tmp/millfolio-workq-test /tmp/millfolio-workq-test.lock /tmp/millfolio-workq-test.tmp && MILLFOLIO_WORKQ_PATH=/tmp/millfolio-workq-test ./build/workqueue-test" }
 # Unit-test the on-device JSON store builders (store.mojo) — ask history + /api/system.
 test-store = { cmd = "mkdir -p build && mojo build test/store_test.mojo -I src -I ../../json -o build/store-test && ./build/store-test" }
-# Full unit suite — what `moon run app-server:check` runs (events + run-queue + work-queue + store).
-test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-store"] }
+# Unit-test the pure orchestrator seams (scheduler.mojo) — enqueue plan, queue-derived
+# status, pause/query gating, reconcile predicate, backfill readiness.
+test-scheduler = { cmd = "mkdir -p build && mojo build test/scheduler_test.mojo -I src -I ../../flare -o build/scheduler-test && ./build/scheduler-test" }
+# Full unit suite — what `moon run app-server:check` runs (events + run-queue + work-queue + store + scheduler).
+test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-store", "test-scheduler"] }
