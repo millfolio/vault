@@ -142,6 +142,7 @@
   // 30s window is kept here so /api/gpu can stay a cheap, stateless instantaneous read.
   let gpuAvg = $state<number | null>(null);
   let memUsed = $state<number | null>(null); // system memory-used %, from /api/gpu
+  let diskUsed = $state<number | null>(null); // disk-used % of the vault volume, from /api/gpu
   let bkPending = $state(0);
   let bkPriority = $state("");
   let bkEta = $state<number | null>(null);
@@ -169,6 +170,8 @@
         // Memory-used % rides the same sample (instantaneous — it's stable enough
         // that a rolling average isn't worth it).
         if (typeof d.mem === "number" && d.mem >= 0) memUsed = d.mem;
+        // Disk-used % of the volume holding the vault + weights (same instantaneous sample).
+        if (typeof d.disk === "number" && d.disk >= 0) diskUsed = d.disk;
       }
     } catch {}
     // Backfill: pending count + priority + a live ETA measured from the drain rate
@@ -906,6 +909,11 @@
     {#if !isDemo && memUsed !== null}
       <span class="metric" title="system memory in use (app + wired + compressed)">
         MEM: {memUsed}%
+      </span>
+    {/if}
+    {#if !isDemo && diskUsed !== null}
+      <span class="metric" title="disk in use on the volume holding the vault + model weights">
+        DISK: {diskUsed}%
       </span>
     {/if}
     <span class="spacer"></span>

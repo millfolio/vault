@@ -370,6 +370,44 @@ def _memory_used_pct() -> Int:
         return -1
 
 
+def _disk_used_pct() -> Int:
+    """Instantaneous disk-used % of the volume holding the vault + models (`df -P` on
+    the data dir, so it reflects the disk the index/weights live on; same subprocess-
+    to-temp-file pattern as `_memory_used_pct`). Returns -1 when unavailable so the bar
+    can hide the indicator."""
+    var out_path = _config_dir() + "/.disk_used"
+    # `cd /` first (see `_gpu_util_pct`): guard against a wiped cwd after a re-unpack.
+    var cmd = (
+        String("cd / 2>/dev/null; df -P '")
+        + _config_dir()
+        + "' 2>/dev/null | awk '"
+        + 'NR==2{v=$5;gsub(/%/,"",v);printf "%d",v}'
+        + "' > '"
+        + out_path
+        + "' 2>/dev/null"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    try:
+        var s: String
+        with open(out_path, "r") as f:
+            s = f.read()
+        var cur = 0
+        var indig = False
+        var b = s.as_bytes()
+        for i in range(len(b)):
+            var c = Int(b[i])
+            if c >= 48 and c <= 57:
+                cur = cur * 10 + (c - 48)
+                indig = True
+            elif indig:
+                break
+        return cur if indig else -1
+    except:
+        return -1
+
+
 # ── WebAuthn (Touch-ID) amount gate: single-file challenge + token stores ──────
 # Single-user local app → one active challenge + one active token at a time is
 # enough (both live in the data dir so they survive across worker threads). The
@@ -987,6 +1025,8 @@ struct Api(Copyable, Handler, Movable):
                     + String(_gpu_util_pct())
                     + ',"mem":'
                     + String(_memory_used_pct())
+                    + ',"disk":'
+                    + String(_disk_used_pct())
                     + "}"
                 )
             )
