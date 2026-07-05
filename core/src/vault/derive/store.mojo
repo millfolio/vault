@@ -20,6 +20,7 @@ from std.time import perf_counter_ns
 from vault.extract.transactions import TxnRow, tsv_to_txn_rows, txn_rows_to_tsv
 from vault.index.sha256 import sha256_hex
 from vault.derive.categorize import (
+    Rule,
     Registry,
     default_registry,
     parse_rules,
@@ -150,6 +151,89 @@ def save_categories(text: String) raises -> Int:
     var changed = effective_retag()
     _reconcile_ledger()
     return changed
+
+
+# ── upgrade: offer newly-added built-in default tags ───────────────────────────
+
+
+def _rule_to_line(r: Rule) -> String:
+    """Serialize ONE rule to the categories-file line format (mirrors the per-rule
+    body of `registry_to_text`): `tag (note) = kw, kw` for a keyword rule, or
+    `tag (note) : question` for an ML rule. Used to APPEND a missing default rule
+    to the user's edited file without rewriting what they already have."""
+    var name = r.tag
+    if r.description.byte_length() > 0:
+        name += " (" + r.description + ")"
+    if r.is_ml():
+        return name + " : " + r.ml_prompt + "\n"
+    var out = name + " = "
+    var first = True
+    for k in range(len(r.refs)):
+        if not first:
+            out += ", "
+        first = False
+        out += "@" + r.refs[k]
+    for k in range(len(r.keywords)):
+        if not first:
+            out += ", "
+        first = False
+        out += r.keywords[k]
+    out += "\n"
+    return out^
+
+
+def missing_default_tags_json() raises -> String:
+    """JSON array of built-in default tags NOT present in the user's effective
+    registry: `[{"name":…,"description":…},…]` (empty → `[]`). Backs the upgrade
+    nudge. Default tags only auto-refresh while `categories.txt` is UNTOUCHED; once
+    the user edits it the file is authoritative, so a default added in a later
+    version (e.g. `transfers`, `rewards`) never appears — this surfaces those so the
+    UI can offer to add them."""
+    var defaults = default_registry()
+    var have = effective_tags()
+    var out = String("[")
+    var first = True
+    for i in range(len(defaults.rules)):
+        ref r = defaults.rules[i]
+        if contains(have, r.tag):
+            continue
+        if not first:
+            out += ","
+        first = False
+        out += '{"name":' + _json_str(r.tag)
+        out += ',"description":' + _json_str(r.description) + "}"
+    out += "]"
+    return out^
+
+
+def add_default_tags(names: List[String]) raises -> Int:
+    """APPEND the named built-in default rules that are MISSING from the user's
+    `categories.txt` (preserving every existing edit — we only add), then re-tag the
+    stored transactions. A name that isn't a built-in default, or is already present,
+    is skipped. Returns the count of rules added."""
+    var defaults = default_registry()
+    var have = effective_tags()
+    var text = (
+        read_categories()
+    )  # seeds the file if needed; the raw current text
+    var append = String("")
+    var added = 0
+    for i in range(len(defaults.rules)):
+        ref r = defaults.rules[i]
+        if contains(have, r.tag):
+            continue
+        if not contains(names, r.tag):
+            continue
+        append += _rule_to_line(r)
+        added += 1
+    if added == 0:
+        return 0
+    if text.byte_length() > 0 and not text.endswith("\n"):
+        text += "\n"
+    _ = save_categories(
+        text + append
+    )  # write verbatim + re-tag (makes it 'touched')
+    return added
 
 
 # ── tags: names, backfill, report ──────────────────────────────────────

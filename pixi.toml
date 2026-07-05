@@ -98,6 +98,12 @@ test-store = { cmd = "mkdir -p build && mojo build core/test/derive/store_test.m
 # 0 transactions. The in-memory TSV round-trip (test-transactions) misses this
 # because it never crosses the file boundary. Pinned MILLFOLIO_DATA_DIR (hermetic).
 test-persist = { cmd = "mkdir -p build && rm -rf build/persist-data && MILLFOLIO_DATA_DIR=\"$PWD/build/persist-data\" bash -c 'mojo build core/test/derive/persist_test.mojo -I core/src -I ../flare -o build/persist-test && MILLFOLIO_DATA_DIR=\"$PWD/build/persist-data\" ./build/persist-test'" }
+# Gate: the UPGRADE path that offers newly-added built-in default tags. On an
+# EDITED (authoritative) categories.txt, missing_default_tags_json surfaces the
+# defaults absent from it (transfers/rewards) and add_default_tags APPENDS the
+# opted-in ones without clobbering the user's rules, then the nudge is idempotent.
+# Pinned MILLFOLIO_DATA_DIR (hermetic); links flare (store→classify) but no calls.
+test-missing-defaults = { cmd = "mkdir -p build && rm -rf build/missing-defaults-data && MILLFOLIO_DATA_DIR=\"$PWD/build/missing-defaults-data\" bash -c 'mojo build core/test/derive/missing_defaults_test.mojo -I core/src -I ../flare -o build/missing-defaults-test && MILLFOLIO_DATA_DIR=\"$PWD/build/missing-defaults-data\" ./build/missing-defaults-test'" }
 # Gate: the index PROCESSING-VERSION mechanism — a stored marker (config_dir()/
 # .index.procversion) that auto-forces a full rebuild when INDEX_PROCESSING_VERSION
 # changes even though file bytes did not (a new Txn field / better extractor / new
@@ -151,4 +157,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-procversion", "test-golden", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
