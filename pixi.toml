@@ -106,6 +106,15 @@ test-persist = { cmd = "mkdir -p build && rm -rf build/persist-data && MILLFOLIO
 # MILLFOLIO_DATA_DIR (hermetic). Pulls the sibling libs like test-result (index.mojo
 # links lancedb/flare/…).
 test-procversion = { cmd = "mkdir -p build && rm -rf build/procversion-data && MILLFOLIO_DATA_DIR=\"$PWD/build/procversion-data\" bash -c 'mojo build core/test/index/procversion_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/procversion-test && MILLFOLIO_DATA_DIR=\"$PWD/build/procversion-data\" ./build/procversion-test'" }
+# Gate: the GOLDEN-OUTPUT snapshot — the human-step guard for INDEX_PROCESSING_VERSION.
+# Pins the EXACT on-disk output of the pure pipeline parts that fill the index fields
+# (csv_transactions + parse_location, extract_transactions + statement_year, and the
+# _chunk_text chunker) against a hand-written fixture, PLUS a sha256 fingerprint of the
+# two pure extraction modules (location.mojo + transactions.mojo). Goes red when the
+# indexed output changes → the failure message tells you to bump INDEX_PROCESSING_VERSION
+# and refresh the golden. Links the sibling libs like test-procversion (imports index.mojo);
+# runs from vault root so the fingerprint net can read the source files.
+test-golden = { cmd = "mkdir -p build && mojo build core/test/index/golden_output_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/golden-test && ./build/golden-test" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
@@ -142,4 +151,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-procversion", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-procversion", "test-golden", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
