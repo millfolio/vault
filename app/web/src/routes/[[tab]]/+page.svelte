@@ -7,6 +7,7 @@
   import SystemPanel from "$lib/components/SystemPanel.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
+  import { fmtEta, shortId } from "$lib/format";
   import type { ServerEvent, Session, MillfolioClient, StepState, ResultSpec } from "$lib/protocol";
 
   // One inline timeline: chat bubbles + the workflow events (status/debug/approval)
@@ -152,8 +153,6 @@
   let idxTotal = $state<number | null>(null);
   const gpuRing: { t: number; v: number }[] = [];
   let bkLast: { pending: number; t: number } | null = null;
-  const fmtEta = (s: number) =>
-    s >= 90 ? `${Math.round(s / 60)} min` : `${Math.max(1, Math.round(s))}s`;
 
   async function pollTelemetry() {
     // GPU: one instantaneous sample → averaged over the last 30s (client-side ring).
@@ -370,14 +369,9 @@
       setInterval(pollTelemetry, 2000);
     }
   });
-  // The engine's live id (e.g. `Qwen/Qwen2.5-3B-Instruct-int4`) vs a selectable id
-  // differ by org prefix + an `-int4` suffix, so match on the short, stripped form.
-  function shortId(id: string): string {
-    return id
-      .slice(id.lastIndexOf("/") + 1)
-      .toLowerCase()
-      .replace(/-int4$/, "");
-  }
+  // shortId (engine id ↔ selectable id) lives in $lib/format (pure + unit-tested):
+  // the live id (e.g. `Qwen/Qwen2.5-3B-Instruct-int4`) vs a selectable id differ by
+  // org prefix + an `-int4` suffix, so both compare on the short, stripped form.
   // Switch the on-device model: POST the choice (the server rewrites the engine
   // config + restarts the engine), then poll until the engine is back serving it.
   async function selectModel(id: string) {

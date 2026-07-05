@@ -97,4 +97,22 @@ describe("VaultPanel Records file cell (P1 regression)", () => {
     });
     expect(container.querySelector("td.rfile .srcname")).toBeNull();
   });
+
+  it("renders merchant and State · Country in one desc cell (P2 compact line)", async () => {
+    stubFetch({ vault: VAULT, transactions: TXNS });
+    const { container } = render(VaultPanel, { props: { initialSub: "records" } });
+
+    await waitFor(() => {
+      expect(container.querySelector("td.desc .merchant")).not.toBeNull();
+    });
+    const desc = container.querySelector("td.desc") as HTMLElement;
+    const merchant = desc.querySelector(".merchant") as HTMLElement;
+    const loc = desc.querySelector(".loc") as HTMLElement;
+    // Both live in the SAME cell (one line), not stacked in separate rows/cells.
+    expect(merchant.textContent).toContain("VERIZON WIRELESS");
+    expect(loc).not.toBeNull();
+    expect(loc.textContent).toContain("GA · USA");
+    // The full raw descriptor stays available on hover.
+    expect(merchant.getAttribute("title")).toBe("VERIZON WIRELESS PMT");
+  });
 });

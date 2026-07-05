@@ -12,6 +12,15 @@
     unlockAmountsNative as revealUnlockNative,
     hasNativeBridge,
   } from "$lib/reveal";
+  import {
+    fmtLoc,
+    fmtDate,
+    fmtMoney,
+    fmtBytes,
+    fmtDollars,
+    fileForAlias,
+    nameForAlias,
+  } from "$lib/format";
 
   // Vault sub-tabs: Records | Tags | Files. `initialSub` lets /tags deep-link open
   // the Tags sub-tab (the tag pills link there).
@@ -117,18 +126,7 @@
     { file: "file_0", date: "4/22", year: 2026, amount: 410.0, direction: "debit", desc: "DELTA AIR LINES ATLANTA", merchant: "DELTA AIR LINES", country: "USA", tags: ["travel"] },
   ];
 
-  // "State · Country" as plain text (compact/muted) — blank when neither is set.
-  function fmtLoc(t: Txn): string {
-    const st = (t.state ?? "").trim();
-    const co = (t.country ?? "").trim();
-    if (st && co) return `${st} · ${co}`;
-    return st || co;
-  }
-
-  // The date with its statement year appended when known (4/03 → 4/03/2026).
-  function fmtDate(t: Txn): string {
-    return t.year > 0 ? `${t.date}/${t.year}` : t.date;
-  }
+  // fmtLoc / fmtDate / fmtMoney / fmtBytes live in $lib/format (pure + unit-tested).
 
   // Records | Tags | Files | Operations sub-view switch inside the Vault tab.
   let sub = $state<"files" | "records" | "tags" | "operations">(
@@ -326,8 +324,7 @@
     }
     return { out, inc, net: inc - out };
   });
-  const money = (n: number) =>
-    "$" + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money = fmtDollars;
   // Re-pull records + tags after a tag is created (retag changes the .tags column).
   async function reloadAfterTag() {
     txLoaded = false;
@@ -460,23 +457,13 @@
     }
   }
 
-  // A signed, formatted amount: debit = money OUT (−), credit = money IN (+).
-  function fmtMoney(amount: number, direction: string): string {
-    const sign = direction === "debit" ? "-" : "+";
-    const abs = Math.abs(amount).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-    return `${sign}$${abs}`;
-  }
-
   // Map a hit's frontier-safe alias back to its real filename (from the manifest).
   function nameFor(alias: string): string {
-    return info?.files.find((f) => f.alias === alias)?.name ?? alias;
+    return nameForAlias(info?.files, alias);
   }
   // The indexed file behind a hit's alias (for opening it in the viewer).
   function fileFor(alias: string): VaultFile | undefined {
-    return info?.files.find((f) => f.alias === alias);
+    return fileForAlias(info?.files, alias);
   }
   // Open the document a search hit came from, in the in-app viewer.
   function openHit(alias: string) {
@@ -523,18 +510,6 @@
     query = "";
     hits = null;
     searchErr = null;
-  }
-
-  function fmtBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    const u = ["KB", "MB", "GB", "TB"];
-    let v = n / 1024;
-    let i = 0;
-    while (v >= 1024 && i < u.length - 1) {
-      v /= 1024;
-      i++;
-    }
-    return `${v.toFixed(v < 10 ? 1 : 0)} ${u[i]}`;
   }
 
   // ── Files: index arbitrary local folders/files + track them for re-index ──────

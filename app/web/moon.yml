@@ -8,3 +8,9 @@ tasks:
     toolchain: 'system'
     inputs: ['src/**/*', 'static/**/*', 'package.json']
     outputs: ['build/**/*']
+  # Headless component + unit tests (vitest + jsdom, offline). Also run in CI by
+  # web.yml; `moon run app-web:test` runs them locally, cached + affected-aware.
+  test:
+    command: 'npm test'
+    toolchain: 'system'
+    inputs: ['src/**/*', 'package.json', 'vitest.config.ts']

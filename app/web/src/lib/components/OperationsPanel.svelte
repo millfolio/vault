@@ -4,6 +4,7 @@
   // GET /api/operations (backed by operations.jsonl). Newest-first. The currently
   // running index job (if any) is pinned live at the top via /api/index/status.
   import { onMount } from "svelte";
+  import { opLabel, fmtDur } from "$lib/format";
 
   let { demo = false }: { demo?: boolean } = $props();
 
@@ -46,23 +47,7 @@
   let mock = $state(false);
   let idxStatus = $state<IndexStatus | null>(null);
 
-  function label(t: string): string {
-    if (t === "index") return "Index";
-    if (t === "reindex") return "Re-index";
-    if (t === "backfill") return "Backfill";
-    return t;
-  }
-
-  // finished - started, as a compact "3.2s" / "1m 04s" (guards against a clock
-  // skew that would make finished < started → shows "—").
-  function fmtDur(o: Operation): string {
-    const s = o.finished - o.started;
-    if (!Number.isFinite(s) || s < 0) return "—";
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    const rem = s % 60;
-    return `${m}m ${String(rem).padStart(2, "0")}s`;
-  }
+  // opLabel + fmtDur live in $lib/format (pure + unit-tested).
 
   function fmtWhen(epoch: number): string {
     if (!epoch || Number.isNaN(epoch)) return "—";
@@ -179,7 +164,7 @@
       {#each ops as o, i (o.started + "-" + o.type + "-" + i)}
         <li class="op">
           <div class="line1">
-            <span class="type">{label(o.type)}</span>
+            <span class="type">{opLabel(o.type)}</span>
             {#if o.status === "done"}
               <span class="badge ok">✓ done</span>
             {:else if o.status === "error"}
@@ -187,7 +172,7 @@
             {:else}
               <span class="badge">{o.status}</span>
             {/if}
-            <span class="dur">{fmtDur(o)}</span>
+            <span class="dur">{fmtDur(o.started, o.finished)}</span>
             <span class="counts">
               {#if typeof o.files === "number"}<span class="ct">{o.files} file{o.files === 1 ? "" : "s"}</span>{/if}
               {#if typeof o.txns === "number"}<span class="ct">{o.txns.toLocaleString()} txns</span>{/if}
