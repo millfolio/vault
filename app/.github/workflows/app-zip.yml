@@ -87,6 +87,7 @@ jobs:
       - name: Build web UI
         working-directory: app/web
         run: |
+          npm install -g npm@11   # node 22 ships npm ~10.9, which rejects the npm-11 lock
           npm ci
           npm run build
 

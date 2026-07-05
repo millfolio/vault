@@ -23,6 +23,9 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # Match the npm that generated package-lock.json (npm 11); node 22 ships npm
+      # ~10.9, which rejects an npm-11 lock with a spurious "Missing <pkg>" on `npm ci`.
+      - run: npm install -g npm@11
       - run: npm ci
       - run: npm run check
       - run: npm test
