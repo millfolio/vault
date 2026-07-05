@@ -38,10 +38,12 @@ struct Txn(Copyable, Movable):
     `tags` are derived category tags (e.g. `phone`, `travel`) materialised at index
     time from the description — empty at extraction, populated when read back from
     the index (see `select_txns`); multi-valued (see `vault.derive`).
-    `merchant`/`country`/`state` are the deterministic index-time location split of
-    `desc` (see `vault.extract.location`): `merchant` is the cleaned brand string,
-    `country` an ISO3 code (`""` when none), `state` a US 2-letter code (`""` when
-    none). Like `tags`, they're empty at extraction and filled from the index.
+    `merchant`/`country`/`state`/`city`/`zip` are the deterministic index-time
+    location split of `desc` (see `vault.extract.location`): `merchant` is the
+    cleaned brand string, `country` an ISO3 code (`""` when none), `state` a US
+    2-letter code, `city` the parsed city name (uppercase), `zip` the US 5-digit
+    zip — each `""` when absent. Like `tags`, they're empty at extraction and filled
+    from the index.
     """
 
     var date: String
@@ -52,6 +54,8 @@ struct Txn(Copyable, Movable):
     var merchant: String
     var country: String
     var state: String
+    var city: String
+    var zip: String
 
     def __init__(
         out self,
@@ -71,6 +75,8 @@ struct Txn(Copyable, Movable):
         self.merchant = String("")
         self.country = String("")
         self.state = String("")
+        self.city = String("")
+        self.zip = String("")
 
 
 @fieldwise_init
@@ -1441,6 +1447,8 @@ def select_txns(rows: List[TxnRow], file_alias: String) raises -> List[Txn]:
             t.merchant = r.merchant.copy()
             t.country = r.country.copy()
             t.state = r.state.copy()
+            t.city = r.city.copy()
+            t.zip = r.zip.copy()
             out.append(t^)
     return out^
 
