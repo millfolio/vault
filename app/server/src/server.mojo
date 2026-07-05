@@ -99,6 +99,7 @@ from store import (
     operations_records_array,
     delete_ask_records,
     system_json,
+    parse_progress_counter,
 )
 from json import loads
 
@@ -2658,15 +2659,20 @@ def _index_progress() -> String:
 
 
 def _index_status_json() raises -> String:
-    """{"state","detail"} for the folder-index job — same shape as the demo status.
-    `state` is idle|indexing|done|error."""
-    return (
-        '{"state":'
-        + json_escape(_index_read_state())
-        + ',"detail":'
-        + json_escape(_index_progress())
-        + "}"
-    )
+    """{"state","detail"[,"current","total"]} for the folder-index job — same shape
+    as the demo status. `state` is idle|indexing|done|error. When the progress line
+    carries a `[n/M]` per-file counter (the embedding phase), `current`/`total` are
+    included so the UI can show an "n of M files" bar; they're omitted otherwise
+    (scanning phase, non-file lines, done/idle)."""
+    var detail = _index_progress()
+    var counter = parse_progress_counter(detail)
+    var out = String('{"state":') + json_escape(_index_read_state())
+    out += ',"detail":' + json_escape(detail)
+    if counter[1] > 0:
+        out += ',"current":' + String(counter[0])
+        out += ',"total":' + String(counter[1])
+    out += "}"
+    return out
 
 
 # ── Operations history (operations.jsonl) ─────────────────────────────────────

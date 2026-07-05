@@ -30,6 +30,8 @@
   interface IndexStatus {
     state: "idle" | "indexing" | "done" | "error";
     detail: string;
+    current?: number; // present only during the per-file embedding phase ([n/M])
+    total?: number;
   }
 
   const MOCK_OPS: Operation[] = [
@@ -143,7 +145,14 @@
             <span class="badge running"><span class="spin" aria-hidden="true"></span>running</span>
             <span class="when">now</span>
           </div>
-          {#if idxStatus?.detail}
+          {#if idxStatus?.total && idxStatus.total > 0}
+            <div class="progress">
+              <div class="pbar" aria-hidden="true">
+                <div class="pfill" style={`width:${Math.min(100, ((idxStatus.current ?? 0) / idxStatus.total) * 100)}%`}></div>
+              </div>
+              <span class="pcount">{idxStatus.current ?? 0} of {idxStatus.total} files</span>
+            </div>
+          {:else if idxStatus?.detail}
             <p class="detail">{idxStatus.detail}</p>
           {/if}
         </li>
@@ -257,6 +266,31 @@
     font-size: 12px;
     color: var(--text-dim);
     word-break: break-word;
+  }
+  .progress {
+    margin: 8px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pbar {
+    flex: 1 1 auto;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .pfill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .pcount {
+    flex: none;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
   }
   .empty {
     padding: 20px 0;

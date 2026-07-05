@@ -40,6 +40,45 @@ def ask_record_line(
     return line
 
 
+def parse_progress_counter(detail: String) -> Tuple[Int, Int]:
+    """Pull a leading `[<current>/<total>]` counter out of an index-progress line.
+
+    The indexer prefixes each per-file embedding line with `  [n/M] …`; this reads
+    those two integers back so the UI can render an "n of M files" bar. Returns
+    `(current, total)`, or `(0, 0)` when the line has no such prefix (the scanning
+    phase, non-file log lines, or a done/idle state). Pure string scanning — no deps.
+    """
+    var s = detail
+    var n = s.byte_length()
+    var zero = ord("0")
+    var nine = ord("9")
+    var i = 0
+    # skip leading whitespace
+    while i < n and (ord(s[byte=i]) == ord(" ") or ord(s[byte=i]) == ord("\t")):
+        i += 1
+    if i >= n or ord(s[byte=i]) != ord("["):
+        return (0, 0)
+    i += 1
+    var cur = 0
+    var cur_digits = 0
+    while i < n and ord(s[byte=i]) >= zero and ord(s[byte=i]) <= nine:
+        cur = cur * 10 + (ord(s[byte=i]) - zero)
+        cur_digits += 1
+        i += 1
+    if cur_digits == 0 or i >= n or ord(s[byte=i]) != ord("/"):
+        return (0, 0)
+    i += 1
+    var tot = 0
+    var tot_digits = 0
+    while i < n and ord(s[byte=i]) >= zero and ord(s[byte=i]) <= nine:
+        tot = tot * 10 + (ord(s[byte=i]) - zero)
+        tot_digits += 1
+        i += 1
+    if tot_digits == 0 or i >= n or ord(s[byte=i]) != ord("]"):
+        return (0, 0)
+    return (cur, tot)
+
+
 def history_records_array(raw: String) -> String:
     """Turn the JSONL history file contents into a JSON array body `[<obj>,…]`,
     NEWEST FIRST (the file is appended oldest→newest, so we walk it in reverse).

@@ -11,6 +11,7 @@ from store import (
     history_records_array,
     delete_ask_records,
     system_json,
+    parse_progress_counter,
 )
 from json import loads
 
@@ -123,5 +124,22 @@ def main() raises:
         sj.find('"transcripts":"/tmp/millfolio/sessions/"') != -1,
         "transcripts path",
     )
+
+    # ── parse_progress_counter: pull [n/M] out of an index-progress line ─────────
+    var pc = parse_progress_counter(
+        "  [3/12] foo.pdf [pdf] Foo — 4 chunk(s), embedding…"
+    )
+    expect(pc[0] == 3 and pc[1] == 12, "parses '  [3/12] foo.pdf …' → (3,12)")
+    var pc2 = parse_progress_counter("Scanning folder…")
+    expect(pc2[0] == 0 and pc2[1] == 0, "no counter → (0,0)")
+    var pc3 = parse_progress_counter("")
+    expect(pc3[0] == 0 and pc3[1] == 0, "empty line → (0,0)")
+    var pc4 = parse_progress_counter("[128/128] done")
+    expect(
+        pc4[0] == 128 and pc4[1] == 128,
+        "no leading space still parses (128,128)",
+    )
+    var pc5 = parse_progress_counter("  [3/] foo")
+    expect(pc5[0] == 0 and pc5[1] == 0, "malformed (missing total) → (0,0)")
 
     print("ok: all store tests passed")
