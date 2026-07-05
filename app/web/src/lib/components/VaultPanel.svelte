@@ -1484,15 +1484,27 @@
     font-size: 11.5px;
     color: var(--text-dim);
   }
+  /* Merchant + "State · Country" share ONE compact line: merchant truncates on
+     the left, the location sits muted at the right of the wide desc column. */
+  .records .desc {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
   .records .desc .merchant {
-    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .records .desc .loc {
-    display: block;
-    margin-top: 1px;
+    flex: none;
+    margin-left: auto;
     font-size: 11px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   .records .act {
     width: 58px;
