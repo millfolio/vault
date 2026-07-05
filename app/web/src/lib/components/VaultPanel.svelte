@@ -1034,10 +1034,12 @@
                 <tr>
                   <td class="date">{fmtDate(t)}</td>
                   <td class="desc">
-                    <span class="merchant" title={t.desc}>{t.merchant && t.merchant.trim() ? t.merchant : t.desc}</span>
-                    {#if fmtLoc(t)}
-                      <span class="loc">{fmtLoc(t)}</span>
-                    {/if}
+                    <div class="descrow">
+                      <span class="merchant" title={t.desc}>{t.merchant && t.merchant.trim() ? t.merchant : t.desc}</span>
+                      {#if fmtLoc(t)}
+                        <span class="loc">{fmtLoc(t)}</span>
+                      {/if}
+                    </div>
                   </td>
                   <td class="num amt" class:out={t.direction === "debit"}>
                     {#if t.amount === null}<span class="masked" title="Locked — Show amounts">••••</span>{:else}{fmtMoney(t.amount, t.direction)}{/if}
@@ -1481,19 +1483,23 @@
   }
   /* Merchant + "State · Country" share ONE compact line: merchant truncates on
      the left, the location sits muted at the right of the wide desc column. */
-  .records .desc {
+  /* The desc <td> stays a real table cell so vertical-align: middle (from
+     .records td) lines the merchant up with the date/amount; the merchant + loc
+     flex row is an INNER div, so the cell isn't pulled out of table layout —
+     which was leaving the merchant riding high at the cell's top. */
+  .records .descrow {
     display: flex;
     align-items: center;
     gap: 10px;
   }
-  .records .desc .merchant {
+  .records .descrow .merchant {
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .records .desc .loc {
+  .records .descrow .loc {
     flex: none;
     margin-left: auto;
     font-size: 11px;
