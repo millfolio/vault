@@ -1213,7 +1213,7 @@ def tags_report_json() raises -> String:
 
 def transactions_json(include_amounts: Bool = True) raises -> String:
     """`{"transactions":[{"file","date","year","amount":N|null,"direction","desc",
-    "merchant","country","state","tags":[…]}]}` over the stored transactions in
+    "merchant","country","state","city","zip","tags":[…]}]}` over the stored transactions in
     as-stored order — the payload the
     app server's GET /api/transactions returns for the Vault → Records view. `amount`
     is a bare JSON number (non-negative magnitude); the sign is in `direction`
@@ -1244,6 +1244,8 @@ def transactions_json(include_amounts: Bool = True) raises -> String:
         out += ',"merchant":' + _json_str(r.merchant)
         out += ',"country":' + _json_str(r.country)
         out += ',"state":' + _json_str(r.state)
+        out += ',"city":' + _json_str(r.city)
+        out += ',"zip":' + _json_str(r.zip)
         out += ',"tags":['
         for k in range(len(r.tags)):
             if k > 0:

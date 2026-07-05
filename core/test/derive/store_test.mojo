@@ -42,6 +42,8 @@ def _row(var desc: String, var tags: List[String]) -> TxnRow:
         String(""),  # merchant
         String(""),  # country
         String(""),  # state
+        String(""),  # city
+        String(""),  # zip
     )
 
 

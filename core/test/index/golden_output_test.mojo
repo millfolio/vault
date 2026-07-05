@@ -59,10 +59,10 @@ comptime TRANSACTIONS_SRC = "core/src/vault/extract/transactions.mojo"
 # Set from a first run (the test PRINTS the computed value when the constant is
 # "" — see the fingerprint block in main()).
 comptime EXPECTED_LOCATION_FP = (
-    "542356856ca44ae371c523804832af26f532c6c42394ce1c6c7a2b07d8eaaf23"
+    "0270c52e9b7fc891803624f70770db553e3c3aac4b7b95e3c6ddf54a01eedda9"
 )
 comptime EXPECTED_TRANSACTIONS_FP = (
-    "ba3001c9c853ab1c27e1a9f27244a2f0d640e397dd5b83645a61bee5a8d95b4f"
+    "de4ffe7417623ed2967d30d991287eeebaa097b0b64c5a9663c4dc8be6c62a3d"
 )
 
 
@@ -105,6 +105,17 @@ def _golden_csv() raises -> List[List[String]]:
             String("-12.34"),
         ]
     )
+    # A real bank-descriptor shape carrying a CITY + ZIP between the street and the
+    # state — pins the parse_location city/zip walk (MALL marker stop; standalone
+    # 5-digit zip before the state).
+    rows.append(
+        [
+            String("03/22/2026"),
+            String("SAFEWAY #3031 85 WESTLAKE MALL DALY CITY 94015 CA USA"),
+            String("Purchase"),
+            String("-56.78"),
+        ]
+    )
     return rows^
 
 
@@ -129,7 +140,7 @@ def _golden_statement() raises -> String:
 def main() raises:
     # ── CSV path: csv_transactions + parse_location, EXACT per-row output ──────
     var ct = csv_transactions(_golden_csv())
-    assert_equal(len(ct), 3, BUMP_MSG + " [csv row count]")
+    assert_equal(len(ct), 4, BUMP_MSG + " [csv row count]")
 
     # Row 0 — LOCATED: STARBUCKS STORE 04821 SEATTLE WA USA, a $4.50 purchase.
     assert_equal(ct[0].date, "1/15", BUMP_MSG + " [csv[0].date]")
@@ -147,6 +158,9 @@ def main() raises:
     )
     assert_equal(loc0.state, "WA", BUMP_MSG + " [loc0.state]")
     assert_equal(loc0.country, "USA", BUMP_MSG + " [loc0.country]")
+    # No zip on this card descriptor; the city is the token before the state.
+    assert_equal(loc0.city, "SEATTLE", BUMP_MSG + " [loc0.city]")
+    assert_equal(loc0.zip, "", BUMP_MSG + " [loc0.zip]")
 
     # Row 1 — NON-LOCATED: an ACH transfer, a $100 credit, no geo.
     assert_equal(ct[1].date, "2/3", BUMP_MSG + " [csv[1].date]")
@@ -179,6 +193,20 @@ def main() raises:
     )
     assert_equal(loc2.state, "WA", BUMP_MSG + " [loc2.state]")
     assert_equal(loc2.country, "USA", BUMP_MSG + " [loc2.country]")
+
+    # Row 3 — CITY + ZIP: `… WESTLAKE MALL DALY CITY 94015 CA USA`. The zip sits
+    # between the city and the state; the city walk stops at the MALL marker.
+    assert_equal(
+        ct[3].desc,
+        "SAFEWAY #3031 85 WESTLAKE MALL DALY CITY 94015 CA USA",
+        BUMP_MSG + " [csv[3].desc]",
+    )
+    var loc3 = parse_location(ct[3].desc)
+    assert_equal(loc3.merchant, "SAFEWAY", BUMP_MSG + " [loc3.merchant]")
+    assert_equal(loc3.city, "DALY CITY", BUMP_MSG + " [loc3.city]")
+    assert_equal(loc3.zip, "94015", BUMP_MSG + " [loc3.zip]")
+    assert_equal(loc3.state, "CA", BUMP_MSG + " [loc3.state]")
+    assert_equal(loc3.country, "USA", BUMP_MSG + " [loc3.country]")
 
     # ── PDF/text path: extract_transactions + statement_year + parse_location ──
     var ext = extract_transactions(_golden_statement())

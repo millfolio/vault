@@ -1,5 +1,5 @@
-"""Location — a deterministic (merchant, country, state) split of a bank/card
-transaction descriptor. No model call: a fast, pure heuristic run ONCE per
+"""Location — a deterministic (merchant, country, state, city, zip) split of a
+bank/card transaction descriptor. No model call: a fast, pure heuristic run ONCE per
 transaction at index time, its result persisted on the `TxnRow` so generated
 programs can group/filter by merchant or geography without re-parsing.
 
@@ -227,7 +227,78 @@ def _markers() -> List[String]:
         String("RD"),
         String("STE"),
         String("SUITE"),
+        String("MALL"),
     ]
+
+
+def _city_markers() -> List[String]:
+    """Address-line marker words used to STOP the city walk (a superset of the
+    merchant markers — merchant extraction stays on `_markers()` unchanged). Once
+    one of these is hit walking backward from the zip, the tokens before it are an
+    address/street, not the city name."""
+    return [
+        String("BLVD"),
+        String("AVE"),
+        String("AVENUE"),
+        String("ST"),
+        String("STREET"),
+        String("MALL"),
+        String("WAY"),
+        String("RD"),
+        String("DR"),
+        String("LN"),
+        String("STE"),
+        String("SUITE"),
+        String("PKWY"),
+        String("HWY"),
+    ]
+
+
+def _last_n(s: String, n: Int) -> String:
+    """The last `n` bytes of `s` (caller guarantees `byte_length() >= n`)."""
+    var b = s.as_bytes()
+    var out = String("")
+    for i in range(len(b) - n, len(b)):
+        out += chr(Int(b[i]))
+    return out^
+
+
+def _strip_dot(s: String) -> String:
+    """Drop a single trailing `.` (so `AVE.` matches the marker `AVE`)."""
+    var b = s.as_bytes()
+    var n = len(b)
+    if n > 0 and Int(b[n - 1]) == 46:  # '.'
+        var out = String("")
+        for i in range(n - 1):
+            out += chr(Int(b[i]))
+        return out^
+    return s.copy()
+
+
+def _alpha_glued_zip(s: String) -> String:
+    """If `s` is an all-ALPHA prefix immediately followed by EXACTLY 5 trailing
+    digits (`GROVE93950`), return the alpha prefix (`GROVE`) — the caller then
+    reads the 5-digit zip off the tail. Empty when `s` isn't that shape (a plain
+    word, a 6+-digit run, a digit-led token)."""
+    var b = s.as_bytes()
+    var n = len(b)
+    if n < 6:  # need >= 1 alpha + 5 digits
+        return String("")
+    # The last 5 bytes must be digits…
+    for i in range(n - 5, n):
+        var c = Int(b[i])
+        if c < 48 or c > 57:
+            return String("")
+    # …and everything before them a non-empty run of ASCII letters (so a 6-digit
+    # token, or `1234A5678`, is rejected — the split is alpha-then-5-digits only).
+    for i in range(n - 5):
+        var c = Int(b[i])
+        if not ((c >= 65 and c <= 90) or (c >= 97 and c <= 122)):
+            return String("")
+    var out = String("")
+    for i in range(n - 5):
+        out += chr(Int(b[i]))
+    return out^
 
 
 def _strip_trailing_paren(desc: String) raises -> String:
@@ -289,30 +360,45 @@ def _refine_merchant(var merch: String) raises -> String:
 
 @fieldwise_init
 struct Location(Copyable, Movable):
-    """A best-effort (merchant, country, state) split of one raw descriptor.
-    `country` is an ISO3 code (`""` when none); `state` is a US 2-letter code
-    (`""` when none); `merchant` is always non-empty (falls back to the first
-    token)."""
+    """A best-effort (merchant, country, state, city, zip) split of one raw
+    descriptor. `country` is an ISO3 code (`""` when none); `state` is a US
+    2-letter code (`""` when none); `city` is the name words that trail the
+    address/street just before the zip/state (`""` when none); `zip` is a US
+    5-digit code (`""` when none); `merchant` is always non-empty (falls back to
+    the first token)."""
 
     var merchant: String
     var country: String  # ISO3, "" when none
     var state: String  # US 2-letter, "" when none
+    var city: String  # trailing city name, "" when none
+    var zip: String  # US 5-digit, "" when none
 
 
 def parse_location(desc: String) raises -> Location:
-    """Split one raw transaction descriptor into (merchant, country, state).
-    Deterministic + fast (no model). See the module docstring for the heuristic.
+    """Split one raw transaction descriptor into
+    (merchant, country, state, city, zip). Deterministic + fast (no model). See
+    the module docstring for the heuristic; city/zip trail the state (descriptors
+    are `… <CITY words> [<ZIP>] <STATE> <COUNTRY>`, with the zip — a standalone
+    5-digit token or a 5-digit suffix glued to a city word — between city and
+    state).
     """
     var iso3 = _iso3()
     var states = _states()
     var markers = _markers()
+    var city_markers = _city_markers()
 
     # Strip a trailing parenthetical annotation (e.g. a bank's `(return)` /
     # `(reversal)` marker) so the geo tokens are trailing again; parse over that.
     var cleaned = _strip_trailing_paren(desc)
     var toks = _tokens(cleaned)
     if len(toks) == 0:
-        return Location(String(cleaned.strip()), String(""), String(""))
+        return Location(
+            String(cleaned.strip()),
+            String(""),
+            String(""),
+            String(""),
+            String(""),
+        )
 
     var country = String("")
     var state = String("")
@@ -339,6 +425,49 @@ def parse_location(desc: String) raises -> Location:
             state = st_up^
             keep -= 1
 
+    # zip from the token now trailing (between city and state): a standalone
+    # 5-digit token, OR a 5-digit suffix glued to a city word (`GROVE93950` →
+    # city-word `GROVE` + zip `93950`). `city_hi` is the top index the city walk
+    # scans backward from (inclusive); `glued_prefix`/`glued_idx` carry the split
+    # city word so the walk reads it in place of the raw glued token.
+    var zip = String("")
+    var city_hi = keep - 1
+    var glued_prefix = String("")
+    var glued_idx = -1
+    if keep > 0:
+        ref last = toks[keep - 1]
+        if _all_digit(last) and last.byte_length() == 5:
+            zip = last.copy()
+            city_hi = keep - 2  # the standalone zip is consumed
+        else:
+            var pref = _alpha_glued_zip(last)
+            if pref.byte_length() > 0:
+                zip = _last_n(last, 5)
+                glued_prefix = pref^
+                glued_idx = keep - 1  # the alpha remainder is a city word
+                city_hi = keep - 1
+
+    # city = the consecutive ALPHA, non-marker tokens immediately before the zip
+    # (or the state, when there's no zip), walking backward — stopping at the first
+    # address marker (dot-stripped so `AVE.` matches), a token with a digit, or a
+    # `#…` token (both are non-alpha → they end the walk).
+    var city_rev = List[String]()
+    var j = city_hi
+    while j >= 0:
+        var raw = glued_prefix.copy() if j == glued_idx else toks[j].copy()
+        var probe = _strip_dot(_upper(raw))
+        if not _all_alpha(probe):
+            break
+        if _in(probe, city_markers):
+            break
+        city_rev.append(raw^)
+        j -= 1
+    var city = String("")
+    for k in range(len(city_rev) - 1, -1, -1):  # collected trailing→leading
+        if city.byte_length() > 0:
+            city += " "
+        city += city_rev[k]
+
     # merchant = leading brand tokens, stopping at the first address-ish token or
     # the (already-consumed) geo region.
     var merch = String("")
@@ -361,4 +490,4 @@ def parse_location(desc: String) raises -> Location:
         merch = toks[
             0
         ].copy()  # nothing survived → fall back to the first token
-    return Location(_refine_merchant(merch^), country^, state^)
+    return Location(_refine_merchant(merch^), country^, state^, city^, zip^)

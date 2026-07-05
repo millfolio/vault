@@ -292,6 +292,8 @@ def main() raises:
             String(""),  # merchant (none)
             String(""),  # country
             String(""),  # state
+            String(""),  # city
+            String(""),  # zip
         )
     )
     rows.append(
@@ -307,6 +309,8 @@ def main() raises:
             String("Rent"),  # merchant
             String(""),  # country
             String(""),  # state
+            String("Metropolis"),  # city
+            String("90210"),  # zip
         )
     )
     rows.append(
@@ -322,6 +326,8 @@ def main() raises:
             String("Coffee Shop"),  # merchant
             String("USA"),  # country
             String("WA"),  # state
+            String("Seattle"),  # city
+            String("98101"),  # zip
         )
     )
     var back = tsv_to_txn_rows(txn_rows_to_tsv(rows))
@@ -380,17 +386,43 @@ def main() raises:
         and legacy8[0].merchant == ""
         and legacy8[0].state == ""
     ) and ok
-    # Location columns round-trip (escaped merchant + ISO country + US state).
+    # Pre-city/zip 11-column row (…/state, no city/zip) parses with empty city/zip.
+    var legacy11 = tsv_to_txn_rows(
+        String(
+            "file_0\t4/02\t500.0\tcredit\tPay\tphone\t5\t2026\tPay\tUSA\tWA\n"
+        )
+    )
+    _say(
+        len(legacy11) == 1
+        and legacy11[0].state == "WA"
+        and legacy11[0].city == ""
+        and legacy11[0].zip == "",
+        "transactions: legacy 11-col row parses with empty city/zip",
+    )
+    ok = (
+        len(legacy11) == 1 and legacy11[0].city == "" and legacy11[0].zip == ""
+    ) and ok
+    # Location columns round-trip (escaped merchant + ISO country + US state + city
+    # + zip).
     var loc_rt = (
         back[2].merchant == "Coffee Shop"
         and back[2].country == "USA"
         and back[2].state == "WA"
+        and back[2].city == "Seattle"
+        and back[2].zip == "98101"
+        and back[1].city == "Metropolis"
+        and back[1].zip == "90210"
         and back[0].merchant == ""
         and back[0].country == ""
+        and back[0].city == ""
+        and back[0].zip == ""
     )
     _say(
         loc_rt,
-        "transactions: location columns round-trip (merchant/country/state)",
+        (
+            "transactions: location columns round-trip"
+            " (merchant/country/state/city/zip)"
+        ),
     )
     ok = loc_rt and ok
 
@@ -544,6 +576,8 @@ def main() raises:
             String(""),
             String(""),
             String(""),
+            String(""),
+            String(""),
         )
 
     # file_a (Jan–Feb) and file_b (Feb–Mar) OVERLAP on the 2/10 charge → dedup to one.
@@ -629,6 +663,8 @@ def main() raises:
             String(""),
             String(""),
             String(""),
+            String(""),
+            String(""),
         )
     )
     isorows.append(
@@ -644,6 +680,8 @@ def main() raises:
             String(""),
             String(""),
             String(""),
+            String(""),
+            String(""),
         )
     )
     isorows.append(
@@ -656,6 +694,8 @@ def main() raises:
             List[String](),
             0,
             0,
+            String(""),
+            String(""),
             String(""),
             String(""),
             String(""),

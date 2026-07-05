@@ -100,6 +100,8 @@ def main() raises:
                 String(""),
                 String(""),
                 String(""),
+                String(""),
+                String(""),
             )
         )
     write_txn_rows(rows)

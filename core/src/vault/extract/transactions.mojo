@@ -1205,11 +1205,14 @@ struct TxnRow(Copyable, Movable):
     # Deterministic location split of `desc`, computed ONCE when this row is built
     # at index time (see `vault.extract.location.parse_location`): `merchant` is the
     # cleaned brand string, `country` an ISO3 code (`""` when none), `state` a US
-    # 2-letter code (`""` when none). Append-only TSV columns — rows written before
-    # these existed parse with all three empty (see `tsv_to_txn_rows`).
+    # 2-letter code (`""` when none), `city` the trailing city name (`""` when none),
+    # `zip` a US 5-digit code (`""` when none). Append-only TSV columns — rows written
+    # before these existed parse with them empty (see `tsv_to_txn_rows`).
     var merchant: String
     var country: String
     var state: String
+    var city: String
+    var zip: String
 
 
 def _tags_to_field(tags: List[String]) -> String:
@@ -1239,10 +1242,10 @@ def _field_to_tags(s: String) raises -> List[String]:
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
     """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc <TAB>
     comma-joined-tags <TAB> added_gen <TAB> year <TAB> escaped_merchant <TAB>
-    country <TAB> state, one per line. Trailing columns are append-only for
-    backward compatibility: rows written before `tags`/`added_gen`/`year`/
-    `merchant`/`country`/`state` existed parse with empty tags / gen 0 / year 0 /
-    empty location (see `tsv_to_txn_rows`)."""
+    country <TAB> state <TAB> escaped_city <TAB> zip, one per line. Trailing columns
+    are append-only for backward compatibility: rows written before `tags`/
+    `added_gen`/`year`/`merchant`/`country`/`state`/`city`/`zip` existed parse with
+    empty tags / gen 0 / year 0 / empty location (see `tsv_to_txn_rows`)."""
     var out = String("")
     for i in range(len(rows)):
         ref r = rows[i]
@@ -1268,6 +1271,10 @@ def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
             + r.country
             + "\t"
             + r.state
+            + "\t"
+            + _esc(r.city)
+            + "\t"
+            + r.zip
             + "\n"
         )
     return out^
@@ -1286,7 +1293,8 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
         # Backward-compatible: rows written before the tags column (5 fields)
         # parse with no tags; rows before added_gen (6 fields) parse as gen 0;
         # rows before year (7 fields) parse as year 0; rows before the location
-        # columns (8 fields) parse with empty merchant/country/state.
+        # columns (8 fields) parse with empty merchant/country/state; rows before
+        # city/zip (11 fields) parse with empty city/zip.
         var tags = List[String]()
         if len(cols) >= 6:
             tags = _field_to_tags(String(cols[5]))
@@ -1305,6 +1313,12 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
         var state = String("")
         if len(cols) >= 11:
             state = String(cols[10].strip())
+        var city = String("")
+        if len(cols) >= 12:
+            city = _unesc(String(cols[11]))
+        var zip = String("")
+        if len(cols) >= 13:
+            zip = String(cols[12].strip())
         rows.append(
             TxnRow(
                 _unesc(String(cols[0])),
@@ -1318,6 +1332,8 @@ def tsv_to_txn_rows(text: String) raises -> List[TxnRow]:
                 merchant^,
                 country^,
                 state^,
+                city^,
+                zip^,
             )
         )
     return rows^

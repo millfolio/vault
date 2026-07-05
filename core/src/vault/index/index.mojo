@@ -77,7 +77,8 @@ comptime EMBED_BATCH = 64  # chunks per /v1/embeddings request
 # index built before this mechanism landed counts as older and rebuilds once.
 # v1: `.merchant`/`.state`/`.country` location fields filled by `parse_location`.
 # v2: parse_location: strip trailing parenthetical annotations (e.g. `(return)`).
-comptime INDEX_PROCESSING_VERSION = 2
+# v3: parse_location: extract city + zip.
+comptime INDEX_PROCESSING_VERSION = 3
 
 
 @fieldwise_init
@@ -849,6 +850,8 @@ def build_index(
                         loc.merchant.copy(),
                         loc.country.copy(),
                         loc.state.copy(),
+                        loc.city.copy(),
+                        loc.zip.copy(),
                     )
                 )
         else:
@@ -883,6 +886,8 @@ def build_index(
                             loc.merchant.copy(),
                             loc.country.copy(),
                             loc.state.copy(),
+                            loc.city.copy(),
+                            loc.zip.copy(),
                         )
                     )
 

@@ -106,6 +106,71 @@ def main() raises:
     var h = parse_location(String("cafe nero london gbr"))
     ok = _expect("lowercase ISO3 recognized", h.country == "GBR", ok)
 
+    # ── city + zip: `… <CITY> [<ZIP>] <STATE> <COUNTRY>` (verified on REAL
+    # descriptors). Zip sits BETWEEN city and state; city = the consecutive alpha,
+    # non-marker tokens before it, walking back to the first address marker / digit
+    # token / `#…`.
+
+    # Standalone 5-digit zip; city stops at the STREET marker (not the DALY prefix).
+    var c1 = parse_location(
+        String("CITY OF DALY CITY-UTIL333 90TH STREET DALY CITY 94015 CA USA")
+    )
+    ok = _expect("c1 city DALY CITY", c1.city == "DALY CITY", ok)
+    ok = _expect("c1 zip 94015", c1.zip == "94015", ok)
+    ok = _expect("c1 state CA", c1.state == "CA", ok)
+    ok = _expect("c1 country USA", c1.country == "USA", ok)
+
+    # MALL is a city-stop marker.
+    var c2 = parse_location(
+        String("SAFEWAY #3031 85 WESTLAKE MALL DALY CITY 94015 CA USA")
+    )
+    ok = _expect("c2 city DALY CITY", c2.city == "DALY CITY", ok)
+    ok = _expect("c2 zip 94015", c2.zip == "94015", ok)
+
+    # Multi-word city, AVE marker stop.
+    var c3 = parse_location(
+        String("TRADER JOE'S #187 QPS301 MCLELLAN AVE SO SAN FRAN 94080 CA USA")
+    )
+    ok = _expect("c3 city SO SAN FRAN", c3.city == "SO SAN FRAN", ok)
+    ok = _expect("c3 zip 94080", c3.zip == "94080", ok)
+
+    # Glued zip: `GROVE93950` → city word `GROVE` + zip `93950`.
+    var c4 = parse_location(
+        String(
+            "ARAMARK ASILOMAR FOOD 800 ASILOMAR BLVD PACIFIC GROVE93950 CA USA"
+        )
+    )
+    ok = _expect("c4 city PACIFIC GROVE", c4.city == "PACIFIC GROVE", ok)
+    ok = _expect("c4 zip 93950 (glued split)", c4.zip == "93950", ok)
+
+    # The TRAILING city occurrence (before the zip) wins over an earlier one.
+    var c5 = parse_location(
+        String("LUCKY #707 DALY CITY 6843 MISSION BLVD DALY CITY 94015 CA USA")
+    )
+    ok = _expect("c5 city DALY CITY (trailing)", c5.city == "DALY CITY", ok)
+    ok = _expect("c5 zip 94015", c5.zip == "94015", ok)
+
+    # A phone number (a digit token) precedes the zip → no city, zip still parses.
+    var c6 = parse_location(
+        String("SP * COOP HOME GOODS 4941 EASTERN AVE. 8883161886 90201 CA USA")
+    )
+    ok = _expect("c6 city empty (phone precedes zip)", c6.city == "", ok)
+    ok = _expect("c6 zip 90201", c6.zip == "90201", ok)
+    ok = _expect("c6 state CA", c6.state == "CA", ok)
+
+    # No-zip card descriptor: city before the state, zip empty.
+    var c7 = parse_location(String("STARBUCKS STORE 04821 SEATTLE WA USA"))
+    ok = _expect("c7 city SEATTLE", c7.city == "SEATTLE", ok)
+    ok = _expect("c7 zip empty", c7.zip == "", ok)
+    ok = _expect("c7 state WA", c7.state == "WA", ok)
+
+    # No-zip, multi-word city; the store-number digit token ends the walk.
+    var c8 = parse_location(
+        String("WHOLE FOODS MKT 55120 SAN FRANCISCO CA USA")
+    )
+    ok = _expect("c8 city SAN FRANCISCO", c8.city == "SAN FRANCISCO", ok)
+    ok = _expect("c8 zip empty", c8.zip == "", ok)
+
     print()
     if ok:
         print("ALL CHECKS PASSED")
