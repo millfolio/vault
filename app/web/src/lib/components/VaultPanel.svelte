@@ -102,14 +102,27 @@
     amount: number | null; // null = withheld until the Touch-ID gate is passed
     direction: string;
     desc: string;
+    // Deterministic location split computed at index time (sparse — only
+    // card-style descriptors carry these; transfers/checking rows are blank).
+    merchant?: string; // cleaned brand string ("" → fall back to desc)
+    country?: string; // ISO3 code ("" → omit)
+    state?: string; // US 2-letter code ("" → omit)
     tags: string[];
   }
   const MOCK_TXNS: Txn[] = [
-    { file: "file_2", date: "4/03", year: 2026, amount: 85.0, direction: "debit", desc: "VERIZON WIRELESS", tags: ["phone"] },
+    { file: "file_2", date: "4/03", year: 2026, amount: 85.0, direction: "debit", desc: "VERIZON WIRELESS PMT 800-922-0204 GA", merchant: "VERIZON WIRELESS", country: "USA", state: "GA", tags: ["phone"] },
     { file: "file_2", date: "4/11", year: 2026, amount: 52.1, direction: "credit", desc: "PAYROLL DEPOSIT", tags: [] },
-    { file: "file_2", date: "4/18", year: 2026, amount: 128.44, direction: "debit", desc: "WHOLE FOODS MARKET", tags: ["groceries"] },
-    { file: "file_0", date: "4/22", year: 2026, amount: 410.0, direction: "debit", desc: "DELTA AIR LINES", tags: ["travel"] },
+    { file: "file_2", date: "4/18", year: 2026, amount: 128.44, direction: "debit", desc: "WHOLE FOODS MKT #123 SEATTLE WA", merchant: "WHOLE FOODS", country: "USA", state: "WA", tags: ["groceries"] },
+    { file: "file_0", date: "4/22", year: 2026, amount: 410.0, direction: "debit", desc: "DELTA AIR LINES ATLANTA", merchant: "DELTA AIR LINES", country: "USA", tags: ["travel"] },
   ];
+
+  // "State · Country" as plain text (compact/muted) — blank when neither is set.
+  function fmtLoc(t: Txn): string {
+    const st = (t.state ?? "").trim();
+    const co = (t.country ?? "").trim();
+    if (st && co) return `${st} · ${co}`;
+    return st || co;
+  }
 
   // The date with its statement year appended when known (4/03 → 4/03/2026).
   function fmtDate(t: Txn): string {
@@ -1006,7 +1019,7 @@
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Description</th>
+                <th>Merchant</th>
                 <th class="num">Amount</th>
                 <th>Tags</th>
                 <th>File</th>
@@ -1017,7 +1030,12 @@
               {#each filteredTxns as t, i (i)}
                 <tr>
                   <td class="date">{fmtDate(t)}</td>
-                  <td class="desc">{t.desc}</td>
+                  <td class="desc">
+                    <span class="merchant" title={t.desc}>{t.merchant && t.merchant.trim() ? t.merchant : t.desc}</span>
+                    {#if fmtLoc(t)}
+                      <span class="loc">{fmtLoc(t)}</span>
+                    {/if}
+                  </td>
                   <td class="num amt" class:out={t.direction === "debit"}>
                     {#if t.amount === null}<span class="masked" title="Locked — Show amounts">••••</span>{:else}{fmtMoney(t.amount, t.direction)}{/if}
                   </td>
@@ -1450,6 +1468,16 @@
     margin-left: auto;
     font-size: 11.5px;
     color: var(--text-dim);
+  }
+  .records .desc .merchant {
+    display: block;
+  }
+  .records .desc .loc {
+    display: block;
+    margin-top: 1px;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
   }
   .records .act {
     width: 58px;
