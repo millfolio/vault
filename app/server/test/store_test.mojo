@@ -91,14 +91,12 @@ def main() raises:
     var sj = system_json(
         "/Users/x",
         "v9",
-        "qwen2.5",
         "/Users/x/.config/millfolio",
         "/Users/x/.config/millfolio/stats.jsonl",
         "/Users/x/.config/millfolio/asks.jsonl",
     )
     _ = loads(sj)  # valid JSON object
     expect(sj.find('"version":"v9"') != -1, "version")
-    expect(sj.find('"model":"qwen2.5"') != -1, "model")
     expect(sj.find('"dataDir":"/Users/x/.config/millfolio"') != -1, "dataDir")
     expect(
         sj.find('"asksFile":"/Users/x/.config/millfolio/asks.jsonl"') != -1,
