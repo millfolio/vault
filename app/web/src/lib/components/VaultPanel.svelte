@@ -115,14 +115,16 @@
     // Deterministic location split computed at index time (sparse — only
     // card-style descriptors carry these; transfers/checking rows are blank).
     merchant?: string; // cleaned brand string ("" → fall back to desc)
+    city?: string; // parsed city ("" → omit); title-cased for display
     country?: string; // ISO3 code ("" → omit)
     state?: string; // US 2-letter code ("" → omit)
+    zip?: string; // parsed US zip ("" → omit) — not displayed, kept for future use
     tags: string[];
   }
   const MOCK_TXNS: Txn[] = [
     { file: "file_2", date: "4/03", year: 2026, amount: 85.0, direction: "debit", desc: "VERIZON WIRELESS PMT 800-922-0204 GA", merchant: "VERIZON WIRELESS", country: "USA", state: "GA", tags: ["phone"] },
     { file: "file_2", date: "4/11", year: 2026, amount: 52.1, direction: "credit", desc: "PAYROLL DEPOSIT", tags: [] },
-    { file: "file_2", date: "4/18", year: 2026, amount: 128.44, direction: "debit", desc: "WHOLE FOODS MKT #123 SEATTLE WA", merchant: "WHOLE FOODS", country: "USA", state: "WA", tags: ["groceries"] },
+    { file: "file_2", date: "4/18", year: 2026, amount: 128.44, direction: "debit", desc: "WHOLE FOODS MKT #123 SEATTLE WA", merchant: "WHOLE FOODS", city: "SEATTLE", country: "USA", state: "WA", tags: ["groceries"] },
     { file: "file_0", date: "4/22", year: 2026, amount: 410.0, direction: "debit", desc: "DELTA AIR LINES ATLANTA", merchant: "DELTA AIR LINES", country: "USA", tags: ["travel"] },
   ];
 

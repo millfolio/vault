@@ -2,17 +2,31 @@
 // framework-free and side-effect-free so they can be unit-tested headless (no DOM,
 // no network) — the highest-value, lowest-flake coverage.
 
-/** A location-bearing row (only `state`/`country` are read). */
+/** A location-bearing row (city/state/country are read). */
 export interface LocLike {
+  city?: string;
   state?: string;
   country?: string;
 }
-/** "State · Country" as compact text — blank when neither is set. */
+/** Title-case a descriptor city for display ("DALY CITY" → "Daly City",
+ * "SO SAN FRAN" → "So San Fran"). Descriptors arrive uppercase. */
+function titleCase(s: string): string {
+  return s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+/**
+ * Compact location text for a transaction row:
+ *   city + state + country → "Daly City, CA · USA"
+ *   state + country        → "CA · USA"
+ *   (city or country alone falls back to what's available)
+ * Blank when nothing is set.
+ */
 export function fmtLoc(t: LocLike): string {
+  const city = (t.city ?? "").trim();
   const st = (t.state ?? "").trim();
   const co = (t.country ?? "").trim();
-  if (st && co) return `${st} · ${co}`;
-  return st || co;
+  const place = city && st ? `${titleCase(city)}, ${st}` : city ? titleCase(city) : st;
+  if (place && co) return `${place} · ${co}`;
+  return place || co;
 }
 
 /** A dated row: the raw `M/D` token plus a statement `year` (0 = unknown). */

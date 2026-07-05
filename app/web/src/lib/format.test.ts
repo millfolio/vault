@@ -26,6 +26,15 @@ describe("fmtLoc", () => {
     expect(fmtLoc({ state: "  ", country: "" })).toBe("");
     expect(fmtLoc({ state: " CA " })).toBe("CA");
   });
+  it("prepends the city, title-cased, before the state", () => {
+    expect(fmtLoc({ city: "DALY CITY", state: "CA", country: "USA" })).toBe("Daly City, CA · USA");
+    expect(fmtLoc({ city: "SEATTLE", state: "WA", country: "USA" })).toBe("Seattle, WA · USA");
+    expect(fmtLoc({ city: "SO SAN FRAN", state: "CA", country: "USA" })).toBe("So San Fran, CA · USA");
+  });
+  it("handles a city without a state, and no city (unchanged)", () => {
+    expect(fmtLoc({ city: "DALY CITY", country: "USA" })).toBe("Daly City · USA");
+    expect(fmtLoc({ city: "", state: "CA", country: "USA" })).toBe("CA · USA");
+  });
 });
 
 describe("fmtDate", () => {
