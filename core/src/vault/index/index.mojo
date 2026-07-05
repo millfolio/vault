@@ -799,6 +799,16 @@ def _extract_txn_rows(
     return rows^
 
 
+def prepare_index_run(base: String, force: Bool) raises:
+    """Public entrypoint for the app-server orchestrator's per-run setup step. The
+    orchestrator drives an index run as `prepare → index_one_file* → finalize_index`
+    (the same decomposition `build_index` uses internally); this is the run-level
+    fresh-vs-incremental decision (see `_prepare_index_run`) it invokes ONCE before
+    the per-file loop — so a processing-version bump or a changed source dir still
+    rebuilds cleanly, exactly as the monolithic `build_index` does."""
+    _prepare_index_run(base, force)
+
+
 def _prepare_index_run(base: String, force: Bool) raises:
     """Run-level setup BEFORE the per-file loop: decide whether this run must
     rebuild from scratch (an explicit `--force`, a processing-version bump, no

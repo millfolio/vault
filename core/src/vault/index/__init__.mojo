@@ -8,6 +8,7 @@ from vault.index.index import (
     build_index,
     index_one_file,
     finalize_index,
+    prepare_index_run,
     FileStepResult,
     search,
     file_chunks,
@@ -40,7 +41,14 @@ from vault.derive.store import (
     transactions_json,
     TagInfo,
 )
-from vault.index.manifest import build_manifest, FileInfo, _csv_columns
+from vault.index.manifest import (
+    build_manifest,
+    manifest_for_files,
+    collect_index_paths,
+    common_base,
+    FileInfo,
+    _csv_columns,
+)
 from vault.index.readers import (
     csv_rows,
     md_text,

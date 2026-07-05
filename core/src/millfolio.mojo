@@ -18,6 +18,7 @@ from vault.index import (
     build_index,
     index_one_file,
     finalize_index,
+    prepare_index_run,
     search,
     Chunk,
     vault_files,
@@ -160,6 +161,20 @@ def main() raises:
         if len(roots) == 0:
             roots.append(_default_dir())  # no paths → the configured vault dir
         build_index(roots^, _embed_url(), force)
+    elif cmd == "index-prepare":
+        # Run-level setup for the app-server orchestrator, BEFORE its per-file steps:
+        # the fresh-vs-incremental decision (a procversion bump / changed source dir
+        # rebuilds; else a no-op). Kept a distinct step so the orchestrator drives
+        #   index-prepare → index-file* → index-finalize
+        # exactly as the monolithic `index` (build_index) does internally.
+        #   millfolio index-prepare <base> [--force]
+        if len(args) < 3:
+            print("usage: millfolio index-prepare <base> [--force]")
+            return
+        var base = String(args[2])
+        var force = len(args) >= 4 and String(args[3]) == "--force"
+        prepare_index_run(base, force)
+        print("index-prepare ok: " + base)
     elif cmd == "index-file":
         # Per-file entrypoint for the app-server orchestrator: index ONE file against
         # the current persisted index and commit it (pausable between files).
