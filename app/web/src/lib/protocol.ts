@@ -75,6 +75,14 @@ export type ResultBlock =
       level: "country" | "state";
       title: string;
       points: { code: string; value: ResultValue }[];
+    }
+  | {
+      // A share-of-whole breakdown — a total split across a SMALL number of named
+      // parts (≤ ~8). The client computes each slice's percentage from its money
+      // `raw` and draws an offline SVG pie/donut.
+      kind: "pie";
+      title: string;
+      slices: { label: string; value: ResultValue }[];
     };
 
 /** The versioned result spec. Clients ignore-with-fallback (render `text` only)
