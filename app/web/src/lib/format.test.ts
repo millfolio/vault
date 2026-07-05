@@ -112,11 +112,22 @@ describe("fmtDur", () => {
     expect(fmtDur(100, 103)).toBe("3s");
   });
   it("shows m + zero-padded s at or over a minute", () => {
-    expect(fmtDur(0, 64)).toBe("1m 04s");
-    expect(fmtDur(0, 125)).toBe("2m 05s");
+    expect(fmtDur(1000, 1064)).toBe("1m 04s");
+    expect(fmtDur(1000, 1125)).toBe("2m 05s");
   });
   it("guards clock skew (finished < started) with an em dash", () => {
     expect(fmtDur(200, 100)).toBe("—");
+  });
+  it("guards a missing/zero start with an em dash (no epoch-0 duration)", () => {
+    expect(fmtDur(0, 64)).toBe("—");
+    expect(fmtDur(-5, 100)).toBe("—");
+  });
+  it("guards an implausibly long span (> 24h) with an em dash", () => {
+    // A stale start epoch leaking into a much-later finalize → a multi-day span.
+    expect(fmtDur(1783000000, 1783000000 + 5 * 24 * 60 * 60)).toBe("—");
+    expect(fmtDur(1000, 1000 + 24 * 60 * 60 + 1)).toBe("—");
+    // The 24h boundary itself is still shown (not over the threshold).
+    expect(fmtDur(1000, 1000 + 24 * 60 * 60)).toBe("1440m 00s");
   });
 });
 

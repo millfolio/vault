@@ -2874,10 +2874,17 @@ def _finalize_index_op():
         started = j["started"].int_value()
     except:
         pass
+    var finished = _epoch_s()
+    # Belt-and-suspenders: a start epoch that's missing (<=0) or absurdly far in the
+    # past (> 24h before finish) can't be THIS run's real start — it's a leaked stale
+    # marker. Clamp it to `finished` so the stored record shows ~0s rather than a
+    # bogus multi-hour duration (the client's fmtDur guards the display too).
+    if started <= 0 or (finished - started) > Int64(86400):
+        started = finished
     _append_operation(
         kind,
         started,
-        _epoch_s(),
+        finished,
         state,
         _index_progress(),
         _indexed_file_count(),
@@ -3030,6 +3037,17 @@ def _start_index_detached(paths: List[String], kind: String = "index") -> Bool:
         for _ in range(len(paths)):
             epochs.append(now)
         _write_tracked(paths, epochs)
+    except:
+        pass
+    # Fresh start: a pending marker still on disk HERE is a STALE one from a prior
+    # run that never finalized (an incremental/instant run on an earlier runtime, or
+    # a crash). Drop it BEFORE we touch the state file so a concurrent poll can't
+    # finalize that old run with a late `finished` epoch — a stale `started` leaking
+    # into a fresh finalize is the "434m 58s" bogus-duration bug. This run stamps its
+    # own marker with the current epoch just below.
+    try:
+        if exists(_pending_op_path()):
+            remove(_pending_op_path())
     except:
         pass
     _write_small(state, "indexing")

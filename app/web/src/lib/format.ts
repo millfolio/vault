@@ -101,10 +101,17 @@ export function opLabel(t: string): string {
   if (t === "backfill") return "Backfill";
   return t;
 }
-/** A duration (seconds between two epochs) as `3s` / `1m 04s`; guards clock skew. */
+/** A duration (seconds between two epochs) as `3s` / `1m 04s`. Returns `—` for any
+ * span we can't trust: clock skew (finished < started), a missing/leaked start
+ * (started ≤ 0), or an implausibly long run (> 24h). This is the reliable user-facing
+ * guard against the "434m 58s" stale-marker bug (a stale `started` from an earlier,
+ * never-finalized index attempt bleeding into a fresh finalize). */
+const MAX_PLAUSIBLE_DUR_S = 24 * 60 * 60; // 24h — no on-device index runs this long
 export function fmtDur(startedEpoch: number, finishedEpoch: number): string {
   const s = finishedEpoch - startedEpoch;
   if (!Number.isFinite(s) || s < 0) return "—";
+  if (startedEpoch <= 0) return "—"; // missing start marker → no real duration
+  if (s > MAX_PLAUSIBLE_DUR_S) return "—"; // leaked stale start → bogus multi-hour span
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   const rem = s % 60;
