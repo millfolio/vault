@@ -27,7 +27,7 @@
     | { t: "table"; headers: string[]; rows: ResultValue[][] }
     | { t: "chart"; mark: "line" | "bar"; title: string; x: string[]; raw: number[]; text: string[] }
     | { t: "group"; title: string; xcats: string[]; series: { title: string; raw: number[]; text: string[] }[] }
-    | { t: "map"; level: "country" | "state"; title: string; points: { code: string; value: ResultValue }[] }
+    | { t: "map"; level: "country" | "state" | "city"; title: string; points: { code: string; value: ResultValue; label?: string }[] }
     | { t: "pie"; title: string; slices: { label: string; value: ResultValue }[] };
 
   // The mark for ONE series, from its shape (+ optional hint override).

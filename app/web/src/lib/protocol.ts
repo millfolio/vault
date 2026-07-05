@@ -57,8 +57,10 @@ export type ResultValue =
 
 /** One data block. Phase 1 renders kpi + table; series is rendered as a table
  *  (charts are Phase 2). `map` is an offline bubble map (proportional-symbol) over
- *  a bundled outline — points are ISO-3166 alpha-3 country codes (level "country")
- *  or US 2-letter state codes (level "state"), each sized by its money value. */
+ *  a bundled outline — points are ISO-3166 alpha-3 country codes (level "country"),
+ *  US 2-letter state codes (level "state"), or (level "city", US-only) a 5-digit US
+ *  zip that PLACES the bubble by its gazetteer centroid + an optional `label` (the
+ *  city name) that DISPLAYS it — each sized by its money value. */
 export type ResultBlock =
   | { kind: "kpi"; label: string; value: ResultValue }
   | { kind: "table"; headers: string[]; rows: ResultValue[][] }
@@ -72,9 +74,11 @@ export type ResultBlock =
     }
   | {
       kind: "map";
-      level: "country" | "state";
+      level: "country" | "state" | "city";
       title: string;
-      points: { code: string; value: ResultValue }[];
+      // `code`: ISO3 (country) / US 2-letter (state) / US zip (city). `label` is set
+      // only for city points (the city name); country/state points carry none.
+      points: { code: string; value: ResultValue; label?: string }[];
     }
   | {
       // A share-of-whole breakdown — a total split across a SMALL number of named

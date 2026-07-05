@@ -227,3 +227,45 @@ export const STATE_GEO: MapGeo = {
 export function geoFor(level: "country" | "state"): MapGeo {
   return level === "state" ? STATE_GEO : COUNTRY_GEO;
 }
+
+// ── CITY level (US zip → centroid) ───────────────────────────────────────────
+// City maps reuse the STATE map's continental-US box: same outline + aspect, same
+// equirectangular projection — a city bubble lands where its state does. Only the
+// PLACEMENT differs: instead of a small bundled code→centroid table, each point's
+// `.zip` is looked up in the ~33k-entry US Census ZCTA gazetteer (bundled as
+// `zipCentroids.json`, ~0.9 MB), which is LAZILY loaded the first time a city map
+// renders so it never bloats the initial bundle for other views.
+
+// Project a US point (lat, lon — the order the zip table stores) to normalized
+// [0,1] over the continental-US box. AK/HI/PR zips fall outside the box; the caller
+// clamps so a bubble stays visible at the frame edge rather than off-canvas.
+export function projectUS(lat: number, lon: number): XY {
+  return project(lon, lat, US);
+}
+
+// A city map reuses the state map's US box (outline + aspect); its bubbles are placed
+// from the lazily-loaded zip table, not this static centroid map — so `centroids` and
+// `names` are empty (kept for a uniform MapGeo shape).
+export const CITY_GEO: MapGeo = {
+  outline: STATE_GEO.outline,
+  centroids: {},
+  names: {},
+  aspect: STATE_GEO.aspect,
+};
+
+// zip5 → [lat, lon]. Lazily loaded, then cached for the session.
+export type ZipTable = Record<string, [number, number]>;
+let _zipTable: ZipTable | null = null;
+export async function loadZipCentroids(): Promise<ZipTable> {
+  if (!_zipTable) {
+    const mod = await import("./zipCentroids.json");
+    _zipTable = (mod.default ?? mod) as unknown as ZipTable;
+  }
+  return _zipTable;
+}
+
+// Title-case a city name (the `.city` field arrives uppercase, e.g. "DALY CITY" →
+// "Daly City"). Keeps hyphenated / apostrophe'd parts sensible enough for a label.
+export function titleCaseCity(s: string): string {
+  return s.toLowerCase().replace(/(^|[\s\-/])([a-z])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+}
