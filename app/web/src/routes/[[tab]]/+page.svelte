@@ -778,8 +778,10 @@
     <section class="onboarding" aria-labelledby="onb-title">
       <h2 id="onb-title">Welcome to {brandName}</h2>
       <p class="onb-lead">
-        Your vault is empty. Point {brandName} at a folder of your own statements with
-        <code>mill index &lt;dir&gt;</code>, or try it right now with sample data.
+        Your vault is empty. Add a folder of your own statements under
+        <a href="/vault">Vault → Files</a> (see the
+        <a href="https://millfolio.app/docs/files" target="_blank" rel="noopener">indexing guide</a>),
+        or try it right now with sample data.
       </p>
       <div class="onb-actions">
         {#if !demoImport}
