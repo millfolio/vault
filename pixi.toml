@@ -146,6 +146,11 @@ test-dates = { cmd = "mkdir -p build && mojo build core/test/extract/dates_test.
 # with MILLFOLIO_NOW pinned — calendar rollover, end-of-month + leap clamping, and
 # ISO results that sort with `<`. Pure date math (no clock/network in the test).
 test-wallclock = { cmd = "mkdir -p build && mojo build core/test/extract/wall_clock_test.mojo -I core/src -o build/wallclock-test && ./build/wallclock-test" }
+# Gate: the pure Julian-day API (julian_from_iso/iso_from_julian) — Fliegel–Van
+# Flandern round-trip identity across leap years/month ends, a known anchor
+# (2000-01-01 == JDN 2451545), day-difference arithmetic, week bucketing, and a
+# TOTAL malformed/empty date → 0 (no crash on a "" Txn.date). Pure, no FFI/clock.
+test-julian = { cmd = "mkdir -p build && mojo build core/test/extract/julian_test.mojo -I core/src -o build/julian-test && ./build/julian-test" }
 # Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
 test-amounts = { cmd = "mkdir -p build && mojo build core/test/extract/amounts_test.mojo -I core/src -o build/amounts-test && ./build/amounts-test" }
 # Gate: the invariant-aware transaction extractor reconciles SYNTHETIC statements
@@ -172,4 +177,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }

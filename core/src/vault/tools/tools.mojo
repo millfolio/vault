@@ -51,6 +51,8 @@ from vault.extract.wall_clock import wall_clock as _wall_clock
 from vault.extract.wall_clock import days_ago as _days_ago
 from vault.extract.wall_clock import months_ago as _months_ago
 from vault.extract.wall_clock import years_ago as _years_ago
+from vault.extract.wall_clock import julian_from_iso as _julian_from_iso
+from vault.extract.wall_clock import iso_from_julian as _iso_from_julian
 
 
 # The SENTINEL that prefixes a progress line on stdout. A `progress(msg)` call
@@ -642,6 +644,21 @@ def years_ago(n: Int) raises -> String:
     / "since <year>". Filter with `t.date >= years_ago(n)` (ISO string compare).
     """
     return _years_ago(n)
+
+
+def julian_from_iso(iso: String) raises -> Int:
+    """ISO `"YYYY-MM-DD"` → its Julian Day Number (a plain Int day count). Use for
+    day DIFFERENCES (`julian_from_iso(a) - julian_from_iso(b)`) and week/period
+    BUCKETING (`julian_from_iso(t.date) // 7` groups by week) — don't re-derive the
+    calendar math. TOTAL: a malformed/empty date (e.g. `Txn.date == ""`) returns 0.
+    Inverse: `iso_from_julian`."""
+    return _julian_from_iso(iso)
+
+
+def iso_from_julian(jd: Int) raises -> String:
+    """Julian Day Number → ISO `"YYYY-MM-DD"` — the inverse of `julian_from_iso`
+    (e.g. to label a computed bucket back as a readable date)."""
+    return _iso_from_julian(jd)
 
 
 def parse_amount(s: String) raises -> Float64:

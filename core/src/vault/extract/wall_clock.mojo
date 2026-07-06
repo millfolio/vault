@@ -195,3 +195,55 @@ def years_ago(n: Int) raises -> String:
     var last = _last_dom(y, t.m)
     var d = last if t.d > last else t.d
     return _iso(_YMD(y, t.m, d))
+
+
+# ── Julian Day Number <-> ISO (Fliegel–Van Flandern) ─────────────────────────
+# A single, correct conversion between an ISO `"YYYY-MM-DD"` string and its
+# Julian Day Number (a plain Int day count) so a generated program can do date
+# arithmetic — day differences (`julian_from_iso(a) - julian_from_iso(b)`) and
+# week/period bucketing (`julian_from_iso(d) // 7`) — without re-deriving the
+# calendar math in every program. The pair is a round-trip identity:
+# `iso_from_julian(julian_from_iso(x)) == x`.
+
+
+def julian_from_iso(iso: String) raises -> Int:
+    """ISO `"YYYY-MM-DD"` -> its Julian Day Number (Int). TOTAL: malformed or empty
+    input (fewer than 3 `-`-separated parts, or non-numeric fields — e.g. a `""`
+    `Txn.date`) returns `0` rather than crashing. Use for day differences and
+    week/period bucketing; inverse is `iso_from_julian`."""
+    var p = iso.split("-")
+    if len(p) < 3:
+        return 0
+    try:
+        var y = Int(String(p[0]))
+        var m = Int(String(p[1]))
+        var d = Int(String(p[2]))
+        var a = (14 - m) // 12
+        var yy = y + 4800 - a
+        var mm = m + 12 * a - 3
+        return (
+            d
+            + (153 * mm + 2) // 5
+            + 365 * yy
+            + yy // 4
+            - yy // 100
+            + yy // 400
+            - 32045
+        )
+    except:
+        return 0
+
+
+def iso_from_julian(jd: Int) raises -> String:
+    """Julian Day Number (Int) -> ISO `"YYYY-MM-DD"` — the inverse of
+    `julian_from_iso` (e.g. to label a computed date bucket)."""
+    var a = jd + 32044
+    var b = (4 * a + 3) // 146097
+    var c = a - (146097 * b) // 4
+    var d1 = (4 * c + 3) // 1461
+    var e = c - (1461 * d1) // 4
+    var m1 = (5 * e + 2) // 153
+    var day = e - (153 * m1 + 2) // 5 + 1
+    var month = m1 + 3 - 12 * (m1 // 10)
+    var year = 100 * b + d1 - 4800 + m1 // 10
+    return _iso(_YMD(year, month, day))

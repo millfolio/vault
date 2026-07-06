@@ -19,4 +19,11 @@ from vault.extract.transactions import (
 from vault.extract.location import Location, parse_location
 from vault.extract.amounts import parse_amount, format_money
 from vault.extract.dates import iso_date
-from vault.extract.wall_clock import wall_clock, days_ago, months_ago, years_ago
+from vault.extract.wall_clock import (
+    wall_clock,
+    days_ago,
+    months_ago,
+    years_ago,
+    julian_from_iso,
+    iso_from_julian,
+)

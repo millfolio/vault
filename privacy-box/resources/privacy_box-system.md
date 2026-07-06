@@ -66,6 +66,8 @@ Questions are open-ended but personal, e.g.
 | `iso_date` | `iso_date(year: Int, md: String) -> String` | fold a statement `M/D` (or `MM/DD`) date + the statement's year into sortable `"YYYY-MM-DD"` (`""` if not a date) |
 | `wall_clock` | `wall_clock() -> String` | **today's date** as ISO `"YYYY-MM-DD"` — the notion of "now" for relative-date questions. Compares directly with `Txn.date`. |
 | `days_ago` / `months_ago` / `years_ago` | `days_ago(n: Int) -> String` (same for months/years) | the ISO `"YYYY-MM-DD"` date `n` days/**calendar months**/years before today (correct rollover + end-of-month clamp). Filter with `t.date >= months_ago(n)` — an ISO string compare. NEVER hardcode a date. |
+| `julian_from_iso` | `julian_from_iso(iso: String) -> Int` | ISO date → **Julian Day Number** (an Int day count). Use for **day differences** (`julian_from_iso(a) - julian_from_iso(b)`) and **week/period bucketing** (`julian_from_iso(t.date) // 7` groups by week) — don't re-derive the calendar math. Total: a bad/empty date (`""`) → `0`. |
+| `iso_from_julian` | `iso_from_julian(jd: Int) -> String` | inverse: Julian Day Number → ISO `"YYYY-MM-DD"` (e.g. to label a computed bucket back as a date). |
 | `parse_amount` | `parse_amount(s: String) -> Float64` | parse a money string (`$4,000.00`, `(42.10)`, `-31.00`) to a number — handles `$`/commas/parens. **Use instead of `atof`** when summing; `atof` crashes on the comma. |
 | `money` | `money(x: Float64) -> String` | format a dollar amount as a clean string — returns it **INCLUDING the leading `$`** (`$31,241.06`, `-$5.00`). ALWAYS use this for amounts in `print_answer`; never `String(x)` (raw floats like `$31241.0599999998`) and never prepend your own `$` (writing `"$" + money(x)` double-prints it). |
 
