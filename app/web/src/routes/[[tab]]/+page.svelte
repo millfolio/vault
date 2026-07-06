@@ -1027,6 +1027,8 @@
     background: var(--surface);
     border: 1px solid var(--border);
     font-size: 12px;
+    white-space: nowrap; /* keep `mill index <dir>` on one line — it was breaking
+                            mid-command (mill / index <dir>) and reading as broken */
   }
   .onb-actions {
     display: flex;
