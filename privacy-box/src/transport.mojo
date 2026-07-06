@@ -19,8 +19,16 @@ from std.os import getenv
 from flare.http import HttpClient, Request
 from flare.tls import TlsStream, TlsConfig
 from json import loads
+from logging import log
 from egress import EgressGuard
 from vaultcfg import resource_path
+from codegen_cache import (
+    codegen_cache_enabled,
+    codegen_cache_dir,
+    stable_hash_hex,
+    codegen_cache_read,
+    codegen_cache_write,
+)
 
 
 # Read timeout for the remote (frontier) model call. A dropped connection (e.g. you
@@ -317,13 +325,42 @@ struct RemoteClient(Movable):
         # progress(), parse_amount/iso_date, both branches — plus any reasoning the
         # model emits can exceed 2048 and get cut mid-line, which then never compiles
         # (and every fix attempt re-truncated at the same cap).
+        #
+        # `system` is an ARRAY of content blocks (not a bare string) with a
+        # `cache_control:{type:ephemeral}` breakpoint on the block, so Anthropic
+        # prompt-caches the large, stable system prompt (well over the 1024-token
+        # minimum) — the ~41% server-side lever. The aliased manifest + question
+        # ride in the user message AFTER it and vary per request, so only the
+        # system prefix is cached (the manifest can't be split out cleanly here).
         var body = String('{"model":"') + self.model + '","max_tokens":8192,'
-        body += '"system":"' + _json_escape(sys) + '",'
+        body += '"system":[{"type":"text","text":"' + _json_escape(sys)
+        body += '","cache_control":{"type":"ephemeral"}}],'
         body += (
             '"messages":[{"role":"user","content":"'
             + _json_escape(prompt)
             + '"}]}'
         )
+
+        # ── disk cache (read) ─────────────────────────────────────────────────
+        # Key on the FINAL body bytes (built above, WITH the cache_control markers,
+        # which are stable) so a hit/miss is consistent with what's actually sent.
+        # The body embeds the model + system + question, so the key covers them all.
+        var use_cache = (not self.mock) and codegen_cache_enabled()
+        var cdir = String("")
+        var ckey = String("")
+        if use_cache:
+            cdir = codegen_cache_dir()
+            if cdir != "":
+                ckey = stable_hash_hex(body)
+                var hit = codegen_cache_read(cdir, ckey)
+                if hit:
+                    log(
+                        "• codegen cache hit ("
+                        + ckey
+                        + ") — reusing the saved program, skipping the API call"
+                    )
+                    # Cost 0: no network, no egress, no token spend on a hit.
+                    return Generated(hit.value().copy(), 0)
 
         var req = Request(
             method="POST",
@@ -394,6 +431,29 @@ struct RemoteClient(Movable):
             )
         except:
             toks = 0
+
+        # Surface the server-side prompt-cache usage so the prefix cache is visible.
+        try:
+            var cw = Int(v["usage"]["cache_creation_input_tokens"].int_value())
+            var cr = Int(v["usage"]["cache_read_input_tokens"].int_value())
+            if cw > 0 or cr > 0:
+                log(
+                    "• prompt cache: "
+                    + String(cr)
+                    + " read / "
+                    + String(cw)
+                    + " written (input tokens)"
+                )
+        except:
+            pass
+
+        # ── disk cache (write) ────────────────────────────────────────────────
+        # Only on SUCCESS: HTTP 200 got us here, `code` is non-empty and not
+        # truncated. Best-effort — a write failure can't break codegen.
+        if use_cache and cdir != "" and code.byte_length() > 0:
+            codegen_cache_write(
+                cdir, ckey, self.model, body.byte_length(), code
+            )
         return Generated(code^, toks)
 
     def _anthropic_stream[
@@ -411,12 +471,40 @@ struct RemoteClient(Movable):
             + self.model
             + '","max_tokens":8192,"stream":true,'
         )
-        body += '"system":"' + _json_escape(sys) + '",'
+        # `system` as a content-block array with a cache_control breakpoint (see
+        # _anthropic): Anthropic prompt-caches the stable system prefix.
+        body += '"system":[{"type":"text","text":"' + _json_escape(sys)
+        body += '","cache_control":{"type":"ephemeral"}}],'
         body += (
             '"messages":[{"role":"user","content":"'
             + _json_escape(prompt)
             + '"}]}'
         )
+
+        # ── disk cache (read) ─────────────────────────────────────────────────
+        # Key on the FINAL body bytes (incl. "stream":true + the cache_control
+        # markers). On a hit, replay the saved program to the sink once and return
+        # — no TLS connect, no egress, no token spend.
+        var use_cache = (not self.mock) and codegen_cache_enabled()
+        var cdir = String("")
+        var ckey = String("")
+        if use_cache:
+            cdir = codegen_cache_dir()
+            if cdir != "":
+                ckey = stable_hash_hex(body)
+                var hit = codegen_cache_read(cdir, ckey)
+                if hit:
+                    var prog = hit.value().copy()
+                    log(
+                        "• codegen cache hit ("
+                        + ckey
+                        + ") — replaying the saved program, skipping the API"
+                        " call"
+                    )
+                    sink.on_delta(
+                        prog
+                    )  # LIVE: surface the whole program at once
+                    return Generated(prog^, 0)
 
         # base_url e.g. https://api.anthropic.com/v1 → host `api.anthropic.com`,
         # request target `/v1/messages`.
@@ -525,4 +613,11 @@ struct RemoteClient(Movable):
                 " the program (stop_reason=max_tokens). Raise max_tokens or"
                 " simplify."
             )
-        return Generated(_strip_fences(code), toks)
+        var program = _strip_fences(code)
+        # ── disk cache (write) ────────────────────────────────────────────────
+        # Reached only on SUCCESS (stream drained, not truncated). Best-effort.
+        if use_cache and cdir != "" and program.byte_length() > 0:
+            codegen_cache_write(
+                cdir, ckey, self.model, body.byte_length(), program
+            )
+        return Generated(program^, toks)

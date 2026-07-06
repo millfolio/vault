@@ -172,6 +172,12 @@ test-location = { cmd = "mkdir -p build && mojo build core/test/extract/location
 test-egress = { cmd = "mkdir -p build && mojo build privacy-box/test/egress_test.mojo -I privacy-box/src -o build/egress-test && ./build/egress-test" }
 # Gate: budget directive parsing/accounting.
 test-budget = { cmd = "mkdir -p build && mojo build privacy-box/test/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
+# Gate: the local persistent CODEGEN DISK CACHE (codegen_cache.mojo) — the FNV-1a
+# stable hash (deterministic + model-sensitive), write-then-read round-trip that
+# records the model, and miss(None)/hit(program) semantics. Exercises the read/write
+# layer directly against a temp dir (no network). Pinned MILLFOLIO_CODEGEN_CACHE_DIR
+# (hermetic); links ../json for the entry JSON parse.
+test-codegen-cache = { cmd = "mkdir -p build && rm -rf build/codegen-cache-data && MILLFOLIO_CODEGEN_CACHE_DIR=\"$PWD/build/codegen-cache-data\" bash -c 'mojo build privacy-box/test/codegen_cache_test.mojo -I privacy-box/src -I ../json -o build/codegen-cache-test && MILLFOLIO_CODEGEN_CACHE_DIR=\"$PWD/build/codegen-cache-data\" ./build/codegen-cache-test'" }
 # Gate: every ```mojo example in the codegen system prompt (privacy_box-system.md)
 # COMPILES against the vault package — catches a wrong tool/field (the `.id` vs
 # `.alias` regression) before it reaches a release. Needs the SIBLING lib repos on
@@ -184,4 +190,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-codegen-cache", "test-result", "test-strip", "test-mojo-version"] }
