@@ -390,6 +390,46 @@ def transactions(file_alias: String) raises -> List[Txn]:
     return r^
 
 
+def all_transactions() raises -> List[Txn]:
+    """EVERY reconcile-verified `Txn` across ALL statement files, concatenated into
+    one list — the whole-vault view. Iterates `manifest()` and calls
+    `transactions(f.alias)` for each file, emitting a per-file scan `progress` line;
+    a non-statement file (empty `transactions`) simply contributes nothing. Use this
+    instead of hand-writing the outer `manifest()` → per-file `transactions()` loop;
+    iterate the result with `for x in all_transactions():`."""
+    var out = List[Txn]()
+    var files = manifest()
+    for i in range(len(files)):
+        var falias = String(files[i].alias)
+        progress("scanning " + falias)
+        var txns = transactions(falias)
+        for t in range(len(txns)):
+            out.append(txns[t].copy())
+    return out^
+
+
+def spending() raises -> List[Txn]:
+    """`all_transactions()` restricted to PURCHASES: money-OUT (`direction ==
+    "debit"`) that is NOT tagged `transfers`. This bakes in the transfers exclusion
+    (the guard against counting a credit-card payment / account transfer as spend),
+    so a "how much did I spend / by category / by merchant" program never re-derives
+    the debit + transfer filter. Iterate with `for x in spending():`."""
+    var out = List[Txn]()
+    var rows = all_transactions()
+    for i in range(len(rows)):
+        ref x = rows[i]
+        if x.direction != "debit":
+            continue
+        var is_transfer = False
+        for g in range(len(x.tags)):
+            if x.tags[g] == "transfers":
+                is_transfer = True
+                break
+        if not is_transfer:
+            out.append(x.copy())
+    return out^
+
+
 def ask_local(instruction: String, content: String) raises -> String:
     """The trusted on-device reader: POST `instruction` + real `content` to the
     local chat-completions endpoint and return the assistant's reply. This is the

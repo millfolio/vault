@@ -151,6 +151,13 @@ test-wallclock = { cmd = "mkdir -p build && mojo build core/test/extract/wall_cl
 # (2000-01-01 == JDN 2451545), day-difference arithmetic, week bucketing, and a
 # TOTAL malformed/empty date → 0 (no crash on a "" Txn.date). Pure, no FFI/clock.
 test-julian = { cmd = "mkdir -p build && mojo build core/test/extract/julian_test.mojo -I core/src -o build/julian-test && ./build/julian-test" }
+# Gate: the whole-vault tool helpers all_transactions()/spending() — driven
+# end-to-end over a hermetically-built index (MILLFOLIO_FAKE_EMBED unit vectors,
+# pinned MILLFOLIO_DATA_DIR, CSV fixtures): all_transactions() == the union of
+# per-file transactions(); spending() keeps ordinary debits, excludes credits, and
+# excludes a (synthetically injected) debit tagged `transfers`. Links the sibling
+# libs like test-index-steps (tools/index pull lancedb/flare/…).
+test-spending = { cmd = "mkdir -p build && rm -rf build/spending-data && MILLFOLIO_DATA_DIR=\"$PWD/build/spending-data\" MILLFOLIO_FAKE_EMBED=1 MILLFOLIO_VAULT=\"$PWD/build/spending-data/vault\" bash -c 'mojo build core/test/tools/spending_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/spending-test && MILLFOLIO_DATA_DIR=\"$PWD/build/spending-data\" MILLFOLIO_FAKE_EMBED=1 MILLFOLIO_VAULT=\"$PWD/build/spending-data/vault\" ./build/spending-test'" }
 # Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
 test-amounts = { cmd = "mkdir -p build && mojo build core/test/extract/amounts_test.mojo -I core/src -o build/amounts-test && ./build/amounts-test" }
 # Gate: the invariant-aware transaction extractor reconciles SYNTHETIC statements
@@ -177,4 +184,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }

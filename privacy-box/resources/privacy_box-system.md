@@ -54,6 +54,8 @@ Questions are open-ended but personal, e.g.
 | `manifest` | `manifest() -> List[VaultFile]` | the aliased file list; each `VaultFile` has **`.alias`** (e.g. `file_0`), `.kind` (`"csv"`/`"pdf"`/`"md"`/`"docx"`), `.size`, and `.columns` (aliased CSV columns; empty otherwise). Read it; never CONSTRUCT one. (`alias` is a reserved Mojo keyword, but member access `f.alias` reads the field fine — use `.alias`, NOT `.id`.) |
 | `search` | `search(query: String, k: Int) -> List[Chunk]` | **semantic search across the whole indexed vault**; each `Chunk` has `.file_alias`, `.text`, `.score`. **Similarity-ranked top-k** — great to *find* the relevant passages for an open question, but it returns only ~k chunks, so it **structurally undercounts aggregations** (a file can have hundreds of chunks). Do NOT use it to count/sum/total — use `transactions`/`file_chunks`/`csv_rows` for those. |
 | `transactions` | `transactions(file_alias: String) -> List[Txn]` | **reconcile-VERIFIED structured transactions** of a statement file, extracted at index time. Each `Txn` has `.date` (a normalized ISO **`"YYYY-MM-DD"`** string, or `""` if unknown — already includes the year, so compare/sort directly and split on `"-"` for day math; do NOT assume `M/D`), `.desc` (the raw descriptor), `.amount` (non-negative magnitude), `.direction` (`"credit"`=money in / `"debit"`=money out), `.tags` (a `List[String]` of category tags assigned at index time — currently `phone`/`travel`/`restaurant`/`groceries`/`health`/`transfers`/`rewards`; empty when none match), and a deterministic **index-time location split** of the descriptor: `.merchant` (the cleaned brand string — use this for grouping / top-merchants instead of raw `.desc`), `.country` (an **ISO3** code like `"USA"`/`"GBR"`, `""` when absent), `.state` (a **US 2-letter** code like `"WA"`, `""` when absent), `.city` (the parsed city name, uppercase, `""` when absent — group on this for a **by-city** breakdown), `.zip` (the **US 5-digit** zip, `""` when absent). Location is `""` on descriptors that carry none — transfers, online charges, PayPal — so filter `if x.country != "":` (or `if x.city != "":`) before grouping. These are EXACT — `len()` to count, `sum(.amount)` to total, `max(.amount)` for the biggest, `.tags` to filter by category, `.merchant`/`.city`/`.country`/`.state` to group — with no model call. **EMPTY** when the file isn't a statement or couldn't be reconciled; then fall back to `file_chunks` + `ask_local_batch`. |
+| `all_transactions` | `all_transactions() -> List[Txn]` | **every `Txn` across ALL files** — concatenates `transactions()` over the whole `manifest()`, with a per-file scan `progress`. Use this instead of hand-writing the outer `for file … transactions(alias)` loop; iterate with `for x in all_transactions():`. |
+| `spending` | `spending() -> List[Txn]` | `all_transactions()` restricted to **purchases**: `direction=="debit"` and NOT tagged `transfers`. Use this for "how much did I spend / by category / by merchant" — it ALREADY excludes transfers (the credit-card-payment guard), so don't re-derive the debit + transfer filter. |
 | `file_chunks` | `file_chunks(file_alias: String) -> List[String]` | **EVERY chunk of one file, in document order** — complete coverage for enumeration (count/sum/max), unlike `search`'s top-k. Reuses the index's already-extracted text. Use this to scan a whole file. |
 | `csv_rows` | `csv_rows(file_alias: String) -> List[Row]` | a table's rows; columns by alias (`row[0]`, `row["col_2"]`) — exact + complete for a CSV |
 | `pdf_text` | `pdf_text(file_alias: String) -> String` | extracted text of a PDF (pdftotext) |
@@ -502,25 +504,21 @@ label column is a plain `String`; the amount cell is ALWAYS `money_val(...)` —
 ```mojo
 from vault import *
 def main() raises:
-    var files = manifest()
     var names = List[String]()
     var totals = List[Float64]()
-    for i in range(len(files)):
-        var txns = transactions(files[i].alias)   # exact, reconcile-verified; [] if none
-        for t in range(len(txns)):
-            ref x = txns[t]
-            if x.direction != "debit":
-                continue
-            var key = x.merchant if x.merchant != "" else x.desc  # cleaned brand
-            var found = False
-            for m in range(len(names)):
-                if names[m] == key:
-                    totals[m] += x.amount
-                    found = True
-                    break
-            if not found:
-                names.append(key)
-                totals.append(x.amount)
+    # spending() = every purchase across all files (debit, transfers already excluded),
+    # so no outer manifest()/transactions() loop and no debit/transfer re-derivation.
+    for x in spending():
+        var key = x.merchant if x.merchant != "" else x.desc  # cleaned brand
+        var found = False
+        for m in range(len(names)):
+            if names[m] == key:
+                totals[m] += x.amount
+                found = True
+                break
+        if not found:
+            names.append(key)
+            totals.append(x.amount)
     if len(names) == 0:
         print_answer("I couldn't find any spending transactions in your vault.")
         return
