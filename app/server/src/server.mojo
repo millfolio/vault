@@ -39,6 +39,7 @@ from flare.ws import WsConnection, WsOpcode, WsCloseCode
 from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 
 from std.ffi import external_call, c_char, c_int
+from std.sys import argv
 from std.time import perf_counter_ns
 
 from settings import load_config, Config
@@ -1710,8 +1711,9 @@ struct Api(Copyable, Handler, Movable):
         """POST /api/demo/download → import the hosted sample vault
         (MILLFOLIO_DEMO_URL, default https://millfolio.app/demo-vault.zip): ENQUEUE a
         single `demo-download` work item and return immediately. The orchestrator loop
-        then downloads + unpacks it into `<data>/demo-vault/` (flare's HttpClient,
-        off-reactor), then enqueues a normal per-file index run over it — so the whole
+        then downloads + unpacks it into `<data>/demo-vault/` (in a `--fetch-demo`
+        subprocess, off-reactor), then enqueues a normal per-file index run over it — so
+        the whole
         import flows through the ONE scheduler and shows in Operations (the download as a
         job, then the per-file indexing). The client polls /api/demo/status. Idempotent:
         a finished import no-ops to done. Disabled in the public replay demo (its vault
@@ -2931,13 +2933,15 @@ def _provision_fetch(id: String) -> Bool:
 # ── sample vault (first-run onboarding) ────────────────────────────────────────
 # A new user with an empty vault can "try it with sample data": the import is a single
 # `demo-download` WORK ITEM the orchestrator loop drains (ORCHESTRATOR.md §2.1) — it
-# fetches the small hosted zip (MILLFOLIO_DEMO_URL) with flare's HttpClient IN-PROCESS
-# (off-reactor, like the codegen/embedding clients — no `curl`), unpacks it into
-# `<data>/demo-vault/`, then enqueues a normal per-file index run over it. So the
-# download and the per-file indexing BOTH flow through the one scheduler and surface in
-# Operations, and the download never blocks the single-threaded HTTP reactor. State is
-# tracked in small files the status endpoint reports; the whole import is recorded as
-# ONE `demo` operation (the index run reuses `_start_index_run` with `record_op=False`).
+# fetches the small hosted zip (MILLFOLIO_DEMO_URL) in a SEPARATE PROCESS (we re-exec
+# this server binary in `--fetch-demo` mode — flare's blocking HTTP client runs in that
+# child, NEVER on the serving reactor; an in-loop flare GET can stall the shared reactor,
+# the "History timed out" we saw — no `curl` either), unpacks it into `<data>/demo-vault/`,
+# then enqueues a normal per-file index run over it. So the download and the per-file
+# indexing BOTH flow through the one scheduler and surface in Operations, and the download
+# never blocks the single-threaded HTTP reactor. State is tracked in small files the status
+# endpoint reports; the whole import is recorded as ONE `demo` operation (the index run
+# reuses `_start_index_run` with `record_op=False`).
 
 
 def _demo_url() -> String:
@@ -3039,8 +3043,9 @@ def _demo_status_json() raises -> String:
     "total"]} for the sample-vault import. `state` (settled via `_demo_effective_state`)
     is idle|downloading|indexing|done|error; `present` is whether the folder exists.
 
-    The zip is tiny, so DOWNLOADING is a single blocking flare GET with no incremental
-    byte progress → `progress`/bytesDone/bytesTotal stay -1 (the client shows a spinner).
+    The zip is tiny, so DOWNLOADING is a single full-body GET (in the `--fetch-demo`
+    subprocess) with no incremental byte progress → `progress`/bytesDone/bytesTotal stay
+    -1 (the client shows a spinner).
     While INDEXING, the per-file work runs as a normal index run through the orchestrator,
     so we surface its `current`/`total` files (the SAME queue-derived count as
     /api/index/status) plus a `progress` percent, mirroring the download → indexing n/M
@@ -3171,34 +3176,105 @@ def _run_demo_download_item(item: WorkItem):
             pass
 
 
-def _demo_fetch_and_unpack() raises -> Bool:
-    """Fetch the hosted sample-vault zip with flare's HttpClient (blocking, in-process —
-    the SAME off-reactor client the codegen/embedding paths use, so NO `curl`), write it
-    to `<data>/.demo-vault.zip`, then unpack it into `<data>/demo-vault/`. Returns True
-    once the folder is present. The zip is tiny (~7 KB) so a single full-body GET is
-    fine — no incremental byte progress. Unpack is a one-line `unzip` shell-out (macOS
-    ships it; the priority was removing the non-universal `curl`). Best-effort; the
-    caller treats a False/raise as an import error."""
+def _self_exe_path() -> String:
+    """Absolute path to THIS running executable (the app-server binary) via macOS
+    `_NSGetExecutablePath`. Used to re-spawn ourselves in `--fetch-demo` mode as a
+    separate PROCESS, so the demo-zip download's flare client runs off the serving
+    reactor. Empty on failure (the caller treats that as a download error)."""
+    comptime CAP = 4096
+    var buf = alloc[UInt8](CAP)
+    var sizep = alloc[UInt32](1)
+    sizep[0] = UInt32(CAP)
+    var rc = external_call["_NSGetExecutablePath", Int32](buf, sizep)
+    sizep.free()
+    var out = String("")
+    if Int(rc) == 0:
+        var n = 0
+        while n < CAP and buf[n] != 0:
+            n += 1
+        var bytes = List[UInt8]()
+        for i in range(n):
+            bytes.append(buf[i])
+        out = String(StringSlice(unsafe_from_utf8=Span(bytes)))
+    buf.free()
+    return out^
+
+
+def _fetch_demo_run(url: String, dest: String) -> Bool:
+    """Body of the `millfolio-server --fetch-demo <url> <dest>` mode: GET `url` with
+    flare (in THIS separate process — off the server's serving reactor) and write the
+    bytes to `dest`. Prints a short status line (captured into the demo log by the
+    caller's `>>` redirect). Returns False on any HTTP/write failure; the parent treats a
+    missing/empty `dest` as the error signal, so we simply do NOT write the file on a
+    non-200/exception."""
+    if url == "" or dest == "":
+        print("fetch-demo: usage: --fetch-demo <url> <dest>")
+        return False
     try:
-        _write_small(_demo_state_path(), "downloading")
-        var req = Request(method="GET", url=_demo_url())
+        var req = Request(method="GET", url=url)
         var client = HttpClient()  # follows redirects (millfolio.app → asset)
         var resp = client.send(req)
         if resp.status != 200:
-            _write_small(
-                _demo_log_path(),
-                "Download failed (HTTP " + String(resp.status) + ")",
-            )
+            print("Download failed (HTTP " + String(resp.status) + ")")
             return False
-        with open(_demo_zip_path(), "w") as f:
+        with open(dest, "w") as f:
             f.write_bytes(Span(resp.body))
+        print("Downloaded sample data (" + String(len(resp.body)) + " bytes)")
+        return True
     except e:
-        _write_small(_demo_log_path(), "Download error: " + String(e))
+        print("Download error: " + String(e))
+        return False
+
+
+def _demo_fetch_and_unpack() raises -> Bool:
+    """Fetch the hosted sample-vault zip in a SEPARATE PROCESS — re-exec THIS server
+    binary in `--fetch-demo` mode so flare's blocking HTTP client runs in that child,
+    NEVER on the serving reactor (an in-loop flare GET can stall the shared reactor —
+    the "History timed out" we saw). We run it from the orchestrator loop thread and
+    BLOCK on it (safe — the loop is not the reactor); a written, non-empty
+    `<data>/.demo-vault.zip` is the success signal (the child writes it only on a 200).
+    Then unpack into `<data>/demo-vault/`. Returns True once the folder is present. The
+    zip is tiny (~KB) so a single full-body GET is fine — no incremental byte progress.
+    Unpack is a one-line `unzip` shell-out (macOS ships it). Best-effort; the caller
+    treats a False/raise as an import error."""
+    _write_small(_demo_state_path(), "downloading")
+    _write_small(_demo_log_path(), "Downloading sample data…")
+    var exe = _self_exe_path()
+    if exe == "":
+        _write_small(
+            _demo_log_path(),
+            "Download error: could not locate the server binary",
+        )
+        return False
+    # Fresh zip each run: a stale/partial file must never be mistaken for a success.
+    try:
+        remove(_demo_zip_path())
+    except:
+        pass
+    # Spawn the download as a child process (flare runs THERE, off our reactor) and
+    # block the loop thread on it. Its stdout/stderr append to the demo log so
+    # `_demo_progress` can surface a failure line as the status detail.
+    var cmd = (
+        _sh_squote(exe)
+        + " --fetch-demo "
+        + _sh_squote(_demo_url())
+        + " "
+        + _sh_squote(_demo_zip_path())
+        + " >> "
+        + _sh_squote(_demo_log_path())
+        + " 2>&1"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)  # BLOCKS in the loop thread (off-reactor)
+    cc.free()
+    # A written, non-empty zip means the child fetch succeeded (it writes nothing on a
+    # non-200/exception; a 0-byte file — empty 200 or a mid-write failure — is a miss).
+    if not exists(_demo_zip_path()) or Int(getsize(_demo_zip_path())) <= 0:
         return False
     # Unpack: replace any prior copy, then extract the `demo-vault/` folder into the
     # data dir. `unzip -o` overwrites; ships with macOS (unlike a bundled `curl`).
     _write_small(_demo_log_path(), "Unpacking…")
-    var cmd = (
+    var ucmd = (
         "rm -rf "
         + _sh_squote(_demo_dir())
         + " && unzip -o "
@@ -3207,9 +3283,9 @@ def _demo_fetch_and_unpack() raises -> Bool:
         + _sh_squote(_config_dir())
         + " >/dev/null 2>&1"
     )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)  # BLOCKS (no trailing &)
-    cc.free()
+    var ucc = _cstr(ucmd)
+    _ = external_call["system", Int32](ucc)  # BLOCKS (no trailing &)
+    ucc.free()
     return _demo_present()
 
 
@@ -4571,6 +4647,18 @@ def on_connect(mut conn: WsConnection) raises:
 
 
 def main() raises:
+    # `--fetch-demo <url> <dest>`: NOT the server — a one-shot download helper we re-exec
+    # as a SEPARATE PROCESS from the orchestrator loop (see `_demo_fetch_and_unpack`), so
+    # the sample-vault zip's flare GET runs off the serving reactor. Do the fetch + exit
+    # before any server/orchestrator setup (never binds the port). The parent reads
+    # success from the written file, so the return value is advisory only.
+    var cli = argv()
+    if len(cli) >= 2 and String(cli[1]) == "--fetch-demo":
+        var url = String(cli[2]) if len(cli) >= 3 else String("")
+        var dest = String(cli[3]) if len(cli) >= 4 else String("")
+        _ = _fetch_demo_run(url, dest)
+        return
+
     var cfg = load_config()
     # The `/chat` orchestrator is built once here from this cfg, so seed it from
     # the in-app key store too (the WS ask path re-loads per connection). A key

@@ -73,6 +73,8 @@
     bytesDone?: number;
     bytesTotal?: number;
     present?: boolean;
+    current?: number; // present during the index phase — files embedded so far ([n/M])
+    total?: number; // present during the index phase — total files to embed
   }
   interface Gpu {
     util: number;
@@ -437,12 +439,19 @@
           </div>
         {:else if demoImport?.state === "downloading"}
           <p class="detail">Downloading sample data…</p>
+        {:else if demoImport?.total && demoImport.total > 0}
+          <div class="progress">
+            <div class="pbar" aria-hidden="true">
+              <div class="pfill" style={`width:${Math.min(100, ((demoImport.current ?? 0) / demoImport.total) * 100)}%`}></div>
+            </div>
+            <span class="pcount">Indexing sample data — {demoImport.current ?? 0} of {demoImport.total} files</span>
+          </div>
         {:else}
           <p class="detail">Indexing sample data (first run loads the embedding model)…</p>
         {/if}
       </div>
     {/if}
-    {#if indexing || runningItem?.kind === "index" || runningItem?.kind === "index-prepare" || runningItem?.kind === "finalize"}
+    {#if !demoImporting && (indexing || runningItem?.kind === "index" || runningItem?.kind === "index-prepare" || runningItem?.kind === "finalize")}
       <div class="op live">
         <div class="line1">
           <span class="type">Index</span>

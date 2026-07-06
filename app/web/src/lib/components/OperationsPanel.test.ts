@@ -138,6 +138,26 @@ describe("OperationsPanel", () => {
     expect(screen.getByText(/Indexing sample data/)).toBeInTheDocument();
   });
 
+  it("shows the sample-data index phase as 'Indexing sample data — n of M files'", async () => {
+    // The demo's per-file indexing runs through the orchestrator queue, so a running
+    // index item is present too — but the demo import must own the single 'Now' row
+    // (the generic Index row is suppressed while importing), enriched with n/M.
+    stubFetch({
+      demoStatus: { state: "indexing", detail: "[2/6] chase.pdf", progress: 33, current: 2, total: 6 },
+      indexStatus: { state: "indexing", detail: "embedding", current: 2, total: 6 },
+      queue: {
+        items: [{ id: 1, kind: "index", payload: "chase.pdf", prio: 10, state: "running", startedTs: 1783000000 }],
+      },
+    });
+    const { container } = render(OperationsPanel);
+    await waitFor(() => {
+      expect(screen.getByText(/Indexing sample data — 2 of 6 files/)).toBeInTheDocument();
+    });
+    // Exactly ONE live row (the Sample data import), not also a generic 'Index' row.
+    expect(container.querySelectorAll(".op.live")).toHaveLength(1);
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+  });
+
   it("renders a completed sample-data import in History as 'Sample data'", async () => {
     stubFetch({
       operations: [
