@@ -51,5 +51,7 @@ test-store = { cmd = "mkdir -p build && mojo build test/store_test.mojo -I src -
 # Unit-test the pure orchestrator seams (scheduler.mojo) — enqueue plan, queue-derived
 # status, pause/query gating, reconcile predicate, backfill readiness.
 test-scheduler = { cmd = "mkdir -p build && mojo build test/scheduler_test.mojo -I src -I ../../flare -o build/scheduler-test && ./build/scheduler-test" }
-# Full unit suite — what `moon run app-server:check` runs (events + run-queue + work-queue + store + scheduler).
-test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-store", "test-scheduler"] }
+# Unit-test the pure API-key helpers (apikey.mojo) — validation + last-4 masking + status JSON.
+test-apikey = { cmd = "mkdir -p build && mojo build test/apikey_test.mojo -I src -I ../../json -o build/apikey-test && ./build/apikey-test" }
+# Full unit suite — what `moon run app-server:check` runs (events + run-queue + work-queue + store + scheduler + apikey).
+test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-store", "test-scheduler", "test-apikey"] }

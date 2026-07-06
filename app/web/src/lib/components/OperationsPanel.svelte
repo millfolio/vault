@@ -89,6 +89,85 @@
   let model = $state("");
   let now = $state(Math.floor(Date.now() / 1000));
 
+  // ── Frontier-model API key (real install only) ──────────────────────────────
+  // Native `.app` users who never set ANTHROPIC_API_KEY can paste it here; codegen
+  // reads it on the next question with no restart. The server NEVER returns the full
+  // key — only whether one is set + a masked "…last4" hint. We never store it in the
+  // browser: it's POSTed and forgotten.
+  let apiKeySet = $state(false);
+  let apiKeyHint = $state("");
+  let apiKeyInput = $state("");
+  let apiKeyBusy = $state(false);
+  let apiKeyMsg = $state("");
+  let apiKeyErr = $state("");
+
+  async function loadApiKey() {
+    const base = apiBase();
+    if (base === null || demo) return;
+    try {
+      const r = await fetch(`${base}/api/settings/apikey`);
+      if (!r.ok) return; // older server → block simply stays hidden
+      const d = await r.json();
+      apiKeySet = !!d.set;
+      apiKeyHint = typeof d.hint === "string" ? d.hint : "";
+    } catch {
+      /* transient — the block just shows the unset state */
+    }
+  }
+
+  async function saveApiKey() {
+    const base = apiBase();
+    if (base === null || demo) return;
+    apiKeyMsg = "";
+    apiKeyErr = "";
+    const key = apiKeyInput.trim();
+    if (!key) {
+      apiKeyErr = "Paste your Anthropic API key first.";
+      return;
+    }
+    apiKeyBusy = true;
+    try {
+      const r = await fetch(`${base}/api/settings/apikey`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        apiKeyErr = d.error ?? `couldn't save (HTTP ${r.status})`;
+        return;
+      }
+      apiKeySet = !!d.set;
+      apiKeyHint = typeof d.hint === "string" ? d.hint : "";
+      apiKeyInput = ""; // never keep the raw key around in the browser
+      apiKeyMsg = "Saved — your next question will use it.";
+    } catch (e) {
+      apiKeyErr = e instanceof Error ? e.message : "couldn't save the key";
+    } finally {
+      apiKeyBusy = false;
+    }
+  }
+
+  async function clearApiKey() {
+    const base = apiBase();
+    if (base === null || demo) return;
+    apiKeyMsg = "";
+    apiKeyErr = "";
+    apiKeyBusy = true;
+    try {
+      const r = await fetch(`${base}/api/settings/apikey`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      apiKeySet = !!d.set;
+      apiKeyHint = typeof d.hint === "string" ? d.hint : "";
+      apiKeyInput = "";
+      apiKeyMsg = "Cleared.";
+    } catch (e) {
+      apiKeyErr = e instanceof Error ? e.message : "couldn't clear the key";
+    } finally {
+      apiKeyBusy = false;
+    }
+  }
+
   // opLabel + fmtDur + fmtEta live in $lib/format (pure + unit-tested).
 
   function fmtWhen(epoch: number): string {
@@ -272,6 +351,7 @@
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => { if (d && typeof d.model === "string") model = d.model; })
         .catch(() => {});
+      loadApiKey(); // the Frontier-model key state (set/hint)
     }
     if (apiBase() !== null) {
       pollStatus();
@@ -510,6 +590,46 @@
           <div class="stat wide"><span class="slabel">Model</span><span class="sval">{model}</span></div>
         {/if}
       </div>
+    </div>
+  {/if}
+
+  <!-- ── Frontier model: the Anthropic API key codegen needs (real install only) ─ -->
+  {#if !demo && !mock}
+    <div class="block" id="apikey">
+      <h3 class="bhead">Frontier model</h3>
+      <p class="khint">
+        Writing a vault program uses Anthropic's frontier model. Paste your API
+        key so questions work without setting an environment variable. It's
+        stored on this device only (owner-only file) and never leaves it except
+        to Anthropic.
+      </p>
+      {#if apiKeySet}
+        <p class="kstate">Key is set <span class="kmask">{apiKeyHint}</span></p>
+      {:else}
+        <p class="kstate kunset">No key set — vault questions can't run yet.</p>
+      {/if}
+      <div class="krow">
+        <input
+          class="kinput"
+          type="password"
+          autocomplete="off"
+          placeholder="sk-ant-…"
+          bind:value={apiKeyInput}
+          disabled={apiKeyBusy}
+          onkeydown={(e) => { if (e.key === "Enter") saveApiKey(); }}
+        />
+        <button class="kbtn" onclick={saveApiKey} disabled={apiKeyBusy || !apiKeyInput.trim()}>
+          {apiKeySet ? "Replace" : "Save"}
+        </button>
+        {#if apiKeySet}
+          <button class="kbtn ghost" onclick={clearApiKey} disabled={apiKeyBusy}>Clear</button>
+        {/if}
+      </div>
+      {#if apiKeyErr}
+        <p class="kmsg kerr">{apiKeyErr}</p>
+      {:else if apiKeyMsg}
+        <p class="kmsg kok">{apiKeyMsg}</p>
+      {/if}
     </div>
   {/if}
 </section>
@@ -866,6 +986,76 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* ── Frontier-model API key ────────────────────────────────────────────────── */
+  .khint {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    max-width: 62ch;
+  }
+  .kstate {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .kstate.kunset {
+    color: var(--err, #e5484d);
+  }
+  .kmask {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+  }
+  .krow {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .kinput {
+    flex: 1 1 240px;
+    min-width: 180px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .kinput:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .kbtn {
+    padding: 8px 14px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .kbtn.ghost {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .kbtn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .kmsg {
+    margin: 8px 0 0;
+    font-size: 12px;
+  }
+  .kmsg.kerr {
+    color: var(--err, #e5484d);
+  }
+  .kmsg.kok {
+    color: var(--accent);
   }
   /* ── shared ──────────────────────────────────────────────────────────────── */
   .empty {

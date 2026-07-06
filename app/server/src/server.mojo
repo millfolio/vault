@@ -41,7 +41,8 @@ from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 from std.ffi import external_call, c_char, c_int
 from std.time import perf_counter_ns
 
-from settings import load_config
+from settings import load_config, Config
+from apikey import apikey_looks_valid, apikey_hint, apikey_status_json
 from wiring import build_vault_orchestrator
 from orchestrator import (
     Orchestrator,
@@ -507,6 +508,76 @@ def _ensure_reveal_secret() -> String:
         return secret^
     except:
         return String("")
+
+
+def _apikey_path() -> String:
+    """The in-app Anthropic API-key store: a 0600 file in the data dir. Written
+    when a user pastes a key into the in-app Settings field (native `.app` users
+    who never set `ANTHROPIC_API_KEY`); read by codegen (`_apply_persisted_apikey`)
+    when the process env has no key. Mirrors the `.reveal-secret` owner-only
+    scheme — the file holds a secret, so it's never world-readable or logged."""
+    return _config_dir() + "/.anthropic-key"
+
+
+def _read_apikey_file() -> String:
+    """The persisted key (trimmed), or "" when absent/unreadable. Best-effort —
+    any failure means "no stored key" so codegen falls back to local-only mode."""
+    try:
+        var p = _apikey_path()
+        if exists(p):
+            with open(p, "r") as f:
+                return String(f.read().strip())
+    except:
+        pass
+    return String("")
+
+
+def _write_apikey_file(key: String) raises:
+    """Persist `key` atomically at 0600: write a temp file, tighten it to
+    owner-only, then rename over the target so a reader never sees a partial or
+    a briefly world-readable file. The key is a SECRET — never logged."""
+    var trimmed = String(key.strip())
+    var final = _apikey_path()
+    var tmp = final + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(trimmed)
+    _chmod(tmp, 0o600)  # owner read/write only, BEFORE it's visible at `final`
+    var s = _cstr(tmp)
+    var d = _cstr(final)
+    var rc = external_call["rename", c_int](s, d)
+    s.free()
+    d.free()
+    if Int(rc) != 0:
+        raise Error("could not persist API key")
+
+
+def _clear_apikey_file():
+    """Remove the persisted key (best-effort). Codegen then reverts to the
+    process env / local-only mode on the next question."""
+    try:
+        var p = _apikey_path()
+        if exists(p):
+            remove(p)
+    except:
+        pass
+
+
+def _apply_persisted_apikey(mut cfg: Config):
+    """Inject the in-app key into the freshly-loaded config when the environment
+    supplied none. `load_config()` already honours `ANTHROPIC_API_KEY` from the
+    process env (the launch-agent forward) with highest precedence; only when
+    that's empty do we fall back to the persisted `.anthropic-key` file. When we
+    do supply a key, restore the remote token budget (load_config zeroes it under
+    a keyless config → local-only mode) so codegen actually reaches the frontier
+    model. Called right after every `load_config()` on the ask/codegen path, so a
+    key pasted in-app takes effect on the very next question — no restart."""
+    if cfg.api_key != "":
+        return  # env (or config file) already provided one — leave it be
+    var stored = _read_apikey_file()
+    if stored == "":
+        return  # nothing persisted — stay in local-only mode
+    cfg.api_key = stored^
+    cfg.remote_token_budget = -1  # re-enable remote (load_config forced 0)
 
 
 def _mint_reveal_token() raises -> String:
@@ -1131,6 +1202,14 @@ struct Api(Copyable, Handler, Movable):
             return self.handle_tags_missing_defaults()
         if path == "/api/tags/add-defaults":
             return self.handle_tags_add_defaults(req)
+        # In-app Anthropic API key (for native users who never set the env var):
+        # GET → {set, hint}; POST {key} → store 0600 (empty key clears); DELETE → clear.
+        if path == "/api/settings/apikey":
+            if req.method == Method.POST:
+                return self.handle_apikey_post(req)
+            if req.method == Method.DELETE:
+                return self.handle_apikey_delete()
+            return self.handle_apikey_get()
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -1327,6 +1406,55 @@ struct Api(Copyable, Handler, Movable):
         ):
             return _cors(unauthorized('{"error":"bad local secret"}'))
         return _cors(ok_json('{"token":"' + _mint_reveal_token() + '"}'))
+
+    def handle_apikey_get(self) raises -> Response:
+        """GET /api/settings/apikey → `{set, hint}`. Reports whether a key is
+        available to codegen (the process env OR the persisted store) and, when
+        one is stored in-app, a masked `…last4` hint. NEVER returns the full key.
+        Disabled in the demo (it has its own replay-engine key handling)."""
+        if _is_demo():
+            return _forbidden('{"error":"not available in demo"}')
+        # A key from the launch-agent env counts as "set" (codegen can reach the
+        # model), but there's no stored value to hint — show it as set, no hint.
+        var env_key = String(getenv("ANTHROPIC_API_KEY", "").strip())
+        var stored = _read_apikey_file()
+        var is_set = env_key != "" or stored != ""
+        var hint = apikey_hint(stored) if stored != "" else String("")
+        return _cors(ok_json(apikey_status_json(is_set, hint)))
+
+    def handle_apikey_post(self, req: Request) raises -> Response:
+        """POST /api/settings/apikey {key} → persist the key 0600 in the data dir
+        so codegen picks it up on the next question (no restart). An empty key
+        clears the store (same as DELETE). Validated with a minimal sanity gate;
+        never logged or echoed back in full — only a masked hint is returned.
+        Disabled in the demo."""
+        if _is_demo():
+            return _forbidden('{"error":"not available in demo"}')
+        var key: String
+        try:
+            var j = loads(req.text())
+            key = String(j["key"].string_value().strip())
+        except:
+            return _cors(bad_request('{"error":"expected {\\"key\\":\\"…\\"}"}'))
+        if key == "":
+            return self.handle_apikey_delete()  # empty → clear
+        if not apikey_looks_valid(key):
+            return _cors(
+                bad_request(
+                    '{"error":"that doesn\'t look like an API key"}'
+                )
+            )
+        _write_apikey_file(key)
+        return _cors(ok_json(apikey_status_json(True, apikey_hint(key))))
+
+    def handle_apikey_delete(self) raises -> Response:
+        """DELETE /api/settings/apikey (or POST {key:""}) → clear the stored key.
+        Codegen reverts to the process env / local-only mode. Disabled in demo."""
+        if _is_demo():
+            return _forbidden('{"error":"not available in demo"}')
+        _clear_apikey_file()
+        var env_key = String(getenv("ANTHROPIC_API_KEY", "").strip())
+        return _cors(ok_json(apikey_status_json(env_key != "", String(""))))
 
     def handle_demo_verify(self, req: Request) raises -> Response:
         """POST /api/demo/verify {token} → validate the Turnstile token with Cloudflare
@@ -3844,6 +3972,9 @@ def on_connect(mut conn: WsConnection) raises:
     )  # our run-queue ticket; >= 0 once we've entered (see runqueue.mojo)
     try:
         var cfg = load_config()
+        # Fall back to the in-app key store when the env supplied none, so a key
+        # pasted into the Settings field takes effect on this very next question.
+        _apply_persisted_apikey(cfg)
         var vault_dir = resolve_vault_dir()
         var orch = build_vault_orchestrator(cfg, vault_dir)
 
@@ -4291,6 +4422,10 @@ def on_connect(mut conn: WsConnection) raises:
 
 def main() raises:
     var cfg = load_config()
+    # The `/chat` orchestrator is built once here from this cfg, so seed it from
+    # the in-app key store too (the WS ask path re-loads per connection). A key
+    # pasted later still lands via the per-connection reload on the WS path.
+    _apply_persisted_apikey(cfg)
 
     # Ensure the data dir exists (new macOS-native location; no migration) so the
     # first stats/asks/controller write doesn't race a missing directory.

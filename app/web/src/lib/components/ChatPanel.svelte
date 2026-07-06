@@ -235,6 +235,40 @@
     if (explicit) return explicit.replace(/\/$/, "");
     return "";
   }
+  // ── Missing-key affordance ──────────────────────────────────────────────────
+  // Codegen runs on the frontier model; with no ANTHROPIC_API_KEY it errors with the
+  // orchestrator's _NO_REMOTE_MSG ("…set ANTHROPIC_API_KEY and retry"). Native `.app`
+  // users never set that env var and have nowhere to fix it, so we surface an inline
+  // key field right under that error. Real product only (the demo has its own key).
+  function needsApiKey(text: string | undefined): boolean {
+    return !!text && text.includes("ANTHROPIC_API_KEY");
+  }
+  let keyFixInput = $state("");
+  let keyFixBusy = $state(false);
+  let keyFixDone = $state(false);
+  let keyFixErr = $state("");
+  async function saveKeyFix() {
+    const key = keyFixInput.trim();
+    if (!key) { keyFixErr = "Paste your key first."; return; }
+    keyFixBusy = true;
+    keyFixErr = "";
+    try {
+      const r = await fetch(`${apiBase()}/api/settings/apikey`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { keyFixErr = d.error ?? `couldn't save (HTTP ${r.status})`; return; }
+      keyFixInput = ""; // never keep the raw key in the browser
+      keyFixDone = true;
+    } catch (e) {
+      keyFixErr = e instanceof Error ? e.message : "couldn't save the key";
+    } finally {
+      keyFixBusy = false;
+    }
+  }
+
   let proposalState = $state<Record<string, "saving" | "added" | "error">>({});
   // Per-proposal edit state — the model's suggested keywords are just a starting
   // point (often not your actual merchants). The user can keep them as-is, edit them,
@@ -486,6 +520,31 @@
               📄 1st source:
               <a href="/api/doc?alias={it.sourceAlias}" target="_blank" rel="noopener">{it.source}</a>
             </p>
+          {/if}
+          {#if it.kind === "assistant" && !demo && needsApiKey(it.text)}
+            {#if keyFixDone}
+              <p class="keyfix-done">Key saved — ask your question again.</p>
+            {:else}
+              <div class="keyfix">
+                <p class="keyfix-lead">Add your Anthropic API key to run vault questions:</p>
+                <div class="keyfix-row">
+                  <input
+                    class="keyfix-input"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="sk-ant-…"
+                    bind:value={keyFixInput}
+                    disabled={keyFixBusy}
+                    onkeydown={(e) => { if (e.key === "Enter") saveKeyFix(); }}
+                  />
+                  <button class="keyfix-btn" onclick={saveKeyFix} disabled={keyFixBusy || !keyFixInput.trim()}>
+                    Save key
+                  </button>
+                </div>
+                {#if keyFixErr}<p class="keyfix-err">{keyFixErr}</p>{/if}
+                <p class="keyfix-hint">Stored on this device only. You can also manage it under Operations → Frontier model.</p>
+              </div>
+            {/if}
           {/if}
         </div>
       {:else if it.kind === "status"}
@@ -930,6 +989,71 @@
   }
   .msg.user p {
     background: var(--accent-dim);
+  }
+
+  /* missing-key affordance — inline under the no-key error */
+  .keyfix {
+    margin: 8px 12px 4px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+  }
+  .keyfix-lead {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .keyfix-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .keyfix-input {
+    flex: 1 1 200px;
+    min-width: 160px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel, var(--bg));
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .keyfix-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .keyfix-btn {
+    padding: 8px 14px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .keyfix-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .keyfix-hint {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .keyfix-err {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--err, #e5484d);
+  }
+  .keyfix-done {
+    margin: 8px 12px 4px;
+    font-size: 13px;
+    color: var(--accent);
   }
 
   /* status — small, inline, dim */
