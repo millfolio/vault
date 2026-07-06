@@ -686,13 +686,14 @@ struct Sandbox(Movable):
         var total = full.byte_length()
         if total <= h.cursor:
             return List[String]()  # no new bytes
-        # New bytes are [cursor, total). split() then drop the already-consumed
-        # prefix by byte count: re-split the whole file and reconstruct the tail
-        # is awkward, so read the new slice via a fresh String of the trailing bytes.
-        var b = full.as_bytes()
-        var chunk = String("")
-        for i in range(h.cursor, total):
-            chunk += chr(Int(b[i]))
+        # New bytes are [cursor, total): slice them off as an owned String,
+        # PRESERVING the raw UTF-8 bytes. A byte-by-byte `chr(Int(b[i]))` would
+        # decode each byte as its own Latin-1 codepoint and re-UTF-8-encode it —
+        # double-encoding every multi-byte char (an em-dash's E2 80 94 → "â" + two
+        # C2-prefixed controls), which mangled chart/result titles. A newline
+        # (0x0A) never appears inside a UTF-8 multibyte sequence, so a char split
+        # across a poll boundary is stitched back whole via `h.pending`.
+        var chunk = String(unsafe_from_utf8=full.as_bytes()[h.cursor : total])
         h.cursor = total
 
         var buf = h.pending + chunk

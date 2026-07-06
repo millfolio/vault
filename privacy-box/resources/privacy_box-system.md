@@ -223,6 +223,13 @@ Emit data only when it genuinely adds to the answer; a plain reply still just us
 Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quantity,
 `date(iso)` for a date, or a bare `String` for a plain label.
 
+**Titles/labels — plain ASCII only.** In every `kpi`/`table`/`series`/`geo_map`/`pie`
+TITLE and text LABEL, use plain ASCII punctuation: write a hyphen `-` or the word
+"by"/"per", NEVER an em-dash `—`/en-dash `–` or other fancy Unicode punctuation
+(curly quotes, ellipsis `…`, bullets). So `series("Restaurant spending by month",
+"time")` ✓ — `series("Restaurant — spending by month", "time")` ✗. (Chart headings
+render best as clean ASCII.)
+
 **The money rule — TWO different functions, do NOT mix them up:**
 - `money(x)` → a formatted **STRING** (`"$1,234.56"`). It is ONLY for the narrative
   sentence in `result_text(...)`/`print_answer(...)`. It is a string, so it carries NO

@@ -137,6 +137,9 @@ test-index-steps = { cmd = "mkdir -p build && rm -rf build/index-steps-data && M
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
 test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/test/sandbox_test.mojo -I privacy-box/src -I ../logging.mojo/src -o build/sandbox-test && PRIVACY_BOX_HOME=\"$PWD/privacy-box\" ./build/sandbox-test" }
+# Gate: run_poll preserves raw multi-byte UTF-8 (em-dash) in the streamed line —
+# no byte-by-byte Latin-1 re-encode. Regression guard for the mojibake title bug.
+test-emdash = { cmd = "mkdir -p build && mojo build privacy-box/test/emdash_utf8_test.mojo -I privacy-box/src -I ../logging.mojo/src -o build/emdash-utf8-test && ./build/emdash-utf8-test" }
 # Gate: M/D statement dates fold with the statement's year into sortable ISO.
 test-dates = { cmd = "mkdir -p build && mojo build core/test/extract/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
 # Gate: the relative-date wall-clock API (wall_clock/days_ago/months_ago/years_ago)
@@ -169,4 +172,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-dates", "test-wallclock", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-result", "test-strip", "test-mojo-version"] }
