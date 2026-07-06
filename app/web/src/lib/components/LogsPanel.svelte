@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import DisclaimerContent from "./DisclaimerContent.svelte";
 
   // System info from the server (/api/system): where the data + logs live, plus the
   // running version/model. The point of this tab is discoverability — when an answer
@@ -126,6 +127,22 @@
       </p>
     </div>
   {/if}
+
+  <!-- Always-available legal/liability notice (the same text as the first-run
+       notice), so "what/where/legal" info all lives together on this tab. -->
+  <div class="group legal">
+    <h3>Legal</h3>
+    <details class="disc-details">
+      <summary>Disclaimer</summary>
+      <div class="disc-inline">
+        <DisclaimerContent heading="h3" />
+      </div>
+    </details>
+    <p class="tip">
+      Full text online:
+      <a href="https://millfolio.app/disclaimer" target="_blank" rel="noopener">millfolio.app/disclaimer ↗</a>
+    </p>
+  </div>
 </section>
 
 <style>
@@ -227,5 +244,19 @@
   }
   .muted {
     color: var(--text-dim);
+  }
+  .disc-details > summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--accent);
+    padding: 4px 0;
+    list-style: revert;
+  }
+  .disc-details > summary:hover {
+    text-decoration: underline;
+  }
+  .disc-inline {
+    padding: 8px 0 4px;
+    max-width: 70ch;
   }
 </style>

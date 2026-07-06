@@ -5,6 +5,7 @@
   import VaultPanel from "$lib/components/VaultPanel.svelte";
   import StatsPanel from "$lib/components/StatsPanel.svelte";
   import OperationsView from "$lib/components/OperationsView.svelte";
+  import DisclaimerNotice from "$lib/components/DisclaimerNotice.svelte";
   import { createMockClient } from "$lib/client";
   import { createWsClient } from "$lib/wsClient";
   import { fmtEta, shortId } from "$lib/format";
@@ -711,6 +712,12 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="catalog-backdrop" onclick={() => (catalogOpen = false)}></div>
+{/if}
+
+<!-- First-run liability/privacy notice — real install only (the public demo shows
+     its own "About this demo" intro instead). Self-gates on a localStorage flag. -->
+{#if !isDemo}
+  <DisclaimerNotice />
 {/if}
 
 {#if showIntro}
