@@ -96,8 +96,7 @@ def _session_append(text: String):
 
 comptime _NO_REMOTE_MSG = (
     "This question needs the frontier model to write its program, but no remote"
-    " budget is available — set ANTHROPIC_API_KEY and retry. (The on-device"
-    " model is no longer used to write programs; it isn't capable enough.)"
+    " budget is available — set ANTHROPIC_API_KEY and retry."
 )
 
 
