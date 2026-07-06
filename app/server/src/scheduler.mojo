@@ -28,6 +28,11 @@ comptime KIND_PREPARE = "index-prepare"
 comptime KIND_INDEX = "index"
 comptime KIND_FINALIZE = "finalize"
 comptime KIND_BACKFILL = "backfill"
+# The first-run sample-data import: ONE item that downloads + unpacks the demo vault
+# (via flare's HttpClient, off-reactor in the orchestrator loop), then enqueues a
+# normal index run over it. Not an index kind (no engine); runs at index priority so
+# it's picked ahead of backfill. See server.mojo `_run_demo_download_item`.
+comptime KIND_DEMO = "demo-download"
 
 # The single payload separator. `work_queue` escapes tabs on serialize, so an embedded
 # `\t` round-trips through the queue file intact and can safely delimit sub-fields.
@@ -112,6 +117,8 @@ def short_payload(kind: String, payload: String) raises -> String:
         if len(parts) >= 1:
             return basename(String(parts[0]))
         return payload
+    if kind == KIND_DEMO:
+        return String("sample data")
     return payload
 
 

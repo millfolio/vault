@@ -260,9 +260,11 @@
   let demoImport = $state<{
     state: string;
     detail: string;
-    progress?: number; // 0..100 during download (-1/absent → indeterminate)
+    progress?: number; // 0..100 (download %, then the indexing % of files)
     bytesDone?: number;
     bytesTotal?: number;
+    current?: number; // indexing phase: files done…
+    total?: number; //  …of this many (the demo import mirrors the orchestrator)
   } | null>(null);
   let demoReady = $state(false);
   let demoImportTimer: ReturnType<typeof setTimeout> | undefined;
@@ -307,6 +309,8 @@
             progress: typeof d.progress === "number" ? d.progress : undefined,
             bytesDone: typeof d.bytesDone === "number" ? d.bytesDone : undefined,
             bytesTotal: typeof d.bytesTotal === "number" ? d.bytesTotal : undefined,
+            current: typeof d.current === "number" ? d.current : undefined,
+            total: typeof d.total === "number" ? d.total : undefined,
           };
           if (d.state === "done") { onDemoDone(); return; }
           if (d.state === "error") return; // leave the error visible with a Retry
@@ -353,6 +357,8 @@
               progress: typeof d.progress === "number" ? d.progress : undefined,
               bytesDone: typeof d.bytesDone === "number" ? d.bytesDone : undefined,
               bytesTotal: typeof d.bytesTotal === "number" ? d.bytesTotal : undefined,
+              current: typeof d.current === "number" ? d.current : undefined,
+              total: typeof d.total === "number" ? d.total : undefined,
             };
             pollDemoImport();
           } else if (d.state === "done" && d.present) {
@@ -795,14 +801,15 @@
           <button class="onb-primary" onclick={startDemoImport}>Download demo data</button>
           <span class="onb-hint">A few sample bank &amp; card statements (~444 transactions).</span>
         {:else if demoImport.state === "downloading" || demoImport.state === "indexing"}
-          {@const pct = demoImport.state === "downloading" && typeof demoImport.progress === "number" && demoImport.progress >= 0 ? demoImport.progress : -1}
+          {@const pct = typeof demoImport.progress === "number" && demoImport.progress >= 0 ? demoImport.progress : -1}
+          {@const idxN = demoImport.state === "indexing" && typeof demoImport.current === "number" && typeof demoImport.total === "number" && demoImport.total > 0 ? `${demoImport.current} of ${demoImport.total} files` : ""}
           <div class="onb-progress-wrap" role="status" aria-live="polite">
             <span class="onb-progress">
               {#if pct < 0}<span class="onb-spinner" aria-hidden="true"></span>{/if}
               {#if demoImport.state === "downloading"}
                 {pct >= 0 ? `Downloading sample data — ${pct}%` : "Downloading sample data…"}
               {:else}
-                Indexing sample data (first run loads the embedding model)…
+                Indexing sample data{idxN ? ` — ${idxN}` : " (first run loads the embedding model)…"}
               {/if}
             </span>
             {#if pct >= 0}

@@ -88,6 +88,7 @@ from scheduler import (
     KIND_INDEX,
     KIND_FINALIZE,
     KIND_BACKFILL,
+    KIND_DEMO,
 )
 
 # The LanceDB-free registry/tags/retag store — the SAME functions the `millfolio`
@@ -1706,14 +1707,16 @@ struct Api(Copyable, Handler, Movable):
         return _cors(ok_json('{"ok":true,"model":' + json_escape(id) + "}"))
 
     def handle_demo_download(self) raises -> Response:
-        """POST /api/demo/download → download the hosted sample vault
-        (MILLFOLIO_DEMO_URL, default https://millfolio.app/demo-vault.zip), unpack
-        it into `<data>/demo-vault/`, and index it so its docs + transactions become
-        queryable — all as a DETACHED background job the client polls via
-        /api/demo/status. Idempotent: a finished import no-ops to done. Disabled in
-        the public replay demo (its vault is fixed + synthetic). Indexing needs the
-        engine runner (MILLFOLIO_RUN_SCRIPT), so we 400 when it isn't configured.
-        """
+        """POST /api/demo/download → import the hosted sample vault
+        (MILLFOLIO_DEMO_URL, default https://millfolio.app/demo-vault.zip): ENQUEUE a
+        single `demo-download` work item and return immediately. The orchestrator loop
+        then downloads + unpacks it into `<data>/demo-vault/` (flare's HttpClient,
+        off-reactor), then enqueues a normal per-file index run over it — so the whole
+        import flows through the ONE scheduler and shows in Operations (the download as a
+        job, then the per-file indexing). The client polls /api/demo/status. Idempotent:
+        a finished import no-ops to done. Disabled in the public replay demo (its vault
+        is fixed + synthetic). Indexing needs the engine runner (MILLFOLIO_RUN_SCRIPT),
+        so we 400 when it isn't configured."""
         if _is_demo():
             return _cors(
                 unauthorized('{"error":"sample data is disabled in the demo"}')
@@ -1726,13 +1729,24 @@ struct Api(Copyable, Handler, Movable):
                 )
             )
         # Already imported → no-op to done (don't re-download a present vault).
-        if _demo_present() and _demo_read_state() == "done":
+        if _demo_present() and _demo_effective_state() == "done":
             return _cors(ok_json('{"ok":true,"state":"done"}'))
         if _demo_running():
             return _cors(
                 bad_request('{"error":"sample data import already running"}')
             )
-        if not _start_demo_detached():
+        # Mark downloading synchronously (so an immediate status poll / re-POST sees it
+        # in flight), stamp the pending Operations row, then enqueue the work item. The
+        # orchestrator loop picks it up and does the actual fetch + index off-reactor.
+        _write_small(_demo_state_path(), "downloading")
+        _write_small(_demo_log_path(), "Downloading sample data…")
+        _write_demo_pending_op(_epoch_s())
+        try:
+            _ = wq_enqueue(
+                String(KIND_DEMO), _demo_dir(), _epoch_s(), PRIO_INDEX
+            )
+        except:
+            _write_small(_demo_state_path(), "error")
             return _cors(
                 bad_request('{"error":"could not start sample data import"}')
             )
@@ -2287,6 +2301,8 @@ def _orchestrator_worker(arg: _OpaquePtr) -> _OpaquePtr:
                     session_started = 0
                     session_tagged = 0
                     session_tags = List[String]()
+            elif item.kind == KIND_DEMO:
+                _run_demo_download_item(item)
             else:
                 _run_index_item(item)
             _usleep(idle_us)
@@ -2913,11 +2929,15 @@ def _provision_fetch(id: String) -> Bool:
 
 
 # ── sample vault (first-run onboarding) ────────────────────────────────────────
-# A new user with an empty vault can "try it with sample data": we fetch a small
-# hosted zip (MILLFOLIO_DEMO_URL), unpack it into `<data>/demo-vault/`, and index
-# it via the engine run-script — the SAME `millfolio index` path `mill index` uses,
-# so the docs + transactions become queryable. Runs as a DETACHED shell job (like a
-# weight download), tracking state in a small file the status endpoint reports.
+# A new user with an empty vault can "try it with sample data": the import is a single
+# `demo-download` WORK ITEM the orchestrator loop drains (ORCHESTRATOR.md §2.1) — it
+# fetches the small hosted zip (MILLFOLIO_DEMO_URL) with flare's HttpClient IN-PROCESS
+# (off-reactor, like the codegen/embedding clients — no `curl`), unpacks it into
+# `<data>/demo-vault/`, then enqueues a normal per-file index run over it. So the
+# download and the per-file indexing BOTH flow through the one scheduler and surface in
+# Operations, and the download never blocks the single-threaded HTTP reactor. State is
+# tracked in small files the status endpoint reports; the whole import is recorded as
+# ONE `demo` operation (the index run reuses `_start_index_run` with `record_op=False`).
 
 
 def _demo_url() -> String:
@@ -2944,11 +2964,7 @@ def _demo_state_path() -> String:
 
 
 def _demo_log_path() -> String:
-    return _config_dir() + "/.demo.log"  # captured curl/unzip/index output
-
-
-def _demo_hdr_path() -> String:
-    return _config_dir() + "/.demo.hdr"  # the download's dumped response headers
+    return _config_dir() + "/.demo.log"  # captured download/unpack detail line
 
 
 def _demo_op_path() -> String:
@@ -2956,67 +2972,6 @@ def _demo_op_path() -> String:
     read back once the import settles to record ONE operation-history row — the same
     lazy-finalize pattern index/reindex runs use (`_pending_op_path`)."""
     return _config_dir() + "/.demo.op"
-
-
-def _ci_starts_with(line: String, prefix_lower: String) -> Bool:
-    """True iff `line` begins with `prefix_lower` (an already-lowercase ASCII prefix),
-    compared case-insensitively. Used to spot the `content-length:` header regardless
-    of the server's capitalisation."""
-    var lb = line.as_bytes()
-    var pb = prefix_lower.as_bytes()
-    if len(lb) < len(pb):
-        return False
-    for i in range(len(pb)):
-        var c = Int(lb[i])
-        if c >= 65 and c <= 90:  # A–Z → lower
-            c += 32
-        if c != Int(pb[i]):
-            return False
-    return True
-
-
-def _demo_read_total() -> Int:
-    """The sample-vault zip's expected byte size, parsed from the LAST `Content-Length`
-    header in the download's dumped response headers (`curl -D`). The last one wins so a
-    redirect chain's intermediate headers don't shadow the final 200's size. Returns -1
-    when unknown (headers not yet written, chunked response with no Content-Length, or a
-    parse miss) → the client falls back to the indeterminate spinner."""
-    try:
-        var s: String
-        with open(_demo_hdr_path(), "r") as f:
-            s = f.read()
-        var needle = String("content-length:")
-        var nlen = needle.byte_length()
-        var lines = s.split("\n")
-        var total = -1
-        for i in range(len(lines)):
-            var ln = String(lines[i].strip())
-            if not _ci_starts_with(ln, needle):
-                continue
-            var n = 0
-            var indig = False
-            var b = ln.as_bytes()
-            for j in range(nlen, len(b)):
-                var c = Int(b[j])
-                if c >= 48 and c <= 57:
-                    n = n * 10 + (c - 48)
-                    indig = True
-                elif indig:
-                    break
-            if indig and n > 0:
-                total = n  # keep the last valid Content-Length
-        return total
-    except:
-        return -1
-
-
-def _demo_zip_bytes() -> Int:
-    """Bytes of the partially/fully downloaded zip on disk — the numerator for the
-    download progress bar. 0 before the file appears; -1 on a stat error."""
-    try:
-        return Int(getsize(_demo_zip_path()))
-    except:
-        return 0
 
 
 def _demo_present() -> Bool:
@@ -3034,10 +2989,31 @@ def _demo_read_state() -> String:
         return String("idle")
 
 
+def _demo_effective_state() -> String:
+    """The sample-data import's state, SETTLED against the index queue. While the raw
+    `.demo.state` file says `indexing`, the actual per-file work runs as a normal index
+    run through the orchestrator — so the demo is still `indexing` while any index-family
+    item is queued/running, and once that drains it reflects the index run's outcome
+    (`done`, or `error` if a step failed). The settled outcome is persisted back to
+    `.demo.state` so the import records its Operations row exactly once. Other raw states
+    (downloading/done/error/idle) pass through unchanged."""
+    var raw = _demo_read_state()
+    if raw != "indexing":
+        return raw^
+    if index_active(_wq_list_safe()):
+        return String("indexing")
+    # The index run settled — reflect + persist its outcome.
+    if _index_read_state_raw() == "error":
+        _write_small(_demo_state_path(), "error")
+        return String("error")
+    _write_small(_demo_state_path(), "done")
+    return String("done")
+
+
 def _demo_running() -> Bool:
     """True while the import is genuinely in flight (downloading or indexing).
     """
-    var st = _demo_read_state()
+    var st = _demo_effective_state()
     return st == "downloading" or st == "indexing"
 
 
@@ -3059,48 +3035,53 @@ def _demo_progress() -> String:
 
 
 def _demo_status_json() raises -> String:
-    """{"state","detail","present","progress","bytesDone","bytesTotal"} for the
-    sample-vault import. `state` is idle|downloading|indexing|done|error; `present` is
-    whether the folder exists. While DOWNLOADING we report the zip's on-disk bytes over
-    its Content-Length (`progress` 0–99; -1 when the total is unknown → the client shows
-    an indeterminate spinner); once the download completes `progress` reads 100. Also
-    finalizes the operations-history row when the import has settled (see
+    """{"state","detail","present","progress","bytesDone","bytesTotal"[,"current",
+    "total"]} for the sample-vault import. `state` (settled via `_demo_effective_state`)
+    is idle|downloading|indexing|done|error; `present` is whether the folder exists.
+
+    The zip is tiny, so DOWNLOADING is a single blocking flare GET with no incremental
+    byte progress → `progress`/bytesDone/bytesTotal stay -1 (the client shows a spinner).
+    While INDEXING, the per-file work runs as a normal index run through the orchestrator,
+    so we surface its `current`/`total` files (the SAME queue-derived count as
+    /api/index/status) plus a `progress` percent, mirroring the download → indexing n/M
+    onboarding progress. Also finalizes the operations-history row once settled (see
     `_finalize_demo_op`)."""
     _finalize_demo_op()
-    var state = _demo_read_state()
+    var state = _demo_effective_state()
+    var detail = _demo_progress()
     var progress = -1
-    var bytes_done = -1
-    var bytes_total = -1
-    if state == "downloading":
-        var total = _demo_read_total()
+    var idx_current = -1
+    var idx_total = -1
+    if state == "indexing":
+        detail = _index_progress()  # the indexer's `[k/M] name` per-file line
+        var total = _read_runtotal()
         if total > 0:
-            bytes_total = total
-            var bd = _demo_zip_bytes()
-            if bd >= 0:
-                bytes_done = bd
-                var pct = (bd * 100) // total
-                if pct < 0:
-                    pct = 0
-                if pct > 99:
-                    pct = 99  # 100 only once the fetch is genuinely done
-                progress = pct
-    elif state == "indexing" or state == "done":
-        progress = 100  # download finished; indexing has its own detail line
-    return (
+            idx_total = total
+            idx_current = index_current(total, wq_list())
+            var pct = (idx_current * 100) // total
+            if pct < 0:
+                pct = 0
+            if pct > 99:
+                pct = 99  # 100 only once the run is genuinely done
+            progress = pct
+    elif state == "done":
+        progress = 100
+    var out = (
         '{"state":'
         + json_escape(state)
         + ',"detail":'
-        + json_escape(_demo_progress())
+        + json_escape(detail)
         + ',"present":'
         + ("true" if _demo_present() else "false")
         + ',"progress":'
         + String(progress)
-        + ',"bytesDone":'
-        + String(bytes_done)
-        + ',"bytesTotal":'
-        + String(bytes_total)
-        + "}"
+        + ',"bytesDone":-1,"bytesTotal":-1'
     )
+    if idx_total > 0:
+        out += ',"current":' + String(idx_current)
+        out += ',"total":' + String(idx_total)
+    out += "}"
+    return out^
 
 
 def _write_demo_pending_op(started: Int64):
@@ -3118,7 +3099,7 @@ def _finalize_demo_op():
     /api/operations) wins records the run exactly once. Best-effort; never raises."""
     if not exists(_demo_op_path()):
         return
-    var state = _demo_read_state()
+    var state = _demo_effective_state()
     if state != "done" and state != "error":
         return  # still downloading / indexing — nothing settled to record yet
     var claimed = _demo_op_path() + ".claiming"
@@ -3157,81 +3138,79 @@ def _finalize_demo_op():
         pass
 
 
-def _start_demo_detached() -> Bool:
-    """Start the DETACHED download+unpack+index of the sample vault (returns
-    immediately). A single &&-chain flips the state file through
-    downloading→indexing→done (or error on any failure); output is captured to the
-    log. `</dev/null &` so it outlives the request. False when the run-script isn't
-    configured (indexing would be impossible)."""
-    var run_script = String(getenv("MILLFOLIO_RUN_SCRIPT", "").strip())
-    if run_script == "":
+def _run_demo_download_item(item: WorkItem):
+    """Dispatch the one `demo-download` work item from the orchestrator loop (off the
+    reactor). Download + unpack the sample vault, then hand the actual indexing to the
+    orchestrator by enqueuing a normal per-file index run over `<data>/demo-vault/` —
+    so the per-file embedding shows in Operations like any other index. On any failure
+    the demo settles to `error`. Always `wq_done`s the item (a failed download isn't
+    retried — the user can hit Retry). Never raises (a loop step must not)."""
+    try:
+        if _demo_fetch_and_unpack():
+            # Hand off to the orchestrator: enqueue prepare → per-file index → finalize
+            # over the demo dir. `record_op=False` so the whole import is ONE `demo` op,
+            # not a separate `index` one. The loop drains these on the next iterations,
+            # and `_demo_effective_state` settles the demo to done/error from that run.
+            if _start_index_run([_demo_dir()], String("index"), False):
+                _write_small(_demo_state_path(), "indexing")
+                _write_small(
+                    _demo_log_path(),
+                    "Indexing sample data (first run loads the embedding"
+                    " model)…",
+                )
+            else:
+                _write_small(_demo_state_path(), "error")
+        else:
+            _write_small(_demo_state_path(), "error")
+        _ = wq_done(item.id)
+    except:
+        _write_small(_demo_state_path(), "error")
+        try:
+            _ = wq_done(item.id)
+        except:
+            pass
+
+
+def _demo_fetch_and_unpack() raises -> Bool:
+    """Fetch the hosted sample-vault zip with flare's HttpClient (blocking, in-process —
+    the SAME off-reactor client the codegen/embedding paths use, so NO `curl`), write it
+    to `<data>/.demo-vault.zip`, then unpack it into `<data>/demo-vault/`. Returns True
+    once the folder is present. The zip is tiny (~7 KB) so a single full-body GET is
+    fine — no incremental byte progress. Unpack is a one-line `unzip` shell-out (macOS
+    ships it; the priority was removing the non-universal `curl`). Best-effort; the
+    caller treats a False/raise as an import error."""
+    try:
+        _write_small(_demo_state_path(), "downloading")
+        var req = Request(method="GET", url=_demo_url())
+        var client = HttpClient()  # follows redirects (millfolio.app → asset)
+        var resp = client.send(req)
+        if resp.status != 200:
+            _write_small(
+                _demo_log_path(),
+                "Download failed (HTTP " + String(resp.status) + ")",
+            )
+            return False
+        with open(_demo_zip_path(), "w") as f:
+            f.write_bytes(Span(resp.body))
+    except e:
+        _write_small(_demo_log_path(), "Download error: " + String(e))
         return False
-    var data = _config_dir()
-    var dir = _demo_dir()
-    var zip = _demo_zip_path()
-    var state = _demo_state_path()
-    var log = _demo_log_path()
-    var hdr = _demo_hdr_path()
-    var url = _demo_url()
-    # printf/echo always succeed, so the whole pipeline can chain on && and any real
-    # failure short-circuits to the trailing `|| printf error`. `-D <hdr>` dumps the
-    # download's own response headers (Content-Length arrives BEFORE the body finishes),
-    # so the status endpoint can report a determinate download % without a second
-    # request — and if the response is header-less/chunked the total is simply absent →
-    # the client falls back to the spinner.
+    # Unpack: replace any prior copy, then extract the `demo-vault/` folder into the
+    # data dir. `unzip -o` overwrites; ships with macOS (unlike a bundled `curl`).
+    _write_small(_demo_log_path(), "Unpacking…")
     var cmd = (
-        "( printf downloading > '"
-        + state
-        + "' && echo 'Downloading sample data…' > '"
-        + log
-        + "'"
-        + " && curl -fsSL -D '"
-        + hdr
-        + "' '"
-        + url
-        + "' -o '"
-        + zip
-        + "' 2>> '"
-        + log
-        + "'"
-        + " && printf indexing > '"
-        + state
-        + "' && echo 'Unpacking…' >> '"
-        + log
-        + "'"
-        + " && rm -rf '"
-        + dir
-        + "' && unzip -o '"
-        + zip
-        + "' -d '"
-        + data
-        + "' >> '"
-        + log
-        + "' 2>&1"
-        + " && echo 'Indexing sample data (loads the embedding model)…' >> '"
-        + log
-        + "'"
-        + " && /bin/bash '"
-        + run_script
-        + "' index '"
-        + dir
-        + "' --force >> '"
-        + log
-        + "' 2>&1"
-        + " && printf done > '"
-        + state
-        + "' || printf error > '"
-        + state
-        + "' ) </dev/null &"
+        "rm -rf "
+        + _sh_squote(_demo_dir())
+        + " && unzip -o "
+        + _sh_squote(_demo_zip_path())
+        + " -d "
+        + _sh_squote(_config_dir())
+        + " >/dev/null 2>&1"
     )
-    _write_small(state, "downloading")
-    _write_small(log, "")
-    _write_small(hdr, "")  # cleared until curl -D dumps the download's headers
-    _write_demo_pending_op(_epoch_s())  # recorded in Operations history on settle
     var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
+    _ = external_call["system", Int32](cc)  # BLOCKS (no trailing &)
     cc.free()
-    return True
+    return _demo_present()
 
 
 # ── general folder/file indexing (Vault/Files) ────────────────────────────────
@@ -3672,7 +3651,9 @@ def _norm_roots(paths: List[String]) raises -> List[String]:
     return out^
 
 
-def _start_index_run(paths: List[String], kind: String) -> Bool:
+def _start_index_run(
+    paths: List[String], kind: String, record_op: Bool = True
+) -> Bool:
     """The index generator (ORCHESTRATOR.md §2.1): instead of spawning a detached
     monolithic `millfolio index`, ENUMERATE the tracked-paths union into its candidate
     files and enqueue one `index` work item per file (dedup coalesces repeats), bracketed
@@ -3682,7 +3663,10 @@ def _start_index_run(paths: List[String], kind: String) -> Bool:
     Computes the source base + file set with the SAME helpers the indexer uses
     (`common_base`/`collect_index_paths`/`manifest_for_files`) so per-file names match.
     Stamps every path as tracked (`lastIndexed = now`), resets the run log, records the
-    file total (for the `[k/M]` bar) and the pending-op marker (kind index|reindex).
+    file total (for the `[k/M]` bar) and — when `record_op` — the pending-op marker
+    (kind index|reindex). The sample-data import passes `record_op=False`: it drives the
+    SAME per-file index run through the orchestrator (so it shows in Operations), but the
+    whole download+index is recorded as ONE `demo` op instead of a separate `index` op.
     False when the run-script isn't configured or no paths were given."""
     var run_script = String(getenv("MILLFOLIO_RUN_SCRIPT", "").strip())
     if run_script == "" or len(paths) == 0:
@@ -3715,7 +3699,8 @@ def _start_index_run(paths: List[String], kind: String) -> Bool:
                 remove(_pending_op_path())
         except:
             pass
-        _write_pending_op(kind, now)
+        if record_op:
+            _write_pending_op(kind, now)
 
         # Enqueue prepare → per-file index → finalize (all at `now`; id order runs them
         # prepare-first, finalize-last). Dedup keeps a re-request from double-queuing.

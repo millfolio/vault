@@ -28,6 +28,7 @@ from scheduler import (
     KIND_INDEX,
     KIND_FINALIZE,
     KIND_BACKFILL,
+    KIND_DEMO,
 )
 from work_queue import WorkItem, PRIO_INDEX, PRIO_FINALIZE, PRIO_BACKFILL
 
@@ -186,6 +187,17 @@ def main() raises:
     fails += expect(
         short_payload(KIND_BACKFILL, "groceries") == "groceries",
         "backfill payload passes through (already a short scope)",
+    )
+    # The sample-data import item renders as a fixed label (its payload is the demo
+    # dir's absolute path — never leak it in the Operations queue view).
+    fails += expect(
+        short_payload(KIND_DEMO, "/Users/x/Library/.../demo-vault")
+        == "sample data",
+        "demo-download payload → 'sample data' (no path leak)",
+    )
+    fails += expect(
+        not is_index_kind(KIND_DEMO),
+        "demo-download is not an index kind",
     )
 
     if fails == 0:
