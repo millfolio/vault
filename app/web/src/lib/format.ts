@@ -99,6 +99,7 @@ export function opLabel(t: string): string {
   if (t === "index") return "Index";
   if (t === "reindex") return "Re-index";
   if (t === "backfill") return "Backfill";
+  if (t === "demo") return "Sample data";
   return t;
 }
 /** A duration (seconds between two epochs) as `3s` / `1m 04s`. Returns `—` for any

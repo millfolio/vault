@@ -9,6 +9,7 @@ import OperationsPanel from "./OperationsPanel.svelte";
 function stubFetch(opts: {
   operations?: unknown;
   indexStatus?: unknown;
+  demoStatus?: unknown;
   queue?: unknown;
   backfill?: unknown;
   gpu?: unknown;
@@ -21,6 +22,7 @@ function stubFetch(opts: {
     vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/index/status")) return json(opts.indexStatus ?? { state: "idle", detail: "" });
+      if (url.includes("/api/demo/status")) return json(opts.demoStatus ?? { state: "idle", detail: "" });
       if (url.includes("/api/orchestrator/queue")) return json(opts.queue ?? { items: [] });
       if (url.includes("/api/backfill/status")) {
         if (opts.backfill) return json(opts.backfill);
@@ -108,6 +110,45 @@ describe("OperationsPanel", () => {
       expect(screen.getByText("2 files queued")).toBeInTheDocument();
     });
     expect(screen.getByText("b.pdf")).toBeInTheDocument();
+  });
+
+  it("shows the sample-data import as a live 'Now' row with a download %", async () => {
+    stubFetch({
+      demoStatus: { state: "downloading", detail: "Downloading sample data…", progress: 42, bytesDone: 4200, bytesTotal: 10000 },
+    });
+    const { container } = render(OperationsPanel);
+    await waitFor(() => {
+      expect(container.querySelector(".op.live")).not.toBeNull();
+    });
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText("Downloading — 42%")).toBeInTheDocument();
+    // A determinate bar renders (not the idle line).
+    expect(screen.queryByText("Nothing running — the machine is idle.")).toBeNull();
+  });
+
+  it("shows the sample-data import indexing phase (indeterminate) in 'Now'", async () => {
+    stubFetch({
+      demoStatus: { state: "indexing", detail: "Indexing sample data…", progress: 100 },
+    });
+    const { container } = render(OperationsPanel);
+    await waitFor(() => {
+      expect(container.querySelector(".op.live")).not.toBeNull();
+    });
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText(/Indexing sample data/)).toBeInTheDocument();
+  });
+
+  it("renders a completed sample-data import in History as 'Sample data'", async () => {
+    stubFetch({
+      operations: [
+        { type: "demo", started: 1783200000, finished: 1783200042, status: "done", detail: "Indexing sample data…", files: 6, txns: 444 },
+      ],
+    });
+    render(OperationsPanel);
+    await waitFor(() => {
+      expect(screen.getByText("Sample data")).toBeInTheDocument();
+    });
+    expect(screen.getByText("444 txns")).toBeInTheDocument();
   });
 
   it("renders the global Controls (Pause + Priority) from backfill status", async () => {

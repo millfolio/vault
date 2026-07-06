@@ -256,7 +256,13 @@
   // sample vault (POST /api/demo/download, polled via /api/demo/status) so they can try
   // millfolio without pointing it at their own folder. `demoImport` mirrors the job
   // state (downloading|indexing|done|error); `demoReady` unlocks the suggested chips.
-  let demoImport = $state<{ state: string; detail: string } | null>(null);
+  let demoImport = $state<{
+    state: string;
+    detail: string;
+    progress?: number; // 0..100 during download (-1/absent → indeterminate)
+    bytesDone?: number;
+    bytesTotal?: number;
+  } | null>(null);
   let demoReady = $state(false);
   let demoImportTimer: ReturnType<typeof setTimeout> | undefined;
   // Suggested first questions — tuned for the sample data, dashboard question first.
@@ -294,7 +300,13 @@
       try {
         const d = await fetch("/api/demo/status").then((r) => (r.ok ? r.json() : null));
         if (d) {
-          demoImport = { state: d.state, detail: d.detail ?? "" };
+          demoImport = {
+            state: d.state,
+            detail: d.detail ?? "",
+            progress: typeof d.progress === "number" ? d.progress : undefined,
+            bytesDone: typeof d.bytesDone === "number" ? d.bytesDone : undefined,
+            bytesTotal: typeof d.bytesTotal === "number" ? d.bytesTotal : undefined,
+          };
           if (d.state === "done") { onDemoDone(); return; }
           if (d.state === "error") return; // leave the error visible with a Retry
         }
@@ -334,7 +346,13 @@
         .then((d) => {
           if (!d) return;
           if (d.state === "downloading" || d.state === "indexing") {
-            demoImport = { state: d.state, detail: d.detail ?? "" };
+            demoImport = {
+              state: d.state,
+              detail: d.detail ?? "",
+              progress: typeof d.progress === "number" ? d.progress : undefined,
+              bytesDone: typeof d.bytesDone === "number" ? d.bytesDone : undefined,
+              bytesTotal: typeof d.bytesTotal === "number" ? d.bytesTotal : undefined,
+            };
             pollDemoImport();
           } else if (d.state === "done" && d.present) {
             onDemoDone();
@@ -768,10 +786,28 @@
           <button class="onb-primary" onclick={startDemoImport}>Download demo data</button>
           <span class="onb-hint">A few sample bank &amp; card statements (~444 transactions).</span>
         {:else if demoImport.state === "downloading" || demoImport.state === "indexing"}
-          <span class="onb-progress" role="status" aria-live="polite">
-            <span class="onb-spinner" aria-hidden="true"></span>
-            {demoImport.state === "downloading" ? "Downloading sample data…" : "Indexing sample data (first run loads the embedding model)…"}
-          </span>
+          {@const pct = demoImport.state === "downloading" && typeof demoImport.progress === "number" && demoImport.progress >= 0 ? demoImport.progress : -1}
+          <div class="onb-progress-wrap" role="status" aria-live="polite">
+            <span class="onb-progress">
+              {#if pct < 0}<span class="onb-spinner" aria-hidden="true"></span>{/if}
+              {#if demoImport.state === "downloading"}
+                {pct >= 0 ? `Downloading sample data — ${pct}%` : "Downloading sample data…"}
+              {:else}
+                Indexing sample data (first run loads the embedding model)…
+              {/if}
+            </span>
+            {#if pct >= 0}
+              <div
+                class="onb-bar"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={pct}
+              >
+                <div class="onb-bar-fill" style={`width:${pct}%`}></div>
+              </div>
+            {/if}
+          </div>
         {:else if demoImport.state === "error"}
           <span class="onb-error" role="alert">Couldn’t load sample data: {demoImport.detail}</span>
           <button class="onb-primary" onclick={startDemoImport}>Retry</button>
@@ -1053,11 +1089,30 @@
     font-size: 12px;
     color: var(--text-dim);
   }
+  .onb-progress-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 220px;
+  }
   .onb-progress {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .onb-bar {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-2, var(--border));
+    overflow: hidden;
+  }
+  .onb-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.3s ease;
   }
   .onb-spinner {
     width: 14px;

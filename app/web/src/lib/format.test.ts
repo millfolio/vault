@@ -103,6 +103,7 @@ describe("opLabel", () => {
     expect(opLabel("index")).toBe("Index");
     expect(opLabel("reindex")).toBe("Re-index");
     expect(opLabel("backfill")).toBe("Backfill");
+    expect(opLabel("demo")).toBe("Sample data");
     expect(opLabel("weird")).toBe("weird");
   });
 });

@@ -25,7 +25,7 @@
   }
 
   interface Operation {
-    type: "index" | "reindex" | "backfill" | string;
+    type: "index" | "reindex" | "backfill" | "demo" | string;
     started: number; // epoch seconds
     finished: number; // epoch seconds
     status: "done" | "error" | string;
@@ -66,6 +66,14 @@
     perTag: PerTag[];
     pendingTotal: number;
   }
+  interface DemoStatus {
+    state: "idle" | "downloading" | "indexing" | "done" | "error" | string;
+    detail: string;
+    progress?: number; // 0..100 while downloading (-1/absent → indeterminate)
+    bytesDone?: number;
+    bytesTotal?: number;
+    present?: boolean;
+  }
   interface Gpu {
     util: number;
     mem: number;
@@ -83,6 +91,7 @@
   let error = $state<string | null>(null);
   let mock = $state(false);
   let idxStatus = $state<IndexStatus | null>(null);
+  let demoImport = $state<DemoStatus | null>(null);
   let queue = $state<QueueItem[]>([]);
   let bk = $state<BackfillStatus | null>(null);
   let gpu = $state<Gpu | null>(null);
@@ -249,6 +258,20 @@
       /* transient — keep polling */
     }
     if (demo) return; // the demo has no queue/backfill/GPU story
+    // The onboarding sample-data import (download → index) is its own tracked job,
+    // separate from the orchestrator index queue; surface it as a live "Now" row.
+    try {
+      const prevDemo = demoImport?.state;
+      const dd = (await fetch(`${base}/api/demo/status`).then((r) => (r.ok ? r.json() : null))) as DemoStatus | null;
+      if (dd) {
+        demoImport = dd;
+        const wasActive = prevDemo === "downloading" || prevDemo === "indexing";
+        const stillActive = dd.state === "downloading" || dd.state === "indexing";
+        if (wasActive && !stillActive) await load(); // settled → fold into History
+      }
+    } catch {
+      /* transient — keep polling */
+    }
     try {
       const q = await fetch(`${base}/api/orchestrator/queue`).then((r) => (r.ok ? r.json() : null));
       if (q && Array.isArray(q.items)) queue = q.items as QueueItem[];
@@ -367,6 +390,16 @@
 
   // ── derived views ───────────────────────────────────────────────────────────
   const indexing = $derived(idxStatus?.state === "indexing");
+  // The sample-data import is "live" while it's downloading or indexing. Its download
+  // phase carries a determinate % (progress 0..100); the index phase is indeterminate.
+  const demoImporting = $derived(
+    demoImport?.state === "downloading" || demoImport?.state === "indexing",
+  );
+  const demoPct = $derived(
+    demoImport?.state === "downloading" && typeof demoImport.progress === "number" && demoImport.progress >= 0
+      ? demoImport.progress
+      : -1,
+  );
   const runningItem = $derived(queue.find((q) => q.state === "running") ?? null);
   const pendingItems = $derived(queue.filter((q) => q.state === "pending"));
   const pendingIndexFiles = $derived(pendingItems.filter((q) => q.kind === "index").length);
@@ -387,6 +420,27 @@
   <!-- ── Now: the running job + the queue behind it ─────────────────────────── -->
   <div class="block">
     <h3 class="bhead">Now</h3>
+    {#if demoImporting}
+      <div class="op live">
+        <div class="line1">
+          <span class="type">Sample data</span>
+          <span class="badge running"><span class="spin" aria-hidden="true"></span>running</span>
+          <span class="when">now</span>
+        </div>
+        {#if demoImport?.state === "downloading" && demoPct >= 0}
+          <div class="progress">
+            <div class="pbar" aria-hidden="true">
+              <div class="pfill" style={`width:${demoPct}%`}></div>
+            </div>
+            <span class="pcount">Downloading — {demoPct}%</span>
+          </div>
+        {:else if demoImport?.state === "downloading"}
+          <p class="detail">Downloading sample data…</p>
+        {:else}
+          <p class="detail">Indexing sample data (first run loads the embedding model)…</p>
+        {/if}
+      </div>
+    {/if}
     {#if indexing || runningItem?.kind === "index" || runningItem?.kind === "index-prepare" || runningItem?.kind === "finalize"}
       <div class="op live">
         <div class="line1">
@@ -430,7 +484,7 @@
         </div>
         <p class="detail">{pendingTotal} transaction-verdict{pendingTotal === 1 ? "" : "s"} left to compute.</p>
       </div>
-    {:else}
+    {:else if !demoImporting}
       <p class="idle muted">Nothing running — the machine is idle.</p>
     {/if}
 

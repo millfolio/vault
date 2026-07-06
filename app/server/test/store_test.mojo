@@ -10,6 +10,7 @@ from store import (
     ask_record_line,
     history_records_array,
     operations_records_array,
+    operation_record_line,
     delete_ask_records,
     system_json,
     parse_progress_counter,
@@ -88,6 +89,28 @@ def main() raises:
     var op3 = ops.find('"ts":3')
     var op1 = ops.find('"ts":1')
     expect(op3 < op1, "operations newest-first (3 before 1)")
+    # ── operation_record_line: a sample-data import ("demo") record ──────────────
+    # The onboarding sample-data import records itself as a `demo` op on completion,
+    # with its file + txn counts (tagged n/a → -1, omitted). Must be valid JSON that
+    # the Operations History array can carry.
+    var demo_line = operation_record_line(
+        String("demo"),
+        Int64(1783200000),
+        Int64(1783200042),
+        String("done"),
+        String("Indexing sample data…"),
+        6,  # files
+        444,  # txns
+        -1,  # tagged: n/a
+    )
+    _ = loads(demo_line)  # must parse
+    expect(demo_line.find('"type":"demo"') != -1, "demo op has type=demo")
+    expect(demo_line.find('"files":6') != -1, "demo op carries file count")
+    expect(demo_line.find('"txns":444') != -1, "demo op carries txn count")
+    expect(demo_line.find('"tagged"') == -1, "demo op omits n/a tagged count")
+    var demo_arr = operations_records_array(demo_line + "\n", 100)
+    _ = loads('{"operations":' + demo_arr + "}")
+
     expect_eq(operations_records_array("", 100), "[]", "empty ops → []")
     expect_eq(
         operations_records_array("bad\n{oops\n", 100),

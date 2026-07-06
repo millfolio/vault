@@ -1300,6 +1300,7 @@ struct Api(Copyable, Handler, Movable):
         if _is_demo():
             return _cors(ok_json('{"operations":[]}'))
         _finalize_index_op()  # fold in a just-settled index run before serving
+        _finalize_demo_op()  # …and a just-settled sample-data import
         var raw = String("")
         try:
             with open(_operations_path(), "r") as f:
@@ -2946,6 +2947,78 @@ def _demo_log_path() -> String:
     return _config_dir() + "/.demo.log"  # captured curl/unzip/index output
 
 
+def _demo_hdr_path() -> String:
+    return _config_dir() + "/.demo.hdr"  # the download's dumped response headers
+
+
+def _demo_op_path() -> String:
+    """Marker written when the sample-data import STARTS (its kind + start epoch),
+    read back once the import settles to record ONE operation-history row — the same
+    lazy-finalize pattern index/reindex runs use (`_pending_op_path`)."""
+    return _config_dir() + "/.demo.op"
+
+
+def _ci_starts_with(line: String, prefix_lower: String) -> Bool:
+    """True iff `line` begins with `prefix_lower` (an already-lowercase ASCII prefix),
+    compared case-insensitively. Used to spot the `content-length:` header regardless
+    of the server's capitalisation."""
+    var lb = line.as_bytes()
+    var pb = prefix_lower.as_bytes()
+    if len(lb) < len(pb):
+        return False
+    for i in range(len(pb)):
+        var c = Int(lb[i])
+        if c >= 65 and c <= 90:  # A–Z → lower
+            c += 32
+        if c != Int(pb[i]):
+            return False
+    return True
+
+
+def _demo_read_total() -> Int:
+    """The sample-vault zip's expected byte size, parsed from the LAST `Content-Length`
+    header in the download's dumped response headers (`curl -D`). The last one wins so a
+    redirect chain's intermediate headers don't shadow the final 200's size. Returns -1
+    when unknown (headers not yet written, chunked response with no Content-Length, or a
+    parse miss) → the client falls back to the indeterminate spinner."""
+    try:
+        var s: String
+        with open(_demo_hdr_path(), "r") as f:
+            s = f.read()
+        var needle = String("content-length:")
+        var nlen = needle.byte_length()
+        var lines = s.split("\n")
+        var total = -1
+        for i in range(len(lines)):
+            var ln = String(lines[i].strip())
+            if not _ci_starts_with(ln, needle):
+                continue
+            var n = 0
+            var indig = False
+            var b = ln.as_bytes()
+            for j in range(nlen, len(b)):
+                var c = Int(b[j])
+                if c >= 48 and c <= 57:
+                    n = n * 10 + (c - 48)
+                    indig = True
+                elif indig:
+                    break
+            if indig and n > 0:
+                total = n  # keep the last valid Content-Length
+        return total
+    except:
+        return -1
+
+
+def _demo_zip_bytes() -> Int:
+    """Bytes of the partially/fully downloaded zip on disk — the numerator for the
+    download progress bar. 0 before the file appears; -1 on a stat error."""
+    try:
+        return Int(getsize(_demo_zip_path()))
+    except:
+        return 0
+
+
 def _demo_present() -> Bool:
     """True once the sample vault has been unpacked (the folder exists)."""
     return isdir(_demo_dir())
@@ -2986,10 +3059,33 @@ def _demo_progress() -> String:
 
 
 def _demo_status_json() raises -> String:
-    """{"state","detail","present"} for the sample-vault import. `state` is
-    idle|downloading|indexing|done|error; `present` is whether the folder exists.
-    """
+    """{"state","detail","present","progress","bytesDone","bytesTotal"} for the
+    sample-vault import. `state` is idle|downloading|indexing|done|error; `present` is
+    whether the folder exists. While DOWNLOADING we report the zip's on-disk bytes over
+    its Content-Length (`progress` 0–99; -1 when the total is unknown → the client shows
+    an indeterminate spinner); once the download completes `progress` reads 100. Also
+    finalizes the operations-history row when the import has settled (see
+    `_finalize_demo_op`)."""
+    _finalize_demo_op()
     var state = _demo_read_state()
+    var progress = -1
+    var bytes_done = -1
+    var bytes_total = -1
+    if state == "downloading":
+        var total = _demo_read_total()
+        if total > 0:
+            bytes_total = total
+            var bd = _demo_zip_bytes()
+            if bd >= 0:
+                bytes_done = bd
+                var pct = (bd * 100) // total
+                if pct < 0:
+                    pct = 0
+                if pct > 99:
+                    pct = 99  # 100 only once the fetch is genuinely done
+                progress = pct
+    elif state == "indexing" or state == "done":
+        progress = 100  # download finished; indexing has its own detail line
     return (
         '{"state":'
         + json_escape(state)
@@ -2997,8 +3093,68 @@ def _demo_status_json() raises -> String:
         + json_escape(_demo_progress())
         + ',"present":'
         + ("true" if _demo_present() else "false")
+        + ',"progress":'
+        + String(progress)
+        + ',"bytesDone":'
+        + String(bytes_done)
+        + ',"bytesTotal":'
+        + String(bytes_total)
         + "}"
     )
+
+
+def _write_demo_pending_op(started: Int64):
+    """Stamp the pending-operation marker for a just-launched sample-data import."""
+    _write_small(
+        _demo_op_path(),
+        String('{"type":"demo","started":') + String(started) + "}",
+    )
+
+
+def _finalize_demo_op():
+    """If the sample-data import has SETTLED (state done|error) and its pending marker
+    is still present, record ONE `demo` operation for it and clear the marker. The
+    marker is claimed with an atomic rename so whichever caller (a status poll or a GET
+    /api/operations) wins records the run exactly once. Best-effort; never raises."""
+    if not exists(_demo_op_path()):
+        return
+    var state = _demo_read_state()
+    if state != "done" and state != "error":
+        return  # still downloading / indexing — nothing settled to record yet
+    var claimed = _demo_op_path() + ".claiming"
+    var op = _cstr(_demo_op_path())
+    var cl = _cstr(claimed)
+    var rc = external_call["rename", c_int](op, cl)
+    op.free()
+    cl.free()
+    if Int(rc) != 0:
+        return  # another caller already claimed it (or it vanished)
+    var started = Int64(0)
+    try:
+        var text: String
+        with open(claimed, "r") as f:
+            text = f.read()
+        var j = loads(text)
+        started = j["started"].int_value()
+    except:
+        pass
+    var finished = _epoch_s()
+    if started <= 0 or (finished - started) > Int64(86400):
+        started = finished  # missing / stale marker → clamp to ~0s (see _finalize_index_op)
+    _append_operation(
+        String("demo"),
+        started,
+        finished,
+        state,
+        _demo_progress(),
+        _indexed_file_count(),
+        _stored_txn_count(),
+        -1,  # tagged: n/a for a sample-data import
+    )
+    try:
+        remove(claimed)
+    except:
+        pass
 
 
 def _start_demo_detached() -> Bool:
@@ -3015,16 +3171,23 @@ def _start_demo_detached() -> Bool:
     var zip = _demo_zip_path()
     var state = _demo_state_path()
     var log = _demo_log_path()
+    var hdr = _demo_hdr_path()
     var url = _demo_url()
     # printf/echo always succeed, so the whole pipeline can chain on && and any real
-    # failure short-circuits to the trailing `|| printf error`.
+    # failure short-circuits to the trailing `|| printf error`. `-D <hdr>` dumps the
+    # download's own response headers (Content-Length arrives BEFORE the body finishes),
+    # so the status endpoint can report a determinate download % without a second
+    # request — and if the response is header-less/chunked the total is simply absent →
+    # the client falls back to the spinner.
     var cmd = (
         "( printf downloading > '"
         + state
         + "' && echo 'Downloading sample data…' > '"
         + log
         + "'"
-        + " && curl -fsSL '"
+        + " && curl -fsSL -D '"
+        + hdr
+        + "' '"
         + url
         + "' -o '"
         + zip
@@ -3063,6 +3226,8 @@ def _start_demo_detached() -> Bool:
     )
     _write_small(state, "downloading")
     _write_small(log, "")
+    _write_small(hdr, "")  # cleared until curl -D dumps the download's headers
+    _write_demo_pending_op(_epoch_s())  # recorded in Operations history on settle
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)
     cc.free()
