@@ -59,6 +59,14 @@ from runqueue import runq_take, runq_peek, runq_done, runq_reset
 # The disk-backed work queue + the pure scheduling seams: the orchestrator loop runs
 # ALL background engine work (indexing + AI-tag backfill) through this one queue, one
 # job at a time, honoring a global pause + priority (see ORCHESTRATOR.md §2.3–2.5).
+from storage import (
+    default_operations_store,
+    default_stats_store,
+    default_asks_store,
+    operations_log_path,
+    stats_log_path,
+    asks_log_path,
+)
 from work_queue import (
     WorkItem,
     wq_enqueue,
@@ -565,9 +573,7 @@ struct Api(Copyable, Handler, Movable):
         var recs = String("")
         var first = True
         try:
-            var raw: String
-            with open(_stats_path(), "r") as f:
-                raw = f.read()
+            var raw = default_stats_store().read_all()
             var lines = raw.split("\n")
             for i in range(len(lines)):
                 var ln = String(lines[i]).strip()
@@ -599,8 +605,7 @@ struct Api(Copyable, Handler, Movable):
         panel shows the most recent ask at the top."""
         var raw = String("")
         try:
-            with open(_asks_path(), "r") as f:
-                raw = f.read()
+            raw = default_asks_store().read_all()
         except:
             pass  # missing file → empty history
         return _cors(ok_json('{"records":' + history_records_array(raw) + "}"))
@@ -616,8 +621,7 @@ struct Api(Copyable, Handler, Movable):
         _finalize_demo_op()  # …and a just-settled sample-data import
         var raw = String("")
         try:
-            with open(_operations_path(), "r") as f:
-                raw = f.read()
+            raw = default_operations_store().read_all()
         except:
             pass  # missing file → empty list
         return _cors(
@@ -639,14 +643,12 @@ struct Api(Copyable, Handler, Movable):
             return _cors(ok_json('{"ok":true}'))
         var raw: String
         try:
-            with open(_asks_path(), "r") as f:
-                raw = f.read()
+            raw = default_asks_store().read_all()
         except:
             return _cors(ok_json('{"ok":true}'))  # nothing to delete
         var filtered = delete_ask_records(raw, q)
         try:
-            with open(_asks_path(), "w") as f:
-                f.write(filtered)
+            default_asks_store().rewrite(filtered)
         except:
             return _cors(bad_request('{"error":"could not update history"}'))
         return _cors(ok_json('{"ok":true}'))
@@ -2787,10 +2789,9 @@ def _index_status_json() raises -> String:
 
 def _operations_path() -> String:
     """Where completed operations accumulate (JSONL) — durable, on-device beside
-    asks.jsonl. MILLFOLIO_OPS_FILE overrides."""
-    return String(
-        getenv("MILLFOLIO_OPS_FILE", _config_dir() + "/operations.jsonl")
-    )
+    asks.jsonl. MILLFOLIO_OPS_FILE overrides. Now resolved by the storage seam
+    (`operations_log_path`), which the `default_operations_store()` also uses."""
+    return operations_log_path()
 
 
 def _pending_op_path() -> String:
@@ -2827,9 +2828,7 @@ def _append_operation(
         kind, started, finished, status, detail, files, txns, tagged
     )
     try:
-        with open(_operations_path(), "a") as f:
-            f.write(line + "\n")  # JSONL — one record per line
-        _chmod(_operations_path(), 0o600)  # owner-only: mirrors asks.jsonl
+        default_operations_store().append(line)  # +"\n" + chmod 0600, in the store
     except:
         log("[operations] append failed (non-fatal)")
 
@@ -3239,10 +3238,9 @@ def _app_version() -> String:
 def _stats_path() -> String:
     """Where per-question usage records accumulate (JSONL). MILLFOLIO_STATS_FILE
     overrides; defaults under the config dir (which `cp -R` deploys never delete).
-    """
-    return String(
-        getenv("MILLFOLIO_STATS_FILE", _config_dir() + "/stats.jsonl")
-    )
+    Resolved by the storage seam (`stats_log_path`) — the System page reads it here;
+    the read/append go through `default_stats_store()`."""
+    return stats_log_path()
 
 
 def _append_stats(
@@ -3301,14 +3299,12 @@ def _append_stats(
         + String(Int(dec_ms + 0.5))
         + ',"api":'
         + api
-        + "}\n"
+        + "}"
     )
     try:
-        with open(_stats_path(), "a") as f:
-            f.write(line)
-        _chmod(
-            _stats_path(), 0o600
-        )  # owner-only: records the full question text
+        # the store appends the "\n" (JSONL) + chmods 0600 (owner-only: the record
+        # holds the full question text) — same two calls as before.
+        default_stats_store().append(line)
     except:
         log("[stats] append failed (non-fatal)")
 
@@ -3317,8 +3313,10 @@ def _asks_path() -> String:
     """Where the FULL per-ask history accumulates (JSONL): the question, the
     GENERATED program, and the answer. Durable + on-device under the config dir
     (which `cp -R` deploys never delete) — survives a browser-data clear, unlike
-    the UI's localStorage. MILLFOLIO_ASKS_FILE overrides."""
-    return String(getenv("MILLFOLIO_ASKS_FILE", _config_dir() + "/asks.jsonl"))
+    the UI's localStorage. MILLFOLIO_ASKS_FILE overrides. Resolved by the storage
+    seam (`asks_log_path`); the System page reads it here, read/append/delete go
+    through `default_asks_store()`."""
+    return asks_log_path()
 
 
 def _append_ask(
@@ -3337,9 +3335,7 @@ def _append_ask(
     logged, never propagated into the chat reply."""
     var line = ask_record_line(epoch, question, code, answer, source, model, ok)
     try:
-        with open(_asks_path(), "a") as f:
-            f.write(line + "\n")  # JSONL — one record per line
-        _chmod(_asks_path(), 0o600)  # owner-only: holds questions + answers
+        default_asks_store().append(line)  # +"\n" + chmod 0600, in the store
     except:
         log("[asks] append failed (non-fatal)")
 

@@ -33,8 +33,8 @@ maps to exactly one by how it's read/written, not by its extension.
 | Shape | Contract | Semantics |
 |-------|----------|-----------|
 | **kv** | `get(key)→val?` · `set(key,val)` · `delete(key)` | small single-value markers; last-write-wins |
-| **log** | `append(record)` · `read()→[record]` (newest-first, capped) | append-only event streams; torn last line tolerated |
-| **queue** | `enqueue/peek/take/done/fail/list/running/reset` over `WorkItem` | ordered work items + a monotonic id; load-modify-save under a lock **(this slice ✓)** |
+| **log** | `append(record)` · `read_all()→raw` · `rewrite(raw)` | append-only event streams; torn last line tolerated **(migrated ✓)** |
+| **queue** | `enqueue/peek/take/done/fail/list/running/reset` over `WorkItem` | ordered work items + a monotonic id; load-modify-save under a lock **(migrated ✓)** |
 | **doc** | `load()→blob` · `save(blob)` | one structured document rewritten whole (registry / config / manifest) |
 
 ### 2.1 Current file → shape mapping
@@ -45,8 +45,8 @@ Drawn from the ~20 files under `~/Library/Application Support/Millfolio/data`
 | Shape | Files (today) | Format today |
 |-------|---------------|--------------|
 | **kv** | `.index.state` `.index.pid` `.index.log` `.index.op` `.index.runtotal` `.index.manifest` · `.model_download.state` · `.demo.state` · `.gpu_util` · `.anthropic-key` / `.reveal-secret` · `.search_cap.txt` `.search_out.json` | bare text / tiny marker files |
-| **log** | `operations.jsonl` · `asks.jsonl` · `stats.jsonl` | append-only JSONL, newest-first read, cap on read |
-| **queue** | `work_queue.jsonl` **← migrated this slice** | TSV (one `WorkItem` per line) + `#nextid` header |
+| **log** | `operations.jsonl` · `asks.jsonl` · `stats.jsonl` **← migrated (slice 2)** | append-only JSONL, newest-first read, cap on read |
+| **queue** | `work_queue.jsonl` **← migrated (slice 1)** | TSV (one `WorkItem` per line) + `#nextid` header |
 | **doc** | `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json` | whole-file rewrite (rules / tracked paths / index manifest / config) |
 
 Note `work_queue.jsonl` keeps its historical `.jsonl` name for compatibility even
@@ -63,7 +63,7 @@ over one `millfolio.db`:
         kv trait        log trait       queue trait      doc trait
            │               │               │               │
    ┌───────┴───────┬───────┴───────┬───────┴───────┬───────┴───────┐
-FileKvStore    FileLogStore   FileQueueStore ✓   FileDocStore     ← today (this cleanup)
+FileKvStore    FileLogStore ✓ FileQueueStore ✓   FileDocStore     ← today (this cleanup)
 SqliteKvStore  SqliteLogStore SqliteQueueStore   SqliteDocStore   ← Phase 5 (one table each)
 ```
 
@@ -144,21 +144,59 @@ definition and one `SqliteStore` backend. That is a later slice; keeping it in
 `app/server` now avoids a premature cross-repo dependency while only the queue is
 migrated.
 
+## 4a. Slice 2 — the log seam (implemented)
+
+The three **append-only JSONL logs** move behind one tiny trait, mirroring the queue:
+
+- **`trait LogStore(Copyable, Movable)`** in `storage.mojo` — three methods:
+  - `append(record: String)` — write one JSONL line (`record + "\n"`) then tighten the
+    file to owner-only (`chmod 0600`). The record is the builder's output **without** a
+    trailing newline (stats' line lost its old inline `"}\n"` → `"}"`, so all three
+    logs now share one append path, byte-identical on disk).
+  - `read_all() -> String` — the **raw** file contents, **raising on a missing file**
+    exactly like the `with open(path, "r")` it replaces, so each caller keeps its own
+    `try/except → empty`. It returns raw (not a pre-split/pre-skipped `List`) on
+    purpose: the newest-first / cap / torn-line-skip logic stays in the **untouched**
+    pure builders (`history_records_array`, `operations_records_array`, and stats'
+    inline comma-join in `handle_stats`), so the HTTP output is provably byte-identical.
+  - `rewrite(content: String)` — whole-file overwrite (no chmod; `"w"` preserves the
+    existing owner-only mode) for the ask-history delete-record compaction
+    (`POST /api/history/delete` → `delete_ask_records` → `rewrite`).
+- **`struct FileLogStore(LogStore, …)`** — the existing `open`/`f.write`/`_chmod` logic
+  moved verbatim; holds only the log's `path`.
+- **Three factories** — `default_operations_store()` / `default_stats_store()` /
+  `default_asks_store()` over `operations_log_path()` / `stats_log_path()` /
+  `asks_log_path()` (honoring `MILLFOLIO_OPS_FILE` / `MILLFOLIO_STATS_FILE` /
+  `MILLFOLIO_ASKS_FILE`). These are the Phase-5 swap points.
+- **`server.mojo` is the thin facade**: `_append_operation` / `_append_stats` /
+  `_append_ask` keep their best-effort `try/except → log("[…] append failed")`, now
+  wrapping `store.append(...)`; the read handlers call `store.read_all()`; the delete
+  handler calls `store.rewrite()`. `_operations_path` / `_stats_path` / `_asks_path`
+  delegate to the storage path helpers (the System page still reads them). Behavior is
+  unchanged. Unit-tested by `test/log_store_test.mojo` (`pixi run test-logstore`).
+
+> **Out of scope (kv slice):** `operations.jsonl` pairs with the lazy-finalize **KV
+> markers** `.index.op` / `.demo.op` (`_pending_op_path`, `_write_pending_op`) — those
+> are a `kv`-shape file, migrated in slice 3, **not** here. Only the `.jsonl` append +
+> read moved.
+
 ## 5. Migration order (remaining categories)
 
 Smallest-surface / lowest-risk first, each shippable on its own:
 
-1. **queue ✓** — this slice (one file, already had a clean API + atomic writes).
-2. **logs** — `operations.jsonl` · `asks.jsonl` · `stats.jsonl`. Append + capped
-   newest-first read; the builders already live in `store.mojo` (`ask_record_line`,
-   `operation_record_line`, `*_records_array`), so a `LogStore` is a thin wrapper over
-   those + the file append. Uniform, well-bounded.
-3. **kv** — the `.index.*` / `.*.state` / `.gpu_util` / secret markers. Many tiny
+1. **queue ✓** — slice 1 (one file, already had a clean API + atomic writes).
+2. **logs ✓** — slice 2: `operations.jsonl` · `asks.jsonl` · `stats.jsonl`. Append +
+   raw read behind `LogStore`; the builders stay in `store.mojo` (`ask_record_line`,
+   `operation_record_line`, `*_records_array`), so the store is a thin bytes-mover over
+   the file append/read. Uniform, well-bounded. See §4a.
+3. **kv** — the `.index.*` / `.*.state` / `.gpu_util` / secret markers (plus the
+   `.index.op` / `.demo.op` pending-op markers the log slice deliberately left). Many tiny
    sites; the win is consolidating scattered bare-file reads/writes behind
    `get/set/delete` (and later one `kv` table instead of a dozen dotfiles).
 4. **docs** — `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json`.
    Whole-document rewrite; some are shared with `vault/core`, so this is the slice
    that motivates moving the traits down to `vault/core` (§4, module home).
 
-Do the **logs** next: they're a single shape across three files with the record
-builders already factored out, so it's the cleanest second proof of the seam.
+Do **kv** next: the `.index.*` / `.*.state` / `.gpu_util` / secret + pending-op
+markers — many tiny scattered bare-file reads/writes to consolidate behind
+`get`/`set`/`delete`.

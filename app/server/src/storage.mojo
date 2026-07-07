@@ -1,18 +1,27 @@
 """Storage seam — the swappable persistence layer for the app server's on-disk state.
 
-This is **Phase 2, slice 1** of the backend storage cleanup (see `STORAGE.md`): the
-first data category — the orchestrator **work queue** — moved behind a trait so the
-on-disk format is swappable (TSV/JSONL today → SQLite later) without touching the
-~call sites. It follows the same pattern flare already uses for its response cache
-(`flare/http/cache/store.mojo`: a `CacheStore` trait + an in-memory impl, a
-filesystem impl slotting in behind the same trait).
+This is the backend storage cleanup (see `STORAGE.md`): each data category moves
+behind a trait so the on-disk format is swappable (TSV/JSONL today → SQLite later)
+without touching the ~call sites. It follows the same pattern flare already uses for
+its response cache (`flare/http/cache/store.mojo`: a `CacheStore` trait + an
+in-memory impl, a filesystem impl slotting in behind the same trait).
 
-Only the queue is migrated in this slice. The `WorkItem`/`QueueState` records, the
-`PRIO_*` class defaults, the path helper (`work_queue_path`, honoring
-`MILLFOLIO_WORKQ_PATH`), and the byte-for-byte JSONL persistence all live here now;
-`work_queue.mojo` is a thin facade that re-exports them and keeps the `wq_*` free
-functions as delegators to a `FileQueueStore`, so `scheduler.mojo` / `server.mojo` /
-`test/work_queue_test.mojo` are UNCHANGED and behavior is identical.
+**Slice 1 — the orchestrator work queue** (`QueueStore` / `FileQueueStore`). The
+`WorkItem`/`QueueState` records, the `PRIO_*` class defaults, the path helper
+(`work_queue_path`, honoring `MILLFOLIO_WORKQ_PATH`), and the byte-for-byte JSONL
+persistence all live here; `work_queue.mojo` is a thin facade that re-exports them and
+keeps the `wq_*` free functions as delegators to a `FileQueueStore`, so
+`scheduler.mojo` / `server.mojo` / `test/work_queue_test.mojo` are UNCHANGED and
+behavior is identical.
+
+**Slice 2 — the append-logs** (`LogStore` / `FileLogStore`, at the bottom of this
+file). The three append-only JSONL logs — `operations.jsonl`, `stats.jsonl`,
+`asks.jsonl` — move behind one tiny trait: `append` a built record line, `read_all`
+the raw file, `rewrite` the whole file. The pure record BUILDERS stay in `store.mojo`
+(they assemble/parse the JSON); the store only moves bytes. `server.mojo`'s
+`_append_*` / read handlers are the thin facade, unchanged in behavior. (The pending-op
+KV markers `.index.op` / `.demo.op` that `operations.jsonl` pairs with are a LATER
+kv slice — NOT migrated here.)
 
 **Contract — `QueueStore`.** enqueue / peek / take / done / fail / list / running /
 reset over `WorkItem`. `FileQueueStore` implements it with the existing flock +
@@ -44,6 +53,10 @@ from std.ffi import external_call, c_char
 from std.memory import alloc
 from std.os import getenv
 from flare.prelude import *  # MutUntrackedOrigin
+from osutil import (
+    _config_dir,
+    _chmod,
+)  # log stores reuse the server's dir + chmod
 
 comptime _O_RDWR: Int = 0x0002
 comptime _O_CREAT: Int = 0x0200
@@ -503,3 +516,110 @@ def default_queue_store() -> FileQueueStore:
     for a runtime flag, returns a `Variant[FileQueueStore, SqliteQueueStore]`).
     """
     return FileQueueStore(work_queue_path())
+
+
+# ── Slice 2: append-log stores (operations.jsonl · stats.jsonl · asks.jsonl) ────
+# The three append-only JSONL logs behind one `LogStore` trait, mirroring the queue
+# slice. Each log is an owner-only file of one JSON object per line. The pure record
+# BUILDERS stay in `store.mojo` (they assemble/parse the JSON) — the store only
+# PERSISTS a built line and hands back the RAW file so the builders
+# (`history_records_array` / `operations_records_array`, and stats' inline
+# comma-join) do their newest-first / cap / torn-line-skip over it UNCHANGED. So the
+# read method returns the raw file text and RAISES on a missing file exactly like the
+# `open(...)` it replaces — each caller keeps its own `try/except → empty` — rather
+# than a pre-split, pre-skipped list that would relocate the builders' logic and risk
+# drifting from the byte-identical HTTP output.
+
+
+def operations_log_path() -> String:
+    """operations.jsonl — completed index/reindex/backfill runs. `MILLFOLIO_OPS_FILE`
+    overrides; else beside the other logs under the data dir."""
+    return String(
+        getenv("MILLFOLIO_OPS_FILE", _config_dir() + "/operations.jsonl")
+    )
+
+
+def stats_log_path() -> String:
+    """stats.jsonl — per-question usage records. `MILLFOLIO_STATS_FILE` overrides.
+    """
+    return String(
+        getenv("MILLFOLIO_STATS_FILE", _config_dir() + "/stats.jsonl")
+    )
+
+
+def asks_log_path() -> String:
+    """asks.jsonl — full per-ask history (question + generated program + answer).
+    `MILLFOLIO_ASKS_FILE` overrides."""
+    return String(getenv("MILLFOLIO_ASKS_FILE", _config_dir() + "/asks.jsonl"))
+
+
+trait LogStore(Copyable, Movable):
+    """Persistence interface for an append-only JSONL event log.
+
+    Three logs share it (operations / stats / asks). The contract is deliberately
+    tiny — `append` one already-built record, `read_all` the raw file, `rewrite` the
+    whole file (the asks delete-record compaction). Record ASSEMBLY/PARSING is NOT
+    here: it stays in the pure builders (`store.mojo`); the store only moves bytes. A
+    Phase 5 `SqliteLogStore` conforms to the SAME trait (an append-only table with a
+    rowid clock; `read_all` reconstructs the same newline-joined text so the builders
+    keep working unchanged), swapped in at the `default_*_store()` factories below.
+    """
+
+    def append(self, record: String) raises:
+        ...
+
+    def read_all(self) raises -> String:
+        ...
+
+    def rewrite(self, content: String) raises:
+        ...
+
+
+@fieldwise_init
+struct FileLogStore(Copyable, LogStore, Movable):
+    """The file-backed append log: the existing `open`/`f.write`/`_chmod` logic moved
+    verbatim behind the trait. Holds only the log's `path`; one instance per log, so a
+    fresh one is built per call around the log's path helper (re-reading the
+    `MILLFOLIO_*_FILE` override every op, like the queue store).
+
+    `append` writes `record + "\\n"` (one JSONL line) then tightens the file to
+    owner-only (0600) — the same two calls every `_append_*` did. `read_all` opens the
+    file for read and returns its whole contents, RAISING on a missing/unreadable file
+    exactly as the previous `with open(path, "r")` did, so each caller keeps its own
+    `try/except → empty`. `rewrite` truncates + writes the whole file (no chmod, as
+    before — the "w" open preserves the existing owner-only mode) for the ask-history
+    delete compaction.
+    """
+
+    var path: String
+
+    def append(self, record: String) raises:
+        with open(self.path, "a") as f:
+            f.write(record + "\n")  # JSONL — one record per line
+        _chmod(self.path, 0o600)  # owner-only: holds personal financial data
+
+    def read_all(self) raises -> String:
+        var content: String
+        with open(self.path, "r") as f:
+            content = f.read()
+        return content
+
+    def rewrite(self, content: String) raises:
+        with open(self.path, "w") as f:
+            f.write(content)
+
+
+def default_operations_store() -> FileLogStore:
+    """The operations-log store — a swap point for Phase 5 (`operations.jsonl`).
+    """
+    return FileLogStore(operations_log_path())
+
+
+def default_stats_store() -> FileLogStore:
+    """The stats-log store — a swap point for Phase 5 (`stats.jsonl`)."""
+    return FileLogStore(stats_log_path())
+
+
+def default_asks_store() -> FileLogStore:
+    """The ask-history store — a swap point for Phase 5 (`asks.jsonl`)."""
+    return FileLogStore(asks_log_path())
