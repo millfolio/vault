@@ -75,6 +75,10 @@ from vault.storage import (
     KV_DEMO_OP,
     KV_DL_STATE,
     KV_DL_MODEL,
+    default_indexed_paths_store,
+    default_manifest_store,
+    DOC_INDEXED_PATHS,
+    DOC_MANIFEST,
 )
 from work_queue import (
     WorkItem,
@@ -1277,9 +1281,7 @@ struct Api(Copyable, Handler, Movable):
         var file_count = 0
         var total_chunks = 0
         if indexed:
-            var text: String
-            with open(manifest_path, "r") as f:
-                text = f.read()
+            var text = default_manifest_store(config_dir).load(DOC_MANIFEST)
             var lines = text.split("\n")
             for i in range(len(lines)):
                 var line = String(lines[i])
@@ -1346,9 +1348,7 @@ struct Api(Copyable, Handler, Movable):
         var manifest_path = _config_dir() + "/manifest.tsv"
         if not isfile(manifest_path):
             return _cors(not_found("no index"))
-        var text: String
-        with open(manifest_path, "r") as f:
-            text = f.read()
+        var text = default_manifest_store(_config_dir()).load(DOC_MANIFEST)
         # Resolve alias -> (source_dir, name, kind) from the manifest.
         var source_dir = String("")
         var name = String("")
@@ -2842,9 +2842,7 @@ def _indexed_file_count() -> Int:
     if not isfile(path):
         return -1
     try:
-        var text: String
-        with open(path, "r") as f:
-            text = f.read()
+        var text = default_manifest_store(_config_dir()).load(DOC_MANIFEST)
         var lines = text.split("\n")
         var n = 0
         for i in range(len(lines)):
@@ -2941,9 +2939,7 @@ def _read_tracked() raises -> _Tracked:
     var epochs = List[String]()
     if not exists(_tracked_paths_path()):
         return _Tracked(paths^, epochs^)
-    var text: String
-    with open(_tracked_paths_path(), "r") as f:
-        text = f.read()
+    var text = default_indexed_paths_store().load(DOC_INDEXED_PATHS)
     if String(text.strip()) == "":
         return _Tracked(paths^, epochs^)
     try:
@@ -2982,7 +2978,12 @@ def _write_tracked(paths: List[String], epochs: List[String]) raises:
             + "}"
         )
     out += "]}"
-    _write_small(_tracked_paths_path(), out)
+    # Route through the doc-store seam; keep `_write_small`'s best-effort swallow so a
+    # failed registry write never wedges the caller (byte-identical to the prior write).
+    try:
+        default_indexed_paths_store().save(DOC_INDEXED_PATHS, out)
+    except:
+        pass
 
 
 def _tracked_folders_json() raises -> String:

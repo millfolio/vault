@@ -1,6 +1,9 @@
 # Storage seam — design + migration roadmap
 
-Status: **in progress** (Phase 2 of the backend architecture cleanup). This document
+Status: **Phase 2 COMPLETE** (of the backend architecture cleanup). All four store
+shapes — **queue / log / kv / doc** — now live behind `vault.storage` traits with
+`File*` implementations; a Phase-5 `SqliteStore` implements the same four traits for a
+one-flag swap. This document
 describes the `Store` abstraction that the app server's on-disk state is migrating
 behind, and the order the remaining categories move. Cross-reference
 [`ORCHESTRATOR.md`](./ORCHESTRATOR.md) — the work queue whose store lands in this
@@ -35,7 +38,7 @@ maps to exactly one by how it's read/written, not by its extension.
 | **kv** | `get(key)→val` · `set(key,val)` · `delete(key)` · `exists(key)` | small single-value markers; last-write-wins **(migrated ✓)** |
 | **log** | `append(record)` · `read_all()→raw` · `rewrite(raw)` | append-only event streams; torn last line tolerated **(migrated ✓)** |
 | **queue** | `enqueue/peek/take/done/fail/list/running/reset` over `WorkItem` | ordered work items + a monotonic id; load-modify-save under a lock **(migrated ✓)** |
-| **doc** | `load()→blob` · `save(blob)` | one structured document rewritten whole (registry / config / manifest) |
+| **doc** | `load(key)→blob` · `save(key,blob)` | one structured document rewritten whole (registry / config / manifest) **(migrated ✓)** |
 
 ### 2.1 Current file → shape mapping
 
@@ -47,7 +50,7 @@ Drawn from the ~20 files under `~/Library/Application Support/Millfolio/data`
 | **kv** | `.index.state` `.index.pid` `.index.op` `.index.runtotal` · `.model_download.state` `.model_download.model` · `.demo.state` `.demo.op` **← migrated (slice 3)** · _(left in place:_ `.anthropic-key` / `.reveal-secret` _— auth 0600;_ `.gpu_util` `.mem_bytes` `.mem_used` `.disk_used` `.dl_du` _— sysmetrics shell-redirect caches;_ `.index.log` `.demo.log` `.model_download.log` _— logs)_ | bare text / tiny marker files |
 | **log** | `operations.jsonl` · `asks.jsonl` · `stats.jsonl` **← migrated (slice 2)** | append-only JSONL, newest-first read, cap on read |
 | **queue** | `work_queue.jsonl` **← migrated (slice 1)** | TSV (one `WorkItem` per line) + `#nextid` header |
-| **doc** | `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json` | whole-file rewrite (rules / tracked paths / index manifest / config) |
+| **doc** | `categories.txt` · `indexed-paths.json` · `manifest.tsv` **← migrated (slice B2)** · _(left: `config.json` — not yet a live doc)_ | whole-file rewrite (rules / tracked paths / index manifest) |
 
 Note `work_queue.jsonl` keeps its historical `.jsonl` name for compatibility even
 though its on-disk format is **TSV**, not JSON — the name predates the format choice
@@ -63,7 +66,7 @@ over one `millfolio.db`:
         kv trait        log trait       queue trait      doc trait
            │               │               │               │
    ┌───────┴───────┬───────┴───────┬───────┴───────┬───────┴───────┐
-FileKvStore ✓  FileLogStore ✓ FileQueueStore ✓   FileDocStore     ← today (this cleanup)
+FileKvStore ✓  FileLogStore ✓ FileQueueStore ✓   FileDocStore ✓   ← today (this cleanup)
 SqliteKvStore  SqliteLogStore SqliteQueueStore   SqliteDocStore   ← Phase 5 (one table each)
 ```
 
@@ -260,6 +263,66 @@ get/set/delete/exists primitive, and `.claiming` isn't a marker).
 >   redirect — but its other writes/reads are genuine in-process KV, so it's migrated; a
 >   Phase-5 SQLite swap would additionally need to reroute that one shell step.)
 
+## 4c. Slice B2 — the doc seam (implemented) — Phase 2 FINAL slice
+
+The structured **whole-document rewrites** move behind one `DocStore` trait, completing
+Phase 2. Because two of the three docs are owned by `vault/core` (the tag registry + the
+index manifest), the trait lands in `vault.storage` (where slice B1 had already promoted
+the layer) so both the app server AND the vault-side owners share it in-process:
+
+- **`trait DocStore(Copyable, Movable)`** in `storage.mojo` — two methods:
+  - `load(key) -> String` — the WHOLE document, **raising on a missing doc** exactly
+    like the inline `with open(path, "r")` each owner replaces, so every owner keeps its
+    own `exists()`-guard / `try/except`.
+  - `save(key, content)` — write the document WHOLE with a plain `"w"` open (truncate +
+    replace; the same **default-umask mode** the originals used — docs are NOT tightened
+    to 0600 like the log/kv-secret files, they hold no raw amounts).
+- **`struct FileDocStore(DocStore, …)`** — the existing inline `open` logic moved verbatim;
+  holds only the base `dir` and maps a **logical key** (the doc's basename, e.g.
+  `categories.txt`) to `dir + "/" + key`, mirroring `FileKvStore`. Keys are logical names,
+  NOT filesystem paths, so a Phase-5 `SqliteDocStore` reuses the SAME keys as the primary
+  key of one `docs(k,v)` table.
+- **Three factories** (the Phase-5 swap points) + key constants `DOC_CATEGORIES` /
+  `DOC_MANIFEST` / `DOC_INDEXED_PATHS`:
+  - `default_categories_store()` over the data dir — `categories_path()` byte-for-byte.
+  - `default_manifest_store(dir)` — **parameterized by dir** because the manifest is read
+    from more than one location (the index owner + the app server use the data dir).
+  - `default_indexed_paths_store()` over the data dir — `_tracked_paths_path()` byte-for-byte.
+- **The owners are thin facades — all document STRUCTURE stays put, the store only moves
+  bytes:**
+  - **`categories.txt`** (`vault.derive.tags`): `write_categories` + the two reads
+    (`load_registry` / `read_categories`) route through the store, but **the registry's
+    refresh-if-untouched decision, the `# managed-checksum:` logic, rule parsing, and the
+    tag-name rules are UNCHANGED**. The store performs only the I/O the registry used to do
+    inline; the registry still decides WHEN to read/refresh/write. `write_categories`
+    keeps its best-effort `try/except` swallow + `ensure_data_dir()`. Proven byte-identical
+    by `test-store` / `test-persist` / **`test-missing-defaults`** (the categories-refresh
+    test), all still green unchanged.
+  - **`manifest.tsv`** (`vault.index`): `_load_manifest` read + `_write_manifest` write route
+    through `default_manifest_store(config_dir())`; the `#meta` header + TSV serialize/parse
+    are untouched. The app server's three manifest READERS (`handle_vault`, the alias→path
+    resolve, `_indexed_file_count`) route through the store too. The `privacy-box` sandbox
+    readers (a different, sandbox-granted dir) are left as-is. Proven byte-identical by
+    **`test-golden`** / `test-index-steps` / `test-procversion`, all still green.
+  - **`indexed-paths.json`** (app-side `server.mojo`): `_read_tracked` read + `_write_tracked`
+    write route through `default_indexed_paths_store()`; the JSON build/parse is unchanged
+    and the write keeps `_write_small`'s best-effort swallow.
+- Unit-tested by `test/storage/doc_store_test.mojo` (`pixi run test-docstore` in `vault`,
+  hermetic over a temp `MILLFOLIO_DATA_DIR`): load-missing-raises, save→load roundtrip,
+  overwrite (last-write-wins), plain-umask mode, and the per-doc factories.
+
+> **Out of scope:** `config.json` is listed as a doc-shape file but isn't a live read/write
+> site yet, so it's left for whenever it lands. The `privacy-box` manifest readers stay
+> inline (they read a sandbox-granted dir, not `vault.storage`, and `sandbox_test` builds
+> without `-I core/src`).
+
+**Phase 2 is done.** All four shapes (queue / log / kv / doc) sit behind `vault.storage`
+traits with `File*` impls; the on-disk format is now swappable without call-site churn. A
+Phase-5 `SqliteStore` implements the four traits (`SqliteQueueStore` / `SqliteLogStore` /
+`SqliteKvStore` / `SqliteDocStore`) over one `millfolio.db` for a **one-flag swap** at the
+`default_*_store()` factories — no facade, no owner, no handler changes. That (plus the
+`libsqlite3` FFI binding it needs) is the only remaining storage work.
+
 ## 5. Migration order (remaining categories)
 
 Smallest-surface / lowest-risk first, each shippable on its own:
@@ -274,13 +337,15 @@ Smallest-surface / lowest-risk first, each shippable on its own:
    Many tiny sites consolidated behind `get/set/delete/exists` (and later one `kv` table
    instead of a dozen dotfiles). Auth 0600 secrets + the sysmetrics shell-redirect scratch
    caches stay put (see §4b). See §4b.
-4. **docs** — `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json`.
-   Whole-document rewrite; some are shared with `vault/core`, which is why the shape
-   traits were **already promoted** to `vault/core` (`vault.storage`, §4 module home) in
-   slice B1 ahead of this — so the shared `DocStore` lands where both sides can use it.
+4. **docs ✓** — slice B2: `categories.txt` · `indexed-paths.json` · `manifest.tsv` behind
+   `DocStore`; all document STRUCTURE stays in the owners (`vault.derive.tags` /
+   `vault.index` / `server.mojo`), the store only moves bytes. Some are shared with
+   `vault/core`, which is why the shape traits were **already promoted** to `vault/core`
+   (`vault.storage`, §4 module home) in slice B1 ahead of this — so the shared `DocStore`
+   lands where both sides use it. See §4c.
 
 **Slice B1 (done):** the whole storage layer moved from `app/server/src/storage.mojo` to
-`vault/core`'s `vault.storage` sub-package (§4 module home) — a pure move + re-wire, no
-new doc migration. **Do docs (slice B2) next:** land `DocStore` in `vault.storage` and
-migrate `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json` (the
-registries actually shared with `vault/core`) behind it.
+`vault/core`'s `vault.storage` sub-package (§4 module home) — a pure move + re-wire.
+**Slice B2 (done):** landed `DocStore` in `vault.storage` and migrated `categories.txt` ·
+`indexed-paths.json` · `manifest.tsv` behind it (§4c) — **Phase 2 COMPLETE**. The only
+remaining storage work is Phase 5 (the `SqliteStore` backend + its `libsqlite3` FFI).
