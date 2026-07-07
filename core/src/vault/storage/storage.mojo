@@ -50,7 +50,7 @@ reset over `WorkItem`. `FileQueueStore` implements it with the existing flock +
 tmp-rename JSONL logic.
 
 **On-disk format (unchanged).** A plain-text, line-per-record file at the store's
-`path` (default `_wq_config_dir()/work_queue.jsonl`, override `MILLFOLIO_WORKQ_PATH`):
+`path` (default `_storage_config_dir()/work_queue.jsonl`, override `MILLFOLIO_WORKQ_PATH`):
 
     #nextid\t<N>                                              ← header: next id to hand out
     <id>\t<kind>\t<payload>\t<enq_at>\t<prio>\t<state>\t<pid>\t<started_ts>
@@ -670,8 +670,8 @@ def default_asks_store() -> FileLogStore:
 #
 # The eight migrated markers — all written/read WHOLE by the server IN-PROCESS (via
 # `_write_small` / inline `open`). Their logical key names double as the on-disk
-# basenames, so `FileKvStore(_config_dir())` reproduces the old `_config_dir()+"/.<name>"`
-# path byte-for-byte:
+# basenames, so `FileKvStore(_storage_config_dir())` reproduces the old
+# `<data-dir>/.<name>` path byte-for-byte:
 comptime KV_INDEX_STATE = ".index.state"  # idle|indexing|done|error
 comptime KV_INDEX_PID = ".index.pid"  # detached index worker's PID
 comptime KV_INDEX_OP = (  # pending index/reindex op marker (lazy-finalize)
