@@ -761,3 +761,102 @@ def default_kv_store() -> FileKvStore:
     file-backed store over the data dir (`_storage_config_dir()`), matching every
     marker's `<data-dir>/.<name>` path byte-for-byte."""
     return FileKvStore(_storage_config_dir())
+
+
+# ── Slice B2: doc store (whole-document rewrite) — Phase 2 FINAL slice ──────────
+# The structured documents the backend rewrites WHOLE — the tag registry
+# (`categories.txt`, owned by `vault.derive`), the aliased index manifest
+# (`manifest.tsv`, owned by `vault.index`), and the tracked-folders registry
+# (`indexed-paths.json`, app-side) — move behind one `DocStore` trait, mirroring the
+# kv/log/queue slices. A `key` is the doc's LOGICAL name (its on-disk basename, e.g.
+# `categories.txt`), NOT a filesystem path: `FileDocStore(dir)` maps `key → dir + "/"
+# + key`, exactly like `FileKvStore`. Same dir+key scheme so a Phase-5 `SqliteDocStore`
+# can reuse the SAME keys as the primary key of one `docs(k TEXT PRIMARY KEY, v BLOB)`
+# table with no call-site change.
+#
+# The store moves BYTES ONLY: every doc's ASSEMBLY/PARSING (the registry's
+# refresh-if-untouched decision + rule parsing, the manifest's `#meta`/TSV
+# serialize+parse, the indexed-paths JSON build) stays in its OWNER; the owner still
+# decides WHEN to read/refresh/write. `load` returns the WHOLE document and RAISES on a
+# missing doc exactly like the inline `with open(path, "r")` each site replaces (every
+# caller keeps its own `if exists(...)` guard / `try/except`); `save` writes it WHOLE
+# with a plain `"w"` open — the same default-umask mode the originals used (docs are
+# NOT tightened to 0600 like the log/kv-secret files; they hold no raw amounts).
+comptime DOC_CATEGORIES = "categories.txt"  # the tag registry (source of truth)
+comptime DOC_MANIFEST = (  # the aliased, frontier-visible index schema
+    "manifest.tsv"
+)
+comptime DOC_INDEXED_PATHS = (  # the tracked-folders registry
+    "indexed-paths.json"
+)
+
+
+trait DocStore(Copyable, Movable):
+    """Persistence interface for a whole-document rewrite (registry / config / manifest).
+
+    Three docs share it (`categories.txt` / `manifest.tsv` / `indexed-paths.json`). The
+    contract is deliberately tiny — `load` the WHOLE document, `save` it WHOLE — because
+    all document STRUCTURE (parse/serialize + any refresh/merge policy) lives in the
+    OWNER, not here; the store only moves bytes. `load` RAISES on a missing doc exactly
+    like the `with open(path, "r")` it replaces, so each owner keeps its own
+    `exists`-guard / `try/except`. A Phase-5 `SqliteDocStore` conforms to the SAME trait
+    over one `docs(k,v)` table, swapped in at the `default_*_store()` factories below.
+    """
+
+    def load(self, key: String) raises -> String:
+        ...
+
+    def save(self, key: String, content: String) raises:
+        ...
+
+
+@fieldwise_init
+struct FileDocStore(Copyable, DocStore, Movable):
+    """The file-backed doc store: each key is a file under `dir`, read/written WHOLE —
+    the existing inline `open` logic moved verbatim. Holds only the base `dir`; a
+    logical key (the doc's basename, e.g. `categories.txt`) maps to `dir + "/" + key`,
+    mirroring `FileKvStore` so keys are storage-agnostic.
+
+    `load` opens the file and returns its raw contents, RAISING on a missing/unreadable
+    file exactly like the inline `with open(path, "r")` it replaces — the owner keeps its
+    `exists`-guard. `save` truncates + writes the whole document with a plain `"w"` open,
+    the same default-umask mode the originals used (no `chmod` — docs aren't tightened to
+    0600 like the log/kv-secret files).
+    """
+
+    var dir: String
+
+    def _path(self, key: String) -> String:
+        return self.dir + "/" + key
+
+    def load(self, key: String) raises -> String:
+        var content: String
+        with open(self._path(key), "r") as f:
+            content = f.read()
+        return content
+
+    def save(self, key: String, content: String) raises:
+        with open(self._path(key), "w") as f:
+            f.write(content)
+
+
+def default_categories_store() -> FileDocStore:
+    """The tag-registry doc store (`categories.txt`) — a Phase-5 swap point. Over the
+    data dir (`_storage_config_dir()`), matching `categories_path()` byte-for-byte.
+    """
+    return FileDocStore(_storage_config_dir())
+
+
+def default_manifest_store(dir: String) -> FileDocStore:
+    """The index-manifest doc store (`manifest.tsv`) — a Phase-5 swap point. Parameterized
+    by `dir` because the manifest is read from more than one location (the index owner +
+    the app server both use the data dir; a sandbox reads it from the index dir).
+    """
+    return FileDocStore(dir)
+
+
+def default_indexed_paths_store() -> FileDocStore:
+    """The tracked-folders doc store (`indexed-paths.json`) — a Phase-5 swap point. Over
+    the data dir (`_storage_config_dir()`), matching `_tracked_paths_path()` byte-for-byte.
+    """
+    return FileDocStore(_storage_config_dir())

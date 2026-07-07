@@ -2,10 +2,11 @@
 
 INTERNAL infra, NOT part of the `from vault import *` tool surface: it is importable
 only by name, `from vault.storage import …`. It holds the per-shape store traits
-(`QueueStore` / `LogStore` / `KvStore`) with their file-backed implementations
-(`FileQueueStore` / `FileLogStore` / `FileKvStore`), the plain records the queue moves
-(`WorkItem` / `QueueState` / the `PRIO_*` defaults), and the `default_*_store()`
-factories that are the single Phase-5 SQLite swap points.
+(`QueueStore` / `LogStore` / `KvStore` / `DocStore` — all four shapes) with their
+file-backed implementations (`FileQueueStore` / `FileLogStore` / `FileKvStore` /
+`FileDocStore`), the plain records the queue moves (`WorkItem` / `QueueState` / the
+`PRIO_*` defaults), and the `default_*_store()` factories that are the single Phase-5
+SQLite swap points.
 
 Promoted here from `app/server` (Phase 2 slice B1) so both the app server AND the
 vault-side registries share one `Store` definition + one future `SqliteStore` backend.
@@ -46,4 +47,13 @@ from vault.storage.storage import (
     KV_DEMO_OP,
     KV_DL_STATE,
     KV_DL_MODEL,
+    # ── doc store (whole-document rewrite) ──
+    DocStore,
+    FileDocStore,
+    default_categories_store,
+    default_manifest_store,
+    default_indexed_paths_store,
+    DOC_CATEGORIES,
+    DOC_MANIFEST,
+    DOC_INDEXED_PATHS,
 )

@@ -39,6 +39,12 @@ from vault.derive.ledger import (
     GEN_ABSENT,
 )
 
+# The doc-store seam (`vault.storage`, Phase 2 slice B2): categories.txt read/write
+# routes through the shared `DocStore` so the on-disk format is swappable (→ SQLite)
+# without touching the registry logic here. `vault.storage` is acyclic (stdlib + flare
+# only), so importing it never pulls the engine/HTTP surface this module avoids.
+from vault.storage import default_categories_store, DOC_CATEGORIES
+
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 
@@ -120,11 +126,13 @@ def _extract_checksum(text: String) raises -> String:
 
 
 def write_categories(path: String, text: String):
-    """Best-effort write of the categories file — never fail over it."""
+    """Best-effort write of the categories file — never fail over it. The write routes
+    through the shared `DocStore`; `path` is retained for call-site compatibility and
+    always equals the store's resolved `<data-dir>/categories.txt`, so it's
+    byte-identical to the previous inline `open(path, "w")`."""
     try:
         ensure_data_dir()
-        with open(path, "w") as f:
-            f.write(text)
+        default_categories_store().save(DOC_CATEGORIES, text)
     except:
         pass
 
@@ -147,9 +155,7 @@ def load_registry() raises -> Registry:
         write_categories(path, registry_to_text(defaults, seed_sum))
         return defaults^
 
-    var text: String
-    with open(path, "r") as f:
-        text = f.read()
+    var text = default_categories_store().load(DOC_CATEGORIES)
     var user = Registry(parse_rules(text))
     var stored_sum = _extract_checksum(text)
 
@@ -180,10 +186,7 @@ def read_categories() raises -> String:
     var path = categories_path()
     if not exists(path):
         return String("")
-    var text: String
-    with open(path, "r") as f:
-        text = f.read()
-    return text^
+    return default_categories_store().load(DOC_CATEGORIES)
 
 
 # ── tag names + ML readiness ───────────────────────────────────────────────────

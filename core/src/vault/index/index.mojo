@@ -56,6 +56,7 @@ from vault.extract.transactions import (
     tsv_to_txn_rows,
 )
 from vault.extract.location import parse_location
+from vault.storage import default_manifest_store, DOC_MANIFEST
 from vault.derive.store import (
     config_dir,
     load_registry,
@@ -441,9 +442,7 @@ def _load_manifest() raises -> Manifest:
     var entries = List[FileEntry]()
     if not exists(_manifest_path()):
         return Manifest(entries^, 0, 0, String(""), 1)
-    var text: String
-    with open(_manifest_path(), "r") as f:
-        text = f.read()
+    var text = default_manifest_store(config_dir()).load(DOC_MANIFEST)
     var next_id = 0
     var next_alias = 0
     var source_dir = String("")
@@ -554,8 +553,7 @@ def _write_manifest(m: Manifest) raises:
             + String(e.chunk_count)
             + "\n"
         )
-    with open(_manifest_path(), "w") as f:
-        f.write(out)
+    default_manifest_store(config_dir()).save(DOC_MANIFEST, out)
 
 
 def _find_by_name(entries: List[FileEntry], name: String) -> Int:

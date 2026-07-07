@@ -94,6 +94,12 @@ test-classify = { cmd = "mkdir -p build && mojo build core/test/derive/classify_
 # ml_backfill_rows call traverses store→classify→flare, so this links the full
 # sibling set like test-result (json/lancedb/pdftotext/zlib/csv/docx).
 test-store = { cmd = "mkdir -p build && mojo build core/test/derive/store_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/store-test && ./build/store-test" }
+# Gate: the DOC storage seam (vault.storage — DocStore/FileDocStore, Phase 2 slice B2).
+# The whole-document rewrites (categories.txt / manifest.tsv / indexed-paths.json) route
+# their read/write through one dir+key store: load-missing raises, save→load roundtrip,
+# overwrite (last-write-wins), plain-umask mode, and the per-doc factories. Hermetic
+# MILLFOLIO_DATA_DIR so the default_*_store() factories resolve to a throwaway dir.
+test-docstore = { cmd = "mkdir -p build && rm -rf build/docstore-data && MILLFOLIO_DATA_DIR=\"$PWD/build/docstore-data\" bash -c 'mkdir -p \"$PWD/build/docstore-data\" && mojo build core/test/storage/doc_store_test.mojo -I core/src -I ../flare -o build/docstore-test && MILLFOLIO_DATA_DIR=\"$PWD/build/docstore-data\" ./build/docstore-test'" }
 # Gate: the REAL on-disk persist path (write_txn_rows tmp+rename → load_txn_rows).
 # A synthetic reconciling statement extracts → is written → reads back with every
 # row intact. Guards the prod HOTFIX regression where the atomic rename got a
@@ -190,4 +196,4 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-codegen-cache", "test-result", "test-strip", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-docstore", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-codegen-cache", "test-result", "test-strip", "test-mojo-version"] }
