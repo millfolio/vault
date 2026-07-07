@@ -66,6 +66,15 @@ from storage import (
     operations_log_path,
     stats_log_path,
     asks_log_path,
+    default_kv_store,
+    KV_INDEX_STATE,
+    KV_INDEX_PID,
+    KV_INDEX_OP,
+    KV_INDEX_RUNTOTAL,
+    KV_DEMO_STATE,
+    KV_DEMO_OP,
+    KV_DL_STATE,
+    KV_DL_MODEL,
 )
 from work_queue import (
     WorkItem,
@@ -1053,7 +1062,7 @@ struct Api(Copyable, Handler, Movable):
         # Mark downloading synchronously (so an immediate status poll / re-POST sees it
         # in flight), stamp the pending Operations row, then enqueue the work item. The
         # orchestrator loop picks it up and does the actual fetch + index off-reactor.
-        _write_small(_demo_state_path(), "downloading")
+        _kv_set(KV_DEMO_STATE, "downloading")
         _write_small(_demo_log_path(), "Downloading sample data…")
         _write_demo_pending_op(_epoch_s())
         try:
@@ -1061,7 +1070,7 @@ struct Api(Copyable, Handler, Movable):
                 String(KIND_DEMO), _demo_dir(), _epoch_s(), PRIO_INDEX
             )
         except:
-            _write_small(_demo_state_path(), "error")
+            _kv_set(KV_DEMO_STATE, "error")
             return _cors(
                 bad_request('{"error":"could not start sample data import"}')
             )
@@ -1520,7 +1529,7 @@ def _reconcile_stale():
             for i in range(len(items)):
                 if is_index_kind(items[i].kind):
                     _ = wq_fail(items[i].id, String("index run orphaned"))
-            _write_small(_index_state_path(), "error")
+            _kv_set(KV_INDEX_STATE, "error")
             _finalize_index_op()  # attribute the failed run from its pending marker
     except:
         pass
@@ -1678,7 +1687,7 @@ def _run_index_item(item: WorkItem):
             _ = wq_done(item.id)
             if item.kind == KIND_FINALIZE:
                 # The run settled cleanly — record the index/reindex op.
-                _write_small(_index_state_path(), "done")
+                _kv_set(KV_INDEX_STATE, "done")
                 _finalize_index_op()
         else:
             _abort_index_run(item.kind + " step failed")
@@ -1694,7 +1703,7 @@ def _abort_index_run(reason: String):
         for i in range(len(items)):
             if is_index_kind(items[i].kind):
                 _ = wq_fail(items[i].id, reason)
-        _write_small(_index_state_path(), "error")
+        _kv_set(KV_INDEX_STATE, "error")
         _finalize_index_op()
     except:
         pass
@@ -1974,13 +1983,13 @@ def _download_bin() -> String:
 
 
 def _dl_state_path() -> String:
-    return (
-        _config_dir() + "/.model_download.state"
-    )  # one word: running|done|error
+    # one word: running|done|error. KV marker (`_kv_set(KV_DL_STATE, …)`); the full
+    # path is still needed for the detached-download shell redirect + provision reads.
+    return _config_dir() + "/" + KV_DL_STATE
 
 
 def _dl_model_path() -> String:
-    return _config_dir() + "/.model_download.model"  # the in-flight model id
+    return _config_dir() + "/" + KV_DL_MODEL  # the in-flight model id (KV marker)
 
 
 def _dl_log_path() -> String:
@@ -1988,10 +1997,22 @@ def _dl_log_path() -> String:
 
 
 def _write_small(path: String, text: String):
-    """Best-effort single-file write (never raises)."""
+    """Best-effort single-file write (never raises). Still used for the captured-output
+    LOGS (`.index.log` / `.demo.log`) and the tracked-paths doc — the single-value KV
+    markers go through `_kv_set` (the storage seam) instead."""
     try:
         with open(path, "w") as f:
             f.write(text)
+    except:
+        pass
+
+
+def _kv_set(key: String, value: String):
+    """Best-effort single-value marker write (never raises) — the storage-seam facade
+    (slice 3) that replaces `_write_small` for the KV markers. Swallows like the old
+    `_write_small` did; `FileKvStore.set` itself raises, so the try/except lives here."""
+    try:
+        default_kv_store().set(key, value)
     except:
         pass
 
@@ -2017,10 +2038,7 @@ def _dl_progress() -> String:
 
 def _dl_read_model() -> String:
     try:
-        var m: String
-        with open(_dl_model_path(), "r") as f:
-            m = f.read()
-        return String(m.strip())
+        return String(default_kv_store().get(KV_DL_MODEL).strip())
     except:
         return String("")
 
@@ -2113,10 +2131,7 @@ def _download_status_json() raises -> String:
     var bytes_total = -1
     if model != "":
         try:
-            var s: String
-            with open(_dl_state_path(), "r") as f:
-                s = f.read()
-            state = String(s.strip())
+            state = String(default_kv_store().get(KV_DL_STATE).strip())
         except:
             state = String("running")
         var done = _model_downloaded(model)
@@ -2155,10 +2170,7 @@ def _download_running() raises -> Bool:
     if model == "" or _model_downloaded(model):
         return False
     try:
-        var s: String
-        with open(_dl_state_path(), "r") as f:
-            s = f.read()
-        return String(s.strip()) == "running"
+        return String(default_kv_store().get(KV_DL_STATE).strip()) == "running"
     except:
         return False
 
@@ -2186,9 +2198,9 @@ def _dl_core_cmd(id: String) -> String:
 def _begin_download_state(id: String):
     """Mark `id` as the in-flight download (running) and truncate the capture log.
     """
-    _write_small(_dl_model_path(), id)
-    _write_small(_dl_state_path(), "running")
-    _write_small(_dl_log_path(), "")
+    _kv_set(KV_DL_MODEL, id)
+    _kv_set(KV_DL_STATE, "running")
+    _write_small(_dl_log_path(), "")  # capture log (not a KV marker) — truncate
 
 
 def _start_download_detached(id: String) -> Bool:
@@ -2229,7 +2241,7 @@ def _provision_fetch(id: String) -> Bool:
     _ = external_call["system", Int32](cc)  # waits (no trailing &)
     cc.free()
     var ok = _model_downloaded(id)  # refs/main appears only on full success
-    _write_small(_dl_state_path(), "done" if ok else "error")
+    _kv_set(KV_DL_STATE, "done" if ok else "error")
     return ok
 
 
@@ -2267,7 +2279,7 @@ def _demo_zip_path() -> String:
 
 
 def _demo_state_path() -> String:
-    return _config_dir() + "/.demo.state"  # downloading|indexing|done|error
+    return _config_dir() + "/" + KV_DEMO_STATE  # downloading|indexing|done|error
 
 
 def _demo_log_path() -> String:
@@ -2277,8 +2289,9 @@ def _demo_log_path() -> String:
 def _demo_op_path() -> String:
     """Marker written when the sample-data import STARTS (its kind + start epoch),
     read back once the import settles to record ONE operation-history row — the same
-    lazy-finalize pattern index/reindex runs use (`_pending_op_path`)."""
-    return _config_dir() + "/.demo.op"
+    lazy-finalize pattern index/reindex runs use (`_pending_op_path`). The full path is
+    still used for the atomic-rename claim in `_finalize_demo_op`."""
+    return _config_dir() + "/" + KV_DEMO_OP
 
 
 def _demo_present() -> Bool:
@@ -2288,10 +2301,7 @@ def _demo_present() -> Bool:
 
 def _demo_read_state() -> String:
     try:
-        var s: String
-        with open(_demo_state_path(), "r") as f:
-            s = f.read()
-        return String(s.strip())
+        return String(default_kv_store().get(KV_DEMO_STATE).strip())
     except:
         return String("idle")
 
@@ -2311,9 +2321,9 @@ def _demo_effective_state() -> String:
         return String("indexing")
     # The index run settled — reflect + persist its outcome.
     if _index_read_state_raw() == "error":
-        _write_small(_demo_state_path(), "error")
+        _kv_set(KV_DEMO_STATE, "error")
         return String("error")
-    _write_small(_demo_state_path(), "done")
+    _kv_set(KV_DEMO_STATE, "done")
     return String("done")
 
 
@@ -2394,8 +2404,8 @@ def _demo_status_json() raises -> String:
 
 def _write_demo_pending_op(started: Int64):
     """Stamp the pending-operation marker for a just-launched sample-data import."""
-    _write_small(
-        _demo_op_path(),
+    _kv_set(
+        KV_DEMO_OP,
         String('{"type":"demo","started":') + String(started) + "}",
     )
 
@@ -2405,7 +2415,7 @@ def _finalize_demo_op():
     is still present, record ONE `demo` operation for it and clear the marker. The
     marker is claimed with an atomic rename so whichever caller (a status poll or a GET
     /api/operations) wins records the run exactly once. Best-effort; never raises."""
-    if not exists(_demo_op_path()):
+    if not default_kv_store().exists(KV_DEMO_OP):
         return
     var state = _demo_effective_state()
     if state != "done" and state != "error":
@@ -2460,19 +2470,19 @@ def _run_demo_download_item(item: WorkItem):
             # not a separate `index` one. The loop drains these on the next iterations,
             # and `_demo_effective_state` settles the demo to done/error from that run.
             if _start_index_run([_demo_dir()], String("index"), False):
-                _write_small(_demo_state_path(), "indexing")
+                _kv_set(KV_DEMO_STATE, "indexing")
                 _write_small(
                     _demo_log_path(),
                     "Indexing sample data (first run loads the embedding"
                     " model)…",
                 )
             else:
-                _write_small(_demo_state_path(), "error")
+                _kv_set(KV_DEMO_STATE, "error")
         else:
-            _write_small(_demo_state_path(), "error")
+            _kv_set(KV_DEMO_STATE, "error")
         _ = wq_done(item.id)
     except:
-        _write_small(_demo_state_path(), "error")
+        _kv_set(KV_DEMO_STATE, "error")
         try:
             _ = wq_done(item.id)
         except:
@@ -2540,7 +2550,7 @@ def _demo_fetch_and_unpack() raises -> Bool:
     zip is tiny (~KB) so a single full-body GET is fine — no incremental byte progress.
     Unpack is a one-line `unzip` shell-out (macOS ships it). Best-effort; the caller
     treats a False/raise as an import error."""
-    _write_small(_demo_state_path(), "downloading")
+    _kv_set(KV_DEMO_STATE, "downloading")
     _write_small(_demo_log_path(), "Downloading sample data…")
     var exe = _self_exe_path()
     if exe == "":
@@ -2599,15 +2609,15 @@ def _demo_fetch_and_unpack() raises -> Bool:
 
 
 def _index_state_path() -> String:
-    return _config_dir() + "/.index.state"  # idle|indexing|done|error
+    return _config_dir() + "/" + KV_INDEX_STATE  # idle|indexing|done|error
 
 
 def _index_log_path() -> String:
-    return _config_dir() + "/.index.log"  # captured indexer output
+    return _config_dir() + "/.index.log"  # captured indexer output (a LOG, not KV)
 
 
 def _index_pid_path() -> String:
-    return _config_dir() + "/.index.pid"  # detached index worker's PID
+    return _config_dir() + "/" + KV_INDEX_PID  # detached index worker's PID
 
 
 def _tracked_paths_path() -> String:
@@ -2618,10 +2628,7 @@ def _index_read_pid() -> Int:
     """The detached index worker's PID (the backgrounded subshell that runs the
     indexer), or -1 when unknown (no pid file / unparsable)."""
     try:
-        var s: String
-        with open(_index_pid_path(), "r") as f:
-            s = f.read()
-        return Int(String(s.strip()))
+        return Int(String(default_kv_store().get(KV_INDEX_PID).strip()))
     except:
         return -1
 
@@ -2637,32 +2644,26 @@ def _pid_alive(pid: Int) -> Bool:
 def _index_read_state_raw() -> String:
     """The state file verbatim (idle|indexing|done|error), no liveness reconciling."""
     try:
-        var s: String
-        with open(_index_state_path(), "r") as f:
-            s = f.read()
-        return String(s.strip())
+        return String(default_kv_store().get(KV_INDEX_STATE).strip())
     except:
         return String("idle")
 
 
 def _index_runtotal_path() -> String:
-    return _config_dir() + "/.index.runtotal"  # file count for the current index run
+    return _config_dir() + "/" + KV_INDEX_RUNTOTAL  # file count for current run
 
 
 def _read_runtotal() -> Int:
     """The current index run's total file count (stamped by the generator at enqueue),
     for the `[k/M]` progress bar. 0 when absent/unparsable."""
     try:
-        var s: String
-        with open(_index_runtotal_path(), "r") as f:
-            s = f.read()
-        return Int(String(s.strip()))
+        return Int(String(default_kv_store().get(KV_INDEX_RUNTOTAL).strip()))
     except:
         return 0
 
 
 def _write_runtotal(n: Int):
-    _write_small(_index_runtotal_path(), String(n))
+    _kv_set(KV_INDEX_RUNTOTAL, String(n))
 
 
 def _wq_list_safe() -> List[WorkItem]:
@@ -2796,14 +2797,15 @@ def _operations_path() -> String:
 
 def _pending_op_path() -> String:
     """Marker written when a detached index/reindex run STARTS (its type + start
-    epoch), read back once the run settles to build the operation record."""
-    return _config_dir() + "/.index.op"
+    epoch), read back once the run settles to build the operation record. The full path
+    is still used for the atomic-rename claim in `_finalize_index_op`."""
+    return _config_dir() + "/" + KV_INDEX_OP
 
 
 def _write_pending_op(kind: String, started: Int64):
     """Stamp the pending-operation marker for a just-launched index/reindex run."""
-    _write_small(
-        _pending_op_path(),
+    _kv_set(
+        KV_INDEX_OP,
         String('{"type":')
         + json_escape(kind)
         + ',"started":'
@@ -2874,7 +2876,7 @@ def _finalize_index_op():
     marker is claimed with an atomic rename so that whichever caller (a status poll,
     a GET /api/operations, or the next run's start) wins records the run exactly
     once. Best-effort; never raises."""
-    if not exists(_pending_op_path()):
+    if not default_kv_store().exists(KV_INDEX_OP):
         return
     var state = _index_read_state()
     if state != "done" and state != "error":

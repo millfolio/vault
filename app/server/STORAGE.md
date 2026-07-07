@@ -32,7 +32,7 @@ maps to exactly one by how it's read/written, not by its extension.
 
 | Shape | Contract | Semantics |
 |-------|----------|-----------|
-| **kv** | `get(key)→val?` · `set(key,val)` · `delete(key)` | small single-value markers; last-write-wins |
+| **kv** | `get(key)→val` · `set(key,val)` · `delete(key)` · `exists(key)` | small single-value markers; last-write-wins **(migrated ✓)** |
 | **log** | `append(record)` · `read_all()→raw` · `rewrite(raw)` | append-only event streams; torn last line tolerated **(migrated ✓)** |
 | **queue** | `enqueue/peek/take/done/fail/list/running/reset` over `WorkItem` | ordered work items + a monotonic id; load-modify-save under a lock **(migrated ✓)** |
 | **doc** | `load()→blob` · `save(blob)` | one structured document rewritten whole (registry / config / manifest) |
@@ -44,7 +44,7 @@ Drawn from the ~20 files under `~/Library/Application Support/Millfolio/data`
 
 | Shape | Files (today) | Format today |
 |-------|---------------|--------------|
-| **kv** | `.index.state` `.index.pid` `.index.log` `.index.op` `.index.runtotal` `.index.manifest` · `.model_download.state` · `.demo.state` · `.gpu_util` · `.anthropic-key` / `.reveal-secret` · `.search_cap.txt` `.search_out.json` | bare text / tiny marker files |
+| **kv** | `.index.state` `.index.pid` `.index.op` `.index.runtotal` · `.model_download.state` `.model_download.model` · `.demo.state` `.demo.op` **← migrated (slice 3)** · _(left in place:_ `.anthropic-key` / `.reveal-secret` _— auth 0600;_ `.gpu_util` `.mem_bytes` `.mem_used` `.disk_used` `.dl_du` _— sysmetrics shell-redirect caches;_ `.index.log` `.demo.log` `.model_download.log` _— logs)_ | bare text / tiny marker files |
 | **log** | `operations.jsonl` · `asks.jsonl` · `stats.jsonl` **← migrated (slice 2)** | append-only JSONL, newest-first read, cap on read |
 | **queue** | `work_queue.jsonl` **← migrated (slice 1)** | TSV (one `WorkItem` per line) + `#nextid` header |
 | **doc** | `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json` | whole-file rewrite (rules / tracked paths / index manifest / config) |
@@ -63,7 +63,7 @@ over one `millfolio.db`:
         kv trait        log trait       queue trait      doc trait
            │               │               │               │
    ┌───────┴───────┬───────┴───────┬───────┴───────┬───────┴───────┐
-FileKvStore    FileLogStore ✓ FileQueueStore ✓   FileDocStore     ← today (this cleanup)
+FileKvStore ✓  FileLogStore ✓ FileQueueStore ✓   FileDocStore     ← today (this cleanup)
 SqliteKvStore  SqliteLogStore SqliteQueueStore   SqliteDocStore   ← Phase 5 (one table each)
 ```
 
@@ -180,6 +180,60 @@ The three **append-only JSONL logs** move behind one tiny trait, mirroring the q
 > are a `kv`-shape file, migrated in slice 3, **not** here. Only the `.jsonl` append +
 > read moved.
 
+## 4b. Slice 3 — the KV / small-marker seam (implemented)
+
+The tiny **single-value marker dotfiles** move behind one `KvStore` trait, mirroring the
+queue + log slices:
+
+- **`trait KvStore(Copyable, Movable)`** in `storage.mojo` — four methods:
+  - `get(key) -> String` — the WHOLE stored value, **raising on a missing key** exactly
+    like the inline `with open(path, "r")` each marker read replaces, so every caller
+    keeps its own `try/except → default` + `.strip()`.
+  - `set(key, value)` — write the value WHOLE (last-write-wins; the `_write_small` body
+    minus its swallow — the thin `_kv_set` server facade keeps the best-effort
+    `try/except`).
+  - `delete(key)` — remove it (raises when absent, like `os.remove`).
+  - `exists(key) -> Bool` — non-raising presence check (the lazy-finalize pending-op
+    guards on it).
+- **`struct FileKvStore(KvStore, …)`** — the existing `_write_small` / inline-`open` logic
+  moved verbatim; holds only the base `dir` and maps a **logical key** (the marker's
+  basename, e.g. `.index.state`) to `dir + "/" + key`. Keys are logical names, NOT
+  filesystem paths, so a Phase-5 `SqliteKvStore` reuses the SAME keys as the primary key
+  of one `kv(k,v)` table.
+- **`default_kv_store()`** over `_config_dir()` — the Phase-5 swap point; reproduces every
+  marker's old `_config_dir() + "/.<name>"` path byte-for-byte.
+- **`server.mojo` is the thin facade**: the marker path helpers (`_index_state_path`,
+  `_dl_state_path`, `_demo_state_path`, `_pending_op_path`, …) now derive from the key
+  constants; writes go through `_kv_set(KEY, …)`, reads through `default_kv_store().get(KEY)`
+  (inside their existing `try/except → default`), and the pending-op finalizers' presence
+  check through `.exists(KEY)`. Behavior is unchanged. Unit-tested by
+  `test/kv_store_test.mojo` (`pixi run test-kvstore`, hermetic over a temp `MILLFOLIO_DATA_DIR`).
+
+**Eight migrated markers** (logical keys, all written/read WHOLE in-process):
+`.index.state` · `.index.pid` · `.index.op` · `.index.runtotal` · `.demo.state` ·
+`.demo.op` · `.model_download.state` · `.model_download.model`. This picks up the
+**pending-op markers `.index.op` / `.demo.op`** the log slice explicitly deferred (their
+WRITE + the finalizer's `exists()` guard now route through the store; the finalizer's
+atomic-rename *claim* to a `.claiming` sibling stays as bespoke orchestration — it isn't a
+get/set/delete/exists primitive, and `.claiming` isn't a marker).
+
+> **Deliberately NOT migrated:**
+> - **Auth 0600 secrets** `.anthropic-key` / `.reveal-secret` — they live in `auth.mojo`
+>   with `chmod 0600` semantics + their own tests. A plain `KvStore.set` opens `"w"` and
+>   would NOT re-tighten the mode, so forcing them through the store would weaken the file
+>   mode. Left in `auth.mojo`; `auth_test` stays green.
+> - **Scratch metric caches** `.gpu_util` / `.mem_bytes` / `.mem_used` / `.disk_used` (in
+>   `sysmetrics.mojo`) and `.dl_du` (in `_du_bytes`) — these are WRITTEN BY A SHELL REDIRECT
+>   (`… > '<path>'`) inside a `system()` subprocess; only their READ is Mojo. The write
+>   can't route through a Mojo `set` (and a subprocess can't write to a future SQLite
+>   backend), so they're not "clean" KV — they're throwaway subprocess-to-temp-file IPC.
+>   Left in place.
+> - **Logs** `.index.log` / `.demo.log` / `.model_download.log` — append + last-line-read
+>   captured-output streams, not single-value markers. (`.model_download.state`'s
+>   *completion* flip in the detached-download path is also a shell `printf … > state`
+>   redirect — but its other writes/reads are genuine in-process KV, so it's migrated; a
+>   Phase-5 SQLite swap would additionally need to reroute that one shell step.)
+
 ## 5. Migration order (remaining categories)
 
 Smallest-surface / lowest-risk first, each shippable on its own:
@@ -189,14 +243,15 @@ Smallest-surface / lowest-risk first, each shippable on its own:
    raw read behind `LogStore`; the builders stay in `store.mojo` (`ask_record_line`,
    `operation_record_line`, `*_records_array`), so the store is a thin bytes-mover over
    the file append/read. Uniform, well-bounded. See §4a.
-3. **kv** — the `.index.*` / `.*.state` / `.gpu_util` / secret markers (plus the
-   `.index.op` / `.demo.op` pending-op markers the log slice deliberately left). Many tiny
-   sites; the win is consolidating scattered bare-file reads/writes behind
-   `get/set/delete` (and later one `kv` table instead of a dozen dotfiles).
+3. **kv ✓** — slice 3: the `.index.*` / `.*.state` / `.*.op` / `.model_download.*` markers
+   (incl. the `.index.op` / `.demo.op` pending-op markers the log slice deliberately left).
+   Many tiny sites consolidated behind `get/set/delete/exists` (and later one `kv` table
+   instead of a dozen dotfiles). Auth 0600 secrets + the sysmetrics shell-redirect scratch
+   caches stay put (see §4b). See §4b.
 4. **docs** — `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json`.
    Whole-document rewrite; some are shared with `vault/core`, so this is the slice
    that motivates moving the traits down to `vault/core` (§4, module home).
 
-Do **kv** next: the `.index.*` / `.*.state` / `.gpu_util` / secret + pending-op
-markers — many tiny scattered bare-file reads/writes to consolidate behind
-`get`/`set`/`delete`.
+Do **docs** next: `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json`
+— whole-document rewrite; some are shared with `vault/core`, so this is the slice that
+motivates moving the shape traits down to `vault/core` (§4, module home).

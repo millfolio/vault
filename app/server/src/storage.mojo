@@ -23,6 +23,17 @@ the raw file, `rewrite` the whole file. The pure record BUILDERS stay in `store.
 KV markers `.index.op` / `.demo.op` that `operations.jsonl` pairs with are a LATER
 kv slice — NOT migrated here.)
 
+**Slice 3 — the KV / small-marker store** (`KvStore` / `FileKvStore`, at the bottom of
+this file). The tiny single-value marker dotfiles — `.index.state` / `.index.pid` /
+`.index.op` / `.index.runtotal` / `.demo.state` / `.demo.op` / `.model_download.state` /
+`.model_download.model` — move behind one trait: `get` (raises on missing, like the
+inline `open`), `set` (write whole), `delete`, `exists`. A `key` is the marker's logical
+name (its basename); `FileKvStore` maps it to `<dir>/<key>`. `server.mojo`'s
+`_kv_set` + the marker path helpers are the thin facade. This picks up the pending-op
+markers `.index.op` / `.demo.op` the log slice deferred. The auth 0600 secrets and the
+`sysmetrics` shell-redirect scratch caches are deliberately NOT migrated (see STORAGE.md
+§4b).
+
 **Contract — `QueueStore`.** enqueue / peek / take / done / fail / list / running /
 reset over `WorkItem`. `FileQueueStore` implements it with the existing flock +
 tmp-rename JSONL logic.
@@ -51,7 +62,8 @@ needs a Mojo `libsqlite3` FFI binding that doesn't exist yet — out of scope he
 """
 from std.ffi import external_call, c_char
 from std.memory import alloc
-from std.os import getenv
+from std.os import getenv, remove
+from std.os.path import exists
 from flare.prelude import *  # MutUntrackedOrigin
 from osutil import (
     _config_dir,
@@ -623,3 +635,106 @@ def default_stats_store() -> FileLogStore:
 def default_asks_store() -> FileLogStore:
     """The ask-history store — a swap point for Phase 5 (`asks.jsonl`)."""
     return FileLogStore(asks_log_path())
+
+
+# ── Slice 3: KV / small-marker store (single-value dotfiles) ───────────────────
+# The tiny single-value marker files behind one `KvStore` trait, mirroring the queue +
+# log slices. Each marker is a bare text file read/written WHOLE — a state word, a pid,
+# a run-total count, a pending-op JSON blob. A `key` is the marker's LOGICAL name (its
+# on-disk basename, e.g. `.index.state`), NOT a filesystem path: `FileKvStore` maps
+# `key → <dir>/<key>`, so a Phase-5 `SqliteKvStore` can reuse the SAME keys as the
+# primary key of one `kv(k TEXT PRIMARY KEY, v BLOB)` table with no call-site change.
+#
+# The eight migrated markers — all written/read WHOLE by the server IN-PROCESS (via
+# `_write_small` / inline `open`). Their logical key names double as the on-disk
+# basenames, so `FileKvStore(_config_dir())` reproduces the old `_config_dir()+"/.<name>"`
+# path byte-for-byte:
+comptime KV_INDEX_STATE = ".index.state"  # idle|indexing|done|error
+comptime KV_INDEX_PID = ".index.pid"  # detached index worker's PID
+comptime KV_INDEX_OP = (  # pending index/reindex op marker (lazy-finalize)
+    ".index.op"
+)
+comptime KV_INDEX_RUNTOTAL = ".index.runtotal"  # file count for the current run
+comptime KV_DEMO_STATE = ".demo.state"  # downloading|indexing|done|error
+comptime KV_DEMO_OP = (  # pending sample-data import marker (lazy-finalize)
+    ".demo.op"
+)
+comptime KV_DL_STATE = ".model_download.state"  # running|done|error
+comptime KV_DL_MODEL = ".model_download.model"  # the in-flight model id
+#
+# NOT migrated (deliberate): the auth secrets `.anthropic-key` / `.reveal-secret` keep
+# their `chmod 0600` semantics + own tests in `auth.mojo` (a plain KV set would widen the
+# mode); the captured-output LOGS `.index.log` / `.demo.log` / `.model_download.log` are
+# append+last-line-read streams, not single-value markers; and the scratch caches
+# `.gpu_util` / `.mem_bytes` / `.mem_used` / `.disk_used` / `.dl_du` are WRITTEN BY A SHELL
+# REDIRECT (`… > '<path>'`) inside a `system()` subprocess — only their read is Mojo — so
+# they can't route through a Mojo `set` (and couldn't back onto SQLite); they stay put in
+# `sysmetrics.mojo` / `_du_bytes`. See STORAGE.md §4b.
+
+
+trait KvStore(Copyable, Movable):
+    """Persistence interface for the small single-value markers.
+
+    A `key` is a marker's logical name; the store maps it to storage. The contract is
+    tiny — `get` returns the WHOLE stored value and RAISES on a missing key exactly like
+    the `with open(path, "r")` each marker read replaces (so every caller keeps its own
+    `try/except → default` + `.strip()`); `set` writes the value WHOLE (last-write-wins);
+    `delete` removes it (raises when absent, like `os.remove`); `exists` is a non-raising
+    presence check (the pending-op finalize guards on it). A Phase-5 `SqliteKvStore`
+    conforms to the SAME trait over one `kv(k,v)` table, swapped in at `default_kv_store()`.
+    """
+
+    def get(self, key: String) raises -> String:
+        ...
+
+    def set(self, key: String, value: String) raises:
+        ...
+
+    def delete(self, key: String) raises:
+        ...
+
+    def exists(self, key: String) -> Bool:
+        ...
+
+
+@fieldwise_init
+struct FileKvStore(Copyable, KvStore, Movable):
+    """The file-backed KV store: each key is a bare dotfile under `dir`, read/written
+    WHOLE — the existing `_write_small` / inline-`open` logic moved verbatim. Holds only
+    the base `dir` (the data dir); `key → dir + "/" + key`.
+
+    `get` opens the file and returns its raw contents, RAISING on a missing/unreadable
+    file exactly like the inline `with open(path, "r")` it replaces — the caller keeps its
+    `.strip()` + `try/except → default`. `set` truncates + writes the value (the
+    `_write_small` body WITHOUT the swallow — the thin `_kv_set` server facade keeps the
+    best-effort `try/except`). `delete` = `os.remove`; `exists` = `os.path.exists` — both
+    back the atomic-rename pending-op finalize.
+    """
+
+    var dir: String
+
+    def _path(self, key: String) -> String:
+        return self.dir + "/" + key
+
+    def get(self, key: String) raises -> String:
+        var content: String
+        with open(self._path(key), "r") as f:
+            content = f.read()
+        return content
+
+    def set(self, key: String, value: String) raises:
+        with open(self._path(key), "w") as f:
+            f.write(value)
+
+    def delete(self, key: String) raises:
+        remove(self._path(key))
+
+    def exists(self, key: String) -> Bool:
+        return exists(self._path(key))
+
+
+def default_kv_store() -> FileKvStore:
+    """The KV store the marker facades use — the single Phase-5 swap point. Today a
+    file-backed store over the data dir (`_config_dir()`), matching every marker's
+    `_config_dir() + "/.<name>"` path byte-for-byte."""
+    return FileKvStore(_config_dir())
