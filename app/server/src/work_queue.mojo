@@ -1,11 +1,12 @@
 """Disk-backed **work queue** for the orchestrator (see `ORCHESTRATOR.md` §2.1–2.2).
 
-This module is now a **thin facade over the storage seam** (`storage.mojo`, see
-`STORAGE.md`). It keeps the public `wq_*` API stable — `scheduler.mojo`, `server.mojo`,
-and `test/work_queue_test.mojo` import from here unchanged — but the actual queue of
-`WorkItem` records now lives behind the `QueueStore` trait, implemented by
-`FileQueueStore` (the byte-identical flock + tmp-rename JSONL persistence, moved
-verbatim into `storage.mojo`). Each `wq_*` function is a one-liner that constructs the
+This module is now a **thin facade over the storage seam** (`vault.storage`, promoted
+to `vault/core` in Phase 2 slice B1 — see `STORAGE.md`). It keeps the public `wq_*` API
+stable — `scheduler.mojo`, `server.mojo`, and `test/work_queue_test.mojo` import from
+here unchanged — but the actual queue of `WorkItem` records now lives behind the
+`QueueStore` trait, implemented by `FileQueueStore` (the byte-identical flock +
+tmp-rename JSONL persistence, moved verbatim into `vault.storage`). Each `wq_*` function
+is a one-liner that constructs the
 `default_queue_store()` (a `FileQueueStore` over `work_queue_path()`, re-reading
 `MILLFOLIO_WORKQ_PATH` every call) and delegates the operation to it.
 
@@ -13,13 +14,13 @@ Splitting the persistence out of the API is Phase 2 slice 1 of the backend stora
 cleanup: the queue is the first data category to move behind `Store` traits so its
 on-disk format is swappable (TSV/JSONL now → SQLite later) without touching the
 ~call sites. The `WorkItem`/`QueueState` records, the `PRIO_*` class defaults, the
-`work_queue_path()` helper, and the on-disk format are all defined in `storage.mojo`
+`work_queue_path()` helper, and the on-disk format are all defined in `vault.storage`
 and re-exported here so existing `from work_queue import …` sites keep resolving.
 
 Unit-tested by `test/work_queue_test.mojo` (task `pixi run test-workqueue`) — the same
 suite as before, unchanged, since behavior is identical.
 """
-from storage import (
+from vault.storage import (
     WorkItem,
     QueueState,
     QueueStore,

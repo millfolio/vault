@@ -15,7 +15,7 @@ Covers the contract the three logs (operations/stats/asks) rely on:
   - the default_*_store factory + its path helper honor the per-log env override
 """
 from std.os import setenv
-from storage import (
+from vault.storage import (
     FileLogStore,
     default_operations_store,
     operations_log_path,

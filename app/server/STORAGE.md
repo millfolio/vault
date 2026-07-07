@@ -133,16 +133,42 @@ and the code stays simple. When a second impl lands, the swap is either:
 Either way the `QueueStore` trait is the contract both impls satisfy; nothing above
 the facade changes.
 
-### Module home
+### Module home — **now `vault/core` (`vault.storage`)** (Phase 2 slice B1, done)
 
-`storage.mojo` lives in **`app/server/src`** for now, because the queue it backs lives
-there. Once the vault-side stores are folded in (`vault/core`'s `derive/store`,
-`derive/ledger` — the categorization registry + the ML-materialization ledger, which
-are the *same* kv/doc shapes shared by the `mill` CLI and the app server in-process),
-the shape traits should move to **`vault/core`** so both sides share one `Store`
-definition and one `SqliteStore` backend. That is a later slice; keeping it in
-`app/server` now avoids a premature cross-repo dependency while only the queue is
-migrated.
+The storage layer was **promoted out of `app/server/src/storage.mojo` into
+`vault/core/src/vault/storage/`** — the `vault.storage` sub-package (import
+`from vault.storage import …`; sibling to `vault.derive` / `vault.index` /
+`vault.extract`). Both sides now share one `Store` definition + one future
+`SqliteStore` backend: the app server AND the vault-side registries (`derive/store`,
+`derive/ledger` — the categorization registry + ML-materialization ledger, the *same*
+kv/doc shapes the `mill` CLI and the server use in-process).
+
+- **Not on the `from vault import *` tool surface.** `vault.storage` is internal
+  infra, deliberately left OUT of `vault/core/src/vault/__init__.mojo`'s wildcard — a
+  privacy_box-generated program can't reach it; it's importable only by name.
+- **Acyclic.** `vault.storage` depends on nothing but stdlib + the `flare` sibling lib
+  (for `MutUntrackedOrigin`) — it imports NOTHING from `app/server`. The two helpers it
+  used to borrow from the server (`osutil._config_dir` for the data dir, `osutil._chmod`
+  for the owner-only log mode) are **inlined** as `_storage_config_dir()` +
+  `_chmod()` (option (b): a minimal self-contained resolver, chosen over parameterizing
+  every factory — the resolver is one env read + a libc `chmod`, and inlining reproduces
+  the exact on-disk paths + 0600 modes byte-for-byte with zero cross-repo coupling). The
+  `WorkItem`/`QueueState`/`PRIO_*` records move with it — plain records, no app-server
+  dependency.
+- **Re-wire.** `app/server`'s facades now `from vault.storage import …`: `work_queue.mojo`
+  (the `wq_*` delegators), `server.mojo` (the log/kv facades), the test tasks. app/server
+  already built with `-I ../../vault/core/src` (for `vault.derive.*`), so the server build
+  needed no new include; the `test-workqueue` / `test-logstore` / `test-kvstore` /
+  `test-scheduler` pixi tasks each gained `-I ../../vault/core/src`.
+- **Precompile/bundle.** `precompile_pkgs.sh` runs `mojo precompile core/src/vault`, which
+  compiles EVERY file in the package — so the new `vault/storage/` sub-package is folded
+  into `vault.mojoc` automatically (no script change), and the app-server resolves
+  `vault.storage` from the compiled package exactly as it resolves `vault.derive`.
+
+This slice is a **pure move + re-wire** — behaviour and on-disk formats are byte-identical.
+The next slice (**B2 — docs**: `categories.txt` / `indexed-paths.json` / `manifest.tsv` /
+`config.json`, the shapes actually shared with `vault/core`) is what this relocation
+unblocks; it lands the `DocStore` and migrates those registries.
 
 ## 4a. Slice 2 — the log seam (implemented)
 
@@ -249,9 +275,12 @@ Smallest-surface / lowest-risk first, each shippable on its own:
    instead of a dozen dotfiles). Auth 0600 secrets + the sysmetrics shell-redirect scratch
    caches stay put (see §4b). See §4b.
 4. **docs** — `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json`.
-   Whole-document rewrite; some are shared with `vault/core`, so this is the slice
-   that motivates moving the traits down to `vault/core` (§4, module home).
+   Whole-document rewrite; some are shared with `vault/core`, which is why the shape
+   traits were **already promoted** to `vault/core` (`vault.storage`, §4 module home) in
+   slice B1 ahead of this — so the shared `DocStore` lands where both sides can use it.
 
-Do **docs** next: `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json`
-— whole-document rewrite; some are shared with `vault/core`, so this is the slice that
-motivates moving the shape traits down to `vault/core` (§4, module home).
+**Slice B1 (done):** the whole storage layer moved from `app/server/src/storage.mojo` to
+`vault/core`'s `vault.storage` sub-package (§4 module home) — a pure move + re-wire, no
+new doc migration. **Do docs (slice B2) next:** land `DocStore` in `vault.storage` and
+migrate `categories.txt` · `indexed-paths.json` · `manifest.tsv` · `config.json` (the
+registries actually shared with `vault/core`) behind it.

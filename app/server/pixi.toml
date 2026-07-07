@@ -45,16 +45,16 @@ test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../
 # Unit-test the serial run-queue state file (runqueue.mojo) — flock + ticket invariants.
 test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I src -I ../../flare -o build/runqueue-test && rm -f /tmp/millfolio-runq-test /tmp/millfolio-runq-test.lock && MILLFOLIO_RUNQ_PATH=/tmp/millfolio-runq-test ./build/runqueue-test" }
 # Unit-test the disk-backed work queue (work_queue.mojo) — priority/FIFO/dedup/persistence.
-test-workqueue = { cmd = "mkdir -p build && mojo build test/work_queue_test.mojo -I src -I ../../flare -o build/workqueue-test && rm -f /tmp/millfolio-workq-test /tmp/millfolio-workq-test.lock /tmp/millfolio-workq-test.tmp && MILLFOLIO_WORKQ_PATH=/tmp/millfolio-workq-test ./build/workqueue-test" }
+test-workqueue = { cmd = "mkdir -p build && mojo build test/work_queue_test.mojo -I src -I ../../vault/core/src -I ../../flare -o build/workqueue-test && rm -f /tmp/millfolio-workq-test /tmp/millfolio-workq-test.lock /tmp/millfolio-workq-test.tmp && MILLFOLIO_WORKQ_PATH=/tmp/millfolio-workq-test ./build/workqueue-test" }
 # Unit-test the on-device JSON store builders (store.mojo) — ask history + /api/system.
 test-store = { cmd = "mkdir -p build && mojo build test/store_test.mojo -I src -I ../../json -o build/store-test && ./build/store-test" }
 # Unit-test the append-log storage seam (storage.mojo — LogStore) — append/read_all/rewrite over temp files.
-test-logstore = { cmd = "mkdir -p build && mojo build test/log_store_test.mojo -I src -I ../../flare -I ../../json -o build/logstore-test && rm -f /tmp/millfolio-logstore-test.jsonl /tmp/millfolio-logstore-test-ops.jsonl && ./build/logstore-test" }
+test-logstore = { cmd = "mkdir -p build && mojo build test/log_store_test.mojo -I src -I ../../vault/core/src -I ../../flare -I ../../json -o build/logstore-test && rm -f /tmp/millfolio-logstore-test.jsonl /tmp/millfolio-logstore-test-ops.jsonl && ./build/logstore-test" }
 # Unit-test the KV / small-marker storage seam (storage.mojo — KvStore) — get/set/delete/exists over a temp MILLFOLIO_DATA_DIR.
-test-kvstore = { cmd = "mkdir -p build && mojo build test/kv_store_test.mojo -I src -I ../../flare -I ../../json -o build/kvstore-test && rm -rf /tmp/millfolio-kvstore-test && mkdir -p /tmp/millfolio-kvstore-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-kvstore-test ./build/kvstore-test; rm -rf /tmp/millfolio-kvstore-test" }
+test-kvstore = { cmd = "mkdir -p build && mojo build test/kv_store_test.mojo -I src -I ../../vault/core/src -I ../../flare -I ../../json -o build/kvstore-test && rm -rf /tmp/millfolio-kvstore-test && mkdir -p /tmp/millfolio-kvstore-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-kvstore-test ./build/kvstore-test; rm -rf /tmp/millfolio-kvstore-test" }
 # Unit-test the pure orchestrator seams (scheduler.mojo) — enqueue plan, queue-derived
 # status, pause/query gating, reconcile predicate, backfill readiness.
-test-scheduler = { cmd = "mkdir -p build && mojo build test/scheduler_test.mojo -I src -I ../../flare -o build/scheduler-test && ./build/scheduler-test" }
+test-scheduler = { cmd = "mkdir -p build && mojo build test/scheduler_test.mojo -I src -I ../../vault/core/src -I ../../flare -o build/scheduler-test && ./build/scheduler-test" }
 # Unit-test the pure API-key helpers (apikey.mojo) — validation + last-4 masking + status JSON.
 test-apikey = { cmd = "mkdir -p build && mojo build test/apikey_test.mojo -I src -I ../../json -o build/apikey-test && ./build/apikey-test" }
 # Unit-test the foundational path/env/string helpers (osutil.mojo) — stdlib only, env knobs via setenv.

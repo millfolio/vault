@@ -18,7 +18,14 @@ tasks:
   test: # events wire-format + run-queue invariants
     command: 'pixi run test-all'
     toolchain: 'system'
-    inputs: ['src/**/*.mojo', 'test/**/*.mojo', 'pixi.toml', 'pixi.lock']
+    # The work-queue/log/kv/scheduler tests now build against `vault.storage`
+    # (`-I ../../vault/core/src`), so a change there must re-trigger them.
+    inputs:
+      - 'src/**/*.mojo'
+      - 'test/**/*.mojo'
+      - '/vault/core/src/**/*.mojo'
+      - 'pixi.toml'
+      - 'pixi.lock'
   check: # build the server binary (via the build dep), then run the unit suite
     command: 'pixi run test-all'
     deps: ['build']

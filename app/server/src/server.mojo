@@ -59,7 +59,7 @@ from runqueue import runq_take, runq_peek, runq_done, runq_reset
 # The disk-backed work queue + the pure scheduling seams: the orchestrator loop runs
 # ALL background engine work (indexing + AI-tag backfill) through this one queue, one
 # job at a time, honoring a global pause + priority (see ORCHESTRATOR.md §2.3–2.5).
-from storage import (
+from vault.storage import (
     default_operations_store,
     default_stats_store,
     default_asks_store,

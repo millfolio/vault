@@ -17,7 +17,7 @@ Covers the contract the ~dozen single-value markers (.index.state / .index.pid /
   - default_kv_store() resolves its dir from MILLFOLIO_DATA_DIR (the Phase-5 swap point)
 """
 from std.os import getenv
-from storage import (
+from vault.storage import (
     FileKvStore,
     default_kv_store,
     KV_INDEX_STATE,
