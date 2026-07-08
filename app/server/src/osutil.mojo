@@ -207,3 +207,18 @@ def _engine_url() -> String:
     classification (`ml_backfill_slice`) POSTs its yes/no batches. Same env the
     `millfolio` CLI reads, so the app and the CLI hit the one engine."""
     return String(getenv("MILLFOLIO_LOCAL_URL", "http://127.0.0.1:8000/v1"))
+
+
+def _model_label() -> String:
+    """The on-device model name shown in the UI's bottom bar + stamped on each stats
+    record. MILLFOLIO_MODEL_LABEL (set by run-demo.sh from the engine's /v1/models)
+    overrides; defaults to the Qwen the demo ships."""
+    return String(getenv("MILLFOLIO_MODEL_LABEL", "Qwen2.5-3B-Instruct"))
+
+
+def _app_version() -> String:
+    """The deployed build label (matches the UI's bottom-bar stamp: '<sha> · <date>').
+    Stamped on each stats record so the Stats page can average per deployed version.
+    MILLFOLIO_VERSION is set by run-demo.sh from the deploy stamp; 'dev' otherwise.
+    """
+    return String(getenv("MILLFOLIO_VERSION", "dev"))

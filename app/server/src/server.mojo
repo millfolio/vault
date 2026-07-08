@@ -29,24 +29,21 @@ multiplex them.)
 """
 
 from std.memory import alloc, UnsafePointer
-from std.os import getenv, listdir, makedirs, remove
-from std.os.path import isfile, isdir, getsize, exists
+from std.os import getenv, makedirs
 
 
 from flare.prelude import *
-from flare.http import Handler, HttpClient
+from flare.http import Handler
 from flare.ws import WsConnection, WsOpcode, WsCloseCode
-from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
+from flare.runtime._thread import ThreadHandle, _null_ptr
 
-from std.ffi import external_call, c_char, c_int
+from std.ffi import external_call
 from std.sys import argv
 from std.time import perf_counter_ns
 
-from settings import load_config, Config
-from apikey import apikey_looks_valid, apikey_hint, apikey_status_json
+from settings import load_config
 from wiring import build_vault_orchestrator
 from orchestrator import (
-    Orchestrator,
     PROGRESS_SENTINEL,
     STAT_SENTINEL,
     LOCAL_SENTINEL,
@@ -56,132 +53,30 @@ from orchestrator import (
 from transport import DeltaSink
 from runqueue import runq_take, runq_peek, runq_done, runq_reset
 
-# The disk-backed work queue + the pure scheduling seams: the orchestrator loop runs
-# ALL background engine work (indexing + AI-tag backfill) through this one queue, one
-# job at a time, honoring a global pause + priority (see ORCHESTRATOR.md §2.3–2.5).
-from vault.storage import (
-    default_operations_store,
-    default_stats_store,
-    default_asks_store,
-    operations_log_path,
-    stats_log_path,
-    asks_log_path,
-    default_kv_store,
-    KV_INDEX_STATE,
-    KV_INDEX_PID,
-    KV_INDEX_OP,
-    KV_INDEX_RUNTOTAL,
-    KV_DEMO_STATE,
-    KV_DEMO_OP,
-    KV_DL_STATE,
-    KV_DL_MODEL,
-    default_indexed_paths_store,
-    default_manifest_store,
-    DOC_INDEXED_PATHS,
-    DOC_MANIFEST,
-)
-from work_queue import (
-    WorkItem,
-    wq_enqueue,
-    wq_peek,
-    wq_take,
-    wq_done,
-    wq_fail,
-    wq_list,
-    wq_running,
-    wq_reset,
-    PRIO_INDEX,
-    PRIO_FINALIZE,
-    PRIO_BACKFILL,
-)
-from scheduler import (
-    EnqSpec,
-    index_run_plan,
-    split_payload,
-    short_payload,
-    index_active,
-    index_pending_files,
-    index_current,
-    query_active,
-    should_reconcile,
-    parse_pending_total,
-    is_index_kind,
-    KIND_PREPARE,
-    KIND_INDEX,
-    KIND_FINALIZE,
-    KIND_BACKFILL,
-    KIND_DEMO,
-)
+# The stats + ask history stores — the two JSONL sinks the chat WS loop appends to.
+from vault.storage import default_stats_store, default_asks_store
 
 # The work orchestrator's runtime (Phase 3 slice): the scheduler loop + its job
-# runners + the index/demo run STATE/OPERATIONS helpers now live in their own module
-# over the queue/scheduler seams. server.mojo keeps the HTTP surface and imports the
-# spawn entry point (`_orchestrator_worker`), the enqueue generator (`_start_index_run`),
-# the boot reconcile (`_reconcile_stale`), and the state/op readers its handlers +
-# status builders still call. work_orchestrator never imports server.mojo (acyclic).
-from work_orchestrator import (
-    _orchestrator_worker,
-    _reconcile_stale,
-    _start_index_run,
-    _finalize_index_op,
-    _append_operation,
-    _index_read_state,
-    _index_read_state_raw,
-    _index_progress,
-    _read_runtotal,
-    _wq_list_safe,
-    _indexed_file_count,
-    _stored_txn_count,
-    _write_tracked,
-    _kv_set,
-    _write_small,
-    _usleep,
-    _demo_dir,
-    _demo_log_path,
-    _demo_present,
-)
+# runners live in their own module. server.mojo keeps the chat WS surface and imports
+# the spawn entry point (`_orchestrator_worker`), the boot reconcile (`_reconcile_stale`),
+# and the poll-loop sleep (`_usleep`). The per-domain handler modules import the rest of
+# the orchestrator's state/op readers. work_orchestrator never imports server.mojo (acyclic).
+from work_orchestrator import _orchestrator_worker, _reconcile_stale, _usleep
 
-# The LanceDB-free registry/tags/retag store — the SAME functions the `millfolio`
-# CLI uses, so the Tags panel + category editor run in-process (no engine spawn).
-from vault.derive.tags import (
-    read_categories,
-    effective_tags,
-    effective_tag_descriptions,
-    load_txn_rows,
-)
-from vault.derive.store import (
-    tags_report_json,
-    transactions_json,
-    save_categories,
-    preview_categories,
-    backfill_status_json,
-    backfill_dedup_json,
-    ml_backfill_slice,
-    set_pause,
-    is_paused,
-    get_priority,
-    set_priority,
-    nap_ms_for_priority,
-    preview_ml_json,
-    add_category,
-    missing_default_tags_json,
-    add_default_tags,
-    verify_amount_password,
-)
-# Filesystem enumeration for the index generator (compute the source base + the
-# candidate-file union the orchestrator enqueues one item per). manifest.mojo is
-# self-contained (std only — no LanceDB), so importing it keeps the server's
-# weight-free, LanceDB-free build intact; the LanceDB-touching index steps
-# (prepare/index-file/finalize) run as subprocesses via MILLFOLIO_RUN_SCRIPT.
-from vault.index.manifest import (
-    common_base,
-    collect_index_paths,
-    manifest_for_files,
-)
+# The category tag NAMES + scope notes the chat WS loop surfaces to codegen (never the
+# keyword RULES — those stay on-device). The rest of the LanceDB-free registry/tags
+# store is imported by the per-domain handler modules.
+from vault.derive.tags import effective_tags, effective_tag_descriptions
 from vaultcfg import vault_dir as resolve_vault_dir
-from sandbox import _spawn_capture
 from state import MillfolioState
 import handlers_vault
+import handlers_apikey
+import handlers_system
+import handlers_amounts
+import handlers_tags
+import handlers_models
+import handlers_demo
+import handlers_operations
 from logging import log
 from events import (
     field,
@@ -194,15 +89,7 @@ from events import (
     error_event,
     json_escape,
 )
-from store import (
-    ask_record_line,
-    history_records_array,
-    operation_record_line,
-    operations_records_array,
-    delete_ask_records,
-    system_json,
-    parse_progress_counter,
-)
+from store import ask_record_line
 from json import loads
 
 # The extracted free-helper modules (Phase-1 slice A). `osutil` is the BASE
@@ -213,47 +100,19 @@ from osutil import (
     _workers,
     _web_root,
     _config_dir,
-    _cstr,
     _chmod,
     _is_demo,
     _epoch_s,
-    _atoi,
-    _tsv_unescape,
-    _lower_ascii,
-    _kind_for_name,
-    _sort_names,
-    _engine_url,
-)
-from sysmetrics import (
-    _gpu_util_pct,
-    _memory_gb,
-    _memory_used_pct,
-    _disk_used_pct,
-    _dir_size,
+    _model_label,
+    _app_version,
 )
 from auth import (
-    _reveal_token_path,
-    _reveal_secret_path,
     _ensure_reveal_secret,
-    _mint_reveal_token,
-    _const_time_eq,
-    _hex_nibble,
-    _new_token,
-    _apikey_path,
-    _read_apikey_file,
-    _write_apikey_file,
-    _clear_apikey_file,
     _apply_persisted_apikey,
-    _turnstile_sitekey,
-    _turnstile_secret,
     _turnstile_enabled,
-    _demo_tokens_path,
-    _verify_turnstile,
-    _mint_demo_token,
     _demo_token_valid,
 )
 from httputil import (
-    unauthorized,
     _content_type,
     _serve_file,
     _cors,
@@ -261,10 +120,6 @@ from httputil import (
     _extract_host,
     _host_allowed,
 )
-
-# Weight provisioning (downloads moved OUT of the installer, INTO this server).
-comptime DEFAULT_CHAT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
-comptime EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 
 
 def _json_escape(s: String) -> String:
@@ -418,149 +273,112 @@ struct Api(Copyable, Handler, Movable):
         if req.method == Method.POST and path == "/api/search":
             return handlers_vault.handle_search(req)
         if path == "/health":
-            return _cors(ok("millfolio ok"))
+            return handlers_system.handle_health()
         # The on-device model name — the UI shows it in the bottom bar.
         if path == "/api/model":
-            # `turnstile_sitekey` is non-empty only when the demo gate is active — the
-            # client renders the widget iff it's present.
-            var sitekey = (
-                _turnstile_sitekey() if _turnstile_enabled() else String("")
-            )
-            return _cors(
-                ok_json(
-                    '{"model":'
-                    + json_escape(_model_label())
-                    + ',"version":'
-                    + json_escape(_app_version())
-                    + ',"turnstile_sitekey":'
-                    + json_escape(sitekey)
-                    + "}"
-                )
-            )
+            return handlers_models.handle_model_info()
         # On-device model selector: the list of switchable (cached) models + the
         # current selection; POST /api/models/select switches it (restarts engine).
         if path == "/api/models":
-            return _cors(
-                ok_json(
-                    '{"current":'
-                    + json_escape(_current_model_id())
-                    + ',"loaded":'
-                    + json_escape(_engine_loaded_model())
-                    + ',"memoryGb":'
-                    + String(_memory_gb())
-                    + ',"available":'
-                    + _available_models_json()
-                    + "}"
-                )
-            )
+            return handlers_models.handle_models_list()
         if req.method == Method.POST and path == "/api/models/select":
-            return self.handle_model_select(req)
+            return handlers_models.handle_model_select(req)
         # Model catalog downloads: start a background fetch of a supported model's
         # weights, and poll its progress.
         if req.method == Method.POST and path == "/api/models/download":
-            return self.handle_model_download(req)
+            return handlers_models.handle_model_download(req)
         if path == "/api/models/download/status":
-            return _cors(ok_json(_download_status_json()))
+            return handlers_models.handle_models_download_status()
         # First-run onboarding: fetch + index the hosted sample vault so a new user
         # can try millfolio without pointing it at their own folder. Poll its progress.
         if req.method == Method.POST and path == "/api/demo/download":
-            return self.handle_demo_download()
+            return handlers_demo.handle_demo_download()
         if path == "/api/demo/status":
-            return _cors(ok_json(_demo_status_json()))
+            return handlers_demo.handle_demo_status()
         # Vault/Files: index an arbitrary local folder/file, track it, and re-index
         # tracked folders to pick up new files. One job at a time (shared with the
         # sample-vault import path). See handle_index for the append-not-clobber note.
         if req.method == Method.POST and path == "/api/index":
-            return self.handle_index(req)
+            return handlers_operations.handle_index(req)
         if path == "/api/index/status":
-            _finalize_index_op()  # record a just-settled run the moment it's seen
-            return _cors(ok_json(_index_status_json()))
+            return handlers_operations.handle_index_status()
         if path == "/api/operations":
-            return self.handle_operations()
+            return handlers_operations.handle_operations()
         # The work-queue contents (running + pending) so Operations can show what's
         # queued behind the running job. Read-only; empty in the demo.
         if path == "/api/orchestrator/queue":
-            if _is_demo():
-                return _cors(ok_json('{"items":[]}'))
-            return _cors(ok_json(_orchestrator_queue_json()))
+            return handlers_operations.handle_orchestrator_queue()
         if path == "/api/index/folders":
-            return _cors(ok_json(_tracked_folders_json()))
+            return handlers_operations.handle_index_folders()
         if req.method == Method.POST and path == "/api/index/reindex":
-            return self.handle_index_reindex(req)
+            return handlers_operations.handle_index_reindex(req)
         if req.method == Method.POST and path == "/api/index/folders/remove":
-            return self.handle_index_folder_remove(req)
+            return handlers_operations.handle_index_folder_remove(req)
         # Demo bot gate: validate a Turnstile token → mint a demo-access token the
         # client echoes on WS chat frames. No-op (empty token) when Turnstile is off.
         if req.method == Method.POST and path == "/api/demo/verify":
-            return self.handle_demo_verify(req)
+            return handlers_demo.handle_demo_verify(req)
         # Instantaneous GPU utilization (%); the bottom bar keeps a 30s average.
         if path == "/api/gpu":
-            return _cors(
-                ok_json(
-                    '{"util":'
-                    + String(_gpu_util_pct())
-                    + ',"mem":'
-                    + String(_memory_used_pct())
-                    + ',"disk":'
-                    + String(_disk_used_pct())
-                    + "}"
-                )
-            )
+            return handlers_system.handle_gpu()
         # Accumulated per-question usage (JSONL file, returned verbatim) — the Stats page.
         if path == "/api/stats":
-            return self.handle_stats()
+            return handlers_system.handle_stats()
         if path == "/api/history/delete":
-            return self.handle_history_delete(req)
+            return handlers_system.handle_history_delete(req)
         if path == "/api/history":
-            return self.handle_history()
+            return handlers_system.handle_history()
         if path == "/api/system":
-            return self.handle_system()
+            return handlers_system.handle_system()
         # Category tags: the panel's list (names + keywords + per-tag counts) and
         # the editable registry file. All in-process via vault.derive.store.
         if path == "/api/tags":
-            return self.handle_tags()
+            return handlers_tags.handle_tags()
         if path == "/api/transactions" or path.find("/api/transactions?") == 0:
-            return self.handle_transactions(req)
+            return handlers_amounts.handle_transactions(req)
         # WebAuthn (Touch-ID) gate for revealing transaction amounts.
         if req.method == Method.POST and path == "/api/auth/unlock":
-            return self.handle_auth_unlock(req)
+            return handlers_amounts.handle_auth_unlock(req)
         if req.method == Method.POST and path == "/api/amounts/unlock-local":
-            return self.handle_amounts_unlock_local(req)
+            return handlers_amounts.handle_amounts_unlock_local(req)
         if path == "/api/categories/preview":
-            return self.handle_categories_preview(req)
+            return handlers_tags.handle_categories_preview(req)
         if path == "/api/categories":
             if req.method == Method.POST:
-                return self.handle_categories_save(req)
-            return self.handle_categories_get()
+                return handlers_tags.handle_categories_save(req)
+            return handlers_tags.handle_categories_get()
         if path == "/api/backfill/status":
-            return self.handle_backfill_status()
+            return handlers_tags.handle_backfill_status()
         if path == "/api/backfill/run":
-            return self.handle_backfill_run()
+            return handlers_tags.handle_backfill_run()
         # Pause + priority are now ORCHESTRATOR-GLOBAL (govern index AND backfill).
         # `/api/orchestrator/*` are the canonical routes; the `/api/backfill/*` ones
         # remain as thin aliases (both hit the same global controller) for one release.
         if path == "/api/orchestrator/pause" or path == "/api/backfill/pause":
-            return self.handle_backfill_pause(req)
+            return handlers_tags.handle_backfill_pause(req)
         if path == "/api/orchestrator/resume" or path == "/api/backfill/resume":
-            return self.handle_backfill_resume()
-        if path == "/api/orchestrator/priority" or path == "/api/backfill/priority":
-            return self.handle_backfill_priority(req)
+            return handlers_tags.handle_backfill_resume()
+        if (
+            path == "/api/orchestrator/priority"
+            or path == "/api/backfill/priority"
+        ):
+            return handlers_tags.handle_backfill_priority(req)
         if path == "/api/tags/preview-ai":
-            return self.handle_tags_preview_ai(req)
+            return handlers_tags.handle_tags_preview_ai(req)
         if path == "/api/tags/add":
-            return self.handle_tags_add(req)
+            return handlers_tags.handle_tags_add(req)
         if path == "/api/tags/missing-defaults":
-            return self.handle_tags_missing_defaults()
+            return handlers_tags.handle_tags_missing_defaults()
         if path == "/api/tags/add-defaults":
-            return self.handle_tags_add_defaults(req)
+            return handlers_tags.handle_tags_add_defaults(req)
         # In-app Anthropic API key (for native users who never set the env var):
         # GET → {set, hint}; POST {key} → store 0600 (empty key clears); DELETE → clear.
         if path == "/api/settings/apikey":
             if req.method == Method.POST:
-                return self.handle_apikey_post(req)
+                return handlers_apikey.handle_apikey_post(req)
             if req.method == Method.DELETE:
-                return self.handle_apikey_delete()
-            return self.handle_apikey_get()
+                return handlers_apikey.handle_apikey_delete()
+            return handlers_apikey.handle_apikey_get()
         # Static web UI — same-origin in production (Vite serves it in dev).
         # Reject path traversal before mapping under web/dist.
         if path.find("..") == -1:
@@ -594,691 +412,6 @@ struct Api(Copyable, Handler, Movable):
         except e:
             reply = String("error: ") + String(e)
         return _cors(ok_json('{"reply":' + _json_escape(reply) + "}"))
-
-    def handle_stats(self) raises -> Response:
-        """Return the usage log as {"model": <label>, "records": [<obj>, …]}. The file
-        is JSONL (each line is already a valid object), so we comma-join the non-empty
-        lines into an array — no server-side JSON parsing. Missing file → empty list.
-        """
-        var recs = String("")
-        var first = True
-        try:
-            var raw = default_stats_store().read_all()
-            var lines = raw.split("\n")
-            for i in range(len(lines)):
-                var ln = String(lines[i]).strip()
-                if ln.byte_length() == 0:
-                    continue
-                if not first:
-                    recs += ","
-                recs += ln
-                first = False
-        except:
-            pass
-        return _cors(
-            ok_json(
-                '{"model":'
-                + json_escape(_model_label())
-                + ',"records":['
-                + recs
-                + '],"backfill":'
-                + backfill_dedup_json()
-                + "}"
-            )
-        )
-
-    def handle_history(self) raises -> Response:
-        """Return the full ask history as {"records": [<obj>, …]} — the durable
-        backend store (`asks.jsonl`) of every question with its generated program
-        and answer. JSONL, so we comma-join the non-empty lines into an array — no
-        server-side JSON parsing. Missing file → empty list. Newest first so the UI
-        panel shows the most recent ask at the top."""
-        var raw = String("")
-        try:
-            raw = default_asks_store().read_all()
-        except:
-            pass  # missing file → empty history
-        return _cors(ok_json('{"records":' + history_records_array(raw) + "}"))
-
-    def handle_operations(self) raises -> Response:
-        """GET /api/operations → {"operations":[…]} — the durable history of COMPLETED
-        index / reindex / backfill runs (operations.jsonl), newest-first and capped at
-        the last 100. Same JSONL-comma-join pattern as /api/history (no server-side
-        parse). Empty in the public demo (synthetic, read-only — nothing to index)."""
-        if _is_demo():
-            return _cors(ok_json('{"operations":[]}'))
-        _finalize_index_op()  # fold in a just-settled index run before serving
-        _finalize_demo_op()  # …and a just-settled sample-data import
-        var raw = String("")
-        try:
-            raw = default_operations_store().read_all()
-        except:
-            pass  # missing file → empty list
-        return _cors(
-            ok_json('{"operations":' + operations_records_array(raw, 100) + "}")
-        )
-
-    def handle_history_delete(self, req: Request) raises -> Response:
-        """POST /api/history/delete {"q": …} → remove that question's records from
-        the durable `asks.jsonl` (the recent-questions panel dedups by question, so
-        this deletes the entry for good). Missing file / empty q is a no-op success.
-        Returns {"ok":true}."""
-        var q: String
-        try:
-            var j = loads(req.text())
-            q = j["q"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {q}"}'))
-        if q == "":
-            return _cors(ok_json('{"ok":true}'))
-        var raw: String
-        try:
-            raw = default_asks_store().read_all()
-        except:
-            return _cors(ok_json('{"ok":true}'))  # nothing to delete
-        var filtered = delete_ask_records(raw, q)
-        try:
-            default_asks_store().rewrite(filtered)
-        except:
-            return _cors(bad_request('{"error":"could not update history"}'))
-        return _cors(ok_json('{"ok":true}'))
-
-    def handle_system(self) raises -> Response:
-        """System info for the System tab: WHERE the data + logs live, so a user can
-        find a per-ask transcript (the generated program + its run output) when an
-        answer looks wrong, plus the running version/model. Paths are computed from
-        $HOME so they stay correct across machines; the log locations mirror the ones
-        the `mill` CLI's launch agents write to."""
-        return _cors(
-            ok_json(
-                system_json(
-                    getenv("HOME", ""),
-                    _app_version(),
-                    _config_dir(),
-                    _stats_path(),
-                    _asks_path(),
-                )
-            )
-        )
-
-    def handle_tags(self) raises -> Response:
-        """GET /api/tags → {"tags":[{name,keywords,count}]} for the Tags panel —
-        in-process (vault.derive.store), the SAME payload `millfolio tags --json`
-        prints. No engine spawn."""
-        return _cors(ok_json(tags_report_json()))
-
-    # ── amount-reveal gate (passphrase) ───────────────────────────────────────
-
-    def handle_auth_unlock(self, req: Request) raises -> Response:
-        """POST /api/auth/unlock {password} → if it matches the local reveal
-        passphrase (`amount_password`, look it up with `mill get amount-password`),
-        mint a ~15-min bearer token that unlocks `?amounts=1`. 401 on a wrong
-        passphrase. The check + the secret live server-side, so this genuinely gates
-        the amounts (a curl without a valid token gets `amount:null`)."""
-        var candidate: String
-        try:
-            var j = loads(req.text())
-            candidate = j["password"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {password}"}'))
-        if not verify_amount_password(candidate):
-            return _cors(unauthorized('{"error":"wrong passphrase"}'))
-        return _cors(ok_json('{"token":"' + _mint_reveal_token() + '"}'))
-
-    def handle_amounts_unlock_local(self, req: Request) raises -> Response:
-        """POST /api/amounts/unlock-local → the NATIVE local-capability path. The
-        macOS menu-bar app, after a successful `LAContext` Touch-ID / login-password
-        check, reads the `.reveal-secret` file and presents it here (JSON `{secret}`
-        or the `X-Millfolio-Reveal-Secret` header). On a constant-time match we mint
-        the SAME reveal token the passphrase path mints — so amounts unlock identically.
-        Localhost-only (rides the Tier-1 loopback guard in `_route`). DENIED in the
-        demo (its amounts are already public → no gate to bridge). The passphrase
-        endpoint is untouched, so a browser with no native bridge is unaffected.
-        """
-        if _is_demo():
-            return _forbidden('{"error":"not available in demo"}')
-        var presented = String(req.headers.get("x-millfolio-reveal-secret"))
-        if presented == "":
-            try:
-                var j = loads(req.text())
-                presented = j["secret"].string_value()
-            except:
-                presented = String("")
-        var secret = _ensure_reveal_secret()
-        if (
-            secret == ""
-            or presented == ""
-            or not _const_time_eq(presented, secret)
-        ):
-            return _cors(unauthorized('{"error":"bad local secret"}'))
-        return _cors(ok_json('{"token":"' + _mint_reveal_token() + '"}'))
-
-    def handle_apikey_get(self) raises -> Response:
-        """GET /api/settings/apikey → `{set, hint}`. Reports whether a key is
-        available to codegen (the process env OR the persisted store) and, when
-        one is stored in-app, a masked `…last4` hint. NEVER returns the full key.
-        Disabled in the demo (it has its own replay-engine key handling)."""
-        if _is_demo():
-            return _forbidden('{"error":"not available in demo"}')
-        # A key from the launch-agent env counts as "set" (codegen can reach the
-        # model), but there's no stored value to hint — show it as set, no hint.
-        var env_key = String(getenv("ANTHROPIC_API_KEY", "").strip())
-        var stored = _read_apikey_file()
-        var is_set = env_key != "" or stored != ""
-        var hint = apikey_hint(stored) if stored != "" else String("")
-        return _cors(ok_json(apikey_status_json(is_set, hint)))
-
-    def handle_apikey_post(self, req: Request) raises -> Response:
-        """POST /api/settings/apikey {key} → persist the key 0600 in the data dir
-        so codegen picks it up on the next question (no restart). An empty key
-        clears the store (same as DELETE). Validated with a minimal sanity gate;
-        never logged or echoed back in full — only a masked hint is returned.
-        Disabled in the demo."""
-        if _is_demo():
-            return _forbidden('{"error":"not available in demo"}')
-        var key: String
-        try:
-            var j = loads(req.text())
-            key = String(j["key"].string_value().strip())
-        except:
-            return _cors(bad_request('{"error":"expected {\\"key\\":\\"…\\"}"}'))
-        if key == "":
-            return self.handle_apikey_delete()  # empty → clear
-        if not apikey_looks_valid(key):
-            return _cors(
-                bad_request(
-                    '{"error":"that doesn\'t look like an API key"}'
-                )
-            )
-        _write_apikey_file(key)
-        return _cors(ok_json(apikey_status_json(True, apikey_hint(key))))
-
-    def handle_apikey_delete(self) raises -> Response:
-        """DELETE /api/settings/apikey (or POST {key:""}) → clear the stored key.
-        Codegen reverts to the process env / local-only mode. Disabled in demo."""
-        if _is_demo():
-            return _forbidden('{"error":"not available in demo"}')
-        _clear_apikey_file()
-        var env_key = String(getenv("ANTHROPIC_API_KEY", "").strip())
-        return _cors(ok_json(apikey_status_json(env_key != "", String(""))))
-
-    def handle_demo_verify(self, req: Request) raises -> Response:
-        """POST /api/demo/verify {token} → validate the Turnstile token with Cloudflare
-        siteverify; on success mint a demo-access token the client echoes on WS chat
-        frames. When the gate is OFF (not demo / no secret), return ok with an empty
-        token so the client flow is a harmless no-op."""
-        if not _turnstile_enabled():
-            return _cors(ok_json('{"ok":true,"token":""}'))
-        var token: String
-        try:
-            var j = loads(req.text())
-            token = j["token"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {token}"}'))
-        if not _verify_turnstile(token):
-            return _cors(
-                unauthorized('{"error":"turnstile verification failed"}')
-            )
-        return _cors(
-            ok_json('{"ok":true,"token":"' + _mint_demo_token() + '"}')
-        )
-
-    def _reveal_authorized(self, req: Request) raises -> Bool:
-        """True iff the request carries a valid, unexpired reveal token
-        (`Authorization: Bearer <token>`) matching the one minted by unlock."""
-        var auth = String(req.headers.get("authorization"))
-        if not auth.startswith("Bearer "):
-            return False
-        var tok = String(auth.removeprefix("Bearer ").strip())
-        if tok == "" or not exists(_reveal_token_path()):
-            return False
-        var line: String
-        with open(_reveal_token_path(), "r") as f:
-            line = f.read()
-        var parts = line.split(" ")
-        if len(parts) < 2 or String(parts[0].strip()) != tok:
-            return False
-        return _epoch_s() < Int64(atol(String(parts[1].strip())))
-
-    def handle_transactions(self, req: Request) raises -> Response:
-        """GET /api/transactions → {"transactions":[{file,date,year,amount,direction,
-        desc,tags}]} — the exact reconciled rows, each with its derived category tags.
-        The amounts are WITHHELD (`amount:null`) unless `?amounts=1` AND the request
-        carries a valid Touch-ID reveal token — so the figures never reach the browser
-        until the gate is passed. In-process via vault.derive.store; no engine spawn.
-        """
-        var inc = _is_demo() or (
-            req.query_param("amounts") == "1" and self._reveal_authorized(req)
-        )
-        return _cors(ok_json(transactions_json(inc)))
-
-    def handle_categories_get(self) raises -> Response:
-        """GET /api/categories → {"text": <raw categories.txt>} for the editor
-        (the file is seeded with the built-in defaults if absent)."""
-        return _cors(ok_json('{"text":' + json_escape(read_categories()) + "}"))
-
-    def handle_categories_save(self, req: Request) raises -> Response:
-        """POST /api/categories {"text": …} → overwrite categories.txt (it becomes
-        the user's authoritative registry) and re-tag the stored transactions
-        in-process. Returns {"ok":true,"retagged":N}."""
-        var text: String
-        try:
-            var j = loads(req.text())
-            text = j["text"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {text}"}'))
-        var changed = save_categories(text)
-        return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
-
-    def handle_categories_preview(self, req: Request) raises -> Response:
-        """POST /api/categories/preview {"text": …} → dry-run the edited rules over
-        the stored transactions WITHOUT saving (the validation loop): per-tag match
-        counts + a few example descriptions to spot false positives before saving.
-        Returns {"tags":[{name,ml,count,examples}]} from preview_categories."""
-        var text: String
-        try:
-            var j = loads(req.text())
-            text = j["text"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {text}"}'))
-        return _cors(ok_json(preview_categories(text)))
-
-    def handle_backfill_status(self) raises -> Response:
-        """GET /api/backfill/status → per-AI-tag backfill progress
-        (`{status,paused_until,perTag:[…],pendingTotal}`) for the Tags-tab
-        Backfill panel. Lock-free read; no engine call."""
-        return _cors(ok_json(backfill_status_json()))
-
-    def handle_backfill_run(self) raises -> Response:
-        """POST /api/backfill/run → run ONE bounded backfill slice (a
-        generation-batch) via the on-device engine, then return the fresh status.
-        The UI loops this until `pendingTotal` hits 0, so each call stays short and
-        shows progress. Non-blocking try-lock inside → returns changed:0 when
-        another writer holds it or backfill is paused."""
-        var changed = 0
-        try:
-            changed = ml_backfill_slice(_engine_url())
-        except e:
-            # Engine down / chat model not serving → best-effort, report 0 + status.
-            print("  backfill slice skipped: ", String(e), sep="")
-        return _cors(
-            ok_json(
-                '{"ok":true,"changed":'
-                + String(changed)
-                + ',"status":'
-                + backfill_status_json()
-                + "}"
-            )
-        )
-
-    def handle_backfill_pause(self, req: Request) raises -> Response:
-        """POST /api/backfill/pause {"seconds":N} → pause the between-questions
-        worker for N seconds (auto-resumes when it elapses). Returns the status.
-        """
-        var seconds: Int
-        try:
-            var j = loads(req.text())
-            seconds = Int(j["seconds"].int_value())
-        except:
-            return _cors(bad_request('{"error":"expected {seconds}"}'))
-        set_pause(seconds)
-        return _cors(
-            ok_json('{"ok":true,"status":' + backfill_status_json() + "}")
-        )
-
-    def handle_backfill_resume(self) raises -> Response:
-        """POST /api/backfill/resume → clear any pause (resume now)."""
-        set_pause(0)
-        return _cors(
-            ok_json('{"ok":true,"status":' + backfill_status_json() + "}")
-        )
-
-    def handle_backfill_priority(self, req: Request) raises -> Response:
-        """POST /api/backfill/priority {"priority":"high"|"medium"|"low"} → set the
-        background backfiller's throttle. Low naps ~5s between classify slices (GPU
-        mostly free), high ~0.1s (fastest). Returns the fresh status (with priority).
-        """
-        var p: String
-        try:
-            var j = loads(req.text())
-            p = j["priority"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {priority}"}'))
-        set_priority(p)
-        return _cors(
-            ok_json('{"ok":true,"status":' + backfill_status_json() + "}")
-        )
-
-    def handle_tags_preview_ai(self, req: Request) raises -> Response:
-        """POST /api/tags/preview-ai {"prompt":…} → time-boxed (~5s) preview of an
-        AI rule over the stored transactions, WITHOUT persisting anything. Returns
-        {matched, evaluated, total} so the UI can show "≈N records would match"
-        before the user creates the tag."""
-        var prompt: String
-        try:
-            var j = loads(req.text())
-            prompt = j["prompt"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {prompt}"}'))
-        if String(prompt.strip()) == "":
-            return _cors(bad_request('{"error":"empty prompt"}'))
-        try:
-            return _cors(ok_json(preview_ml_json(_engine_url(), prompt)))
-        except e:
-            return _cors(
-                bad_request(
-                    '{"error":"preview failed — is the engine up? '
-                    + _json_escape(String(e))
-                    + '"}'
-                )
-            )
-
-    def handle_model_select(self, req: Request) raises -> Response:
-        """POST /api/models/select {"model": "<hf-id>"} → switch the on-device model.
-        Rewrites the engine config's `model` and restarts the engine LaunchAgent (a
-        few seconds of reload). Only cached models are accepted, and never in the
-        public demo (it would restart the shared engine). Returns {"ok":true,"model"}.
-        """
-        if _is_demo():
-            return _cors(
-                unauthorized(
-                    '{"error":"model switching is disabled in the demo"}'
-                )
-            )
-        var id: String
-        try:
-            id = String(loads(req.text())["model"].string_value())
-        except:
-            return _cors(bad_request('{"error":"expected {model}"}'))
-        if id == "":
-            return _cors(bad_request('{"error":"empty model"}'))
-        # Only allow a model that (a) appears in the catalog/available list AND (b) is
-        # actually DOWNLOADED, so we never restart the engine into a checkpoint that's
-        # missing (the available list now includes not-yet-downloaded catalog models).
-        if _available_models_json().find(json_escape(id)) == -1:
-            return _cors(bad_request('{"error":"unknown model"}'))
-        if not _model_downloaded(id):
-            return _cors(
-                bad_request('{"error":"that model isn\'t downloaded yet"}')
-            )
-        if not _config_set_model(id):
-            return _cors(
-                bad_request('{"error":"could not update engine config"}')
-            )
-        _restart_engine()
-        return _cors(ok_json('{"ok":true,"model":' + json_escape(id) + "}"))
-
-    def handle_model_download(self, req: Request) raises -> Response:
-        """POST /api/models/download {"model": "<hf-id>"} → start a background download
-        of a SUPPORTED chat model's weights via the native downloader. Rejects unknown
-        ids, a second concurrent download, and the public demo (no downloads there).
-        Returns {"ok":true,"model"}; the client polls /api/models/download/status.
-        """
-        if _is_demo():
-            return _cors(
-                unauthorized('{"error":"downloads are disabled in the demo"}')
-            )
-        var id: String
-        try:
-            id = String(loads(req.text())["model"].string_value())
-        except:
-            return _cors(bad_request('{"error":"expected {model}"}'))
-        if id == "":
-            return _cors(bad_request('{"error":"empty model"}'))
-        if not _is_supported(id):
-            return _cors(
-                bad_request('{"error":"unknown or unsupported model"}')
-            )
-        if _model_downloaded(id):
-            return _cors(
-                ok_json(
-                    '{"ok":true,"downloaded":true,"model":'
-                    + json_escape(id)
-                    + "}"
-                )
-            )
-        if _download_running():
-            return _cors(
-                bad_request('{"error":"a download is already in progress"}')
-            )
-        if not _start_download_detached(id):
-            return _cors(
-                bad_request(
-                    '{"error":"downloads unavailable (downloader not'
-                    ' configured)"}'
-                )
-            )
-        return _cors(ok_json('{"ok":true,"model":' + json_escape(id) + "}"))
-
-    def handle_demo_download(self) raises -> Response:
-        """POST /api/demo/download → import the hosted sample vault
-        (MILLFOLIO_DEMO_URL, default https://millfolio.app/demo-vault.zip): ENQUEUE a
-        single `demo-download` work item and return immediately. The orchestrator loop
-        then downloads + unpacks it into `<data>/demo-vault/` (in a `--fetch-demo`
-        subprocess, off-reactor), then enqueues a normal per-file index run over it — so
-        the whole
-        import flows through the ONE scheduler and shows in Operations (the download as a
-        job, then the per-file indexing). The client polls /api/demo/status. Idempotent:
-        a finished import no-ops to done. Disabled in the public replay demo (its vault
-        is fixed + synthetic). Indexing needs the engine runner (MILLFOLIO_RUN_SCRIPT),
-        so we 400 when it isn't configured."""
-        if _is_demo():
-            return _cors(
-                unauthorized('{"error":"sample data is disabled in the demo"}')
-            )
-        if getenv("MILLFOLIO_RUN_SCRIPT", "") == "":
-            return _cors(
-                bad_request(
-                    '{"error":"sample data unavailable (engine runner not'
-                    ' configured)"}'
-                )
-            )
-        # Already imported → no-op to done (don't re-download a present vault).
-        if _demo_present() and _demo_effective_state() == "done":
-            return _cors(ok_json('{"ok":true,"state":"done"}'))
-        if _demo_running():
-            return _cors(
-                bad_request('{"error":"sample data import already running"}')
-            )
-        # Mark downloading synchronously (so an immediate status poll / re-POST sees it
-        # in flight), stamp the pending Operations row, then enqueue the work item. The
-        # orchestrator loop picks it up and does the actual fetch + index off-reactor.
-        _kv_set(KV_DEMO_STATE, "downloading")
-        _write_small(_demo_log_path(), "Downloading sample data…")
-        _write_demo_pending_op(_epoch_s())
-        try:
-            _ = wq_enqueue(
-                String(KIND_DEMO), _demo_dir(), _epoch_s(), PRIO_INDEX
-            )
-        except:
-            _kv_set(KV_DEMO_STATE, "error")
-            return _cors(
-                bad_request('{"error":"could not start sample data import"}')
-            )
-        return _cors(ok_json('{"ok":true,"state":"downloading"}'))
-
-    def handle_index(self, req: Request) raises -> Response:
-        """POST /api/index {"path":…} → index an arbitrary local folder or file as a
-        DETACHED background job (polled via /api/index/status), and TRACK the path so
-        it can be re-indexed later.
-
-        APPEND-not-clobber: the on-device indexer keys its ENTIRE store on the
-        common-ancestor directory of the paths it's handed, and rebuilds from scratch
-        whenever that base changes — so indexing a lone new folder would REPLACE the
-        previously-indexed one. We therefore always index the UNION of every tracked
-        path in one run; the content-hash diff skips unchanged files, so re-indexing
-        the union to add one folder stays cheap. (Adding a folder that shifts the
-        common ancestor still forces a full re-embed — no data loss, just slower.)
-
-        Disabled in the demo; needs the engine runner (MILLFOLIO_RUN_SCRIPT). One job
-        at a time (rejects a second while one runs)."""
-        if _is_demo():
-            return _cors(
-                unauthorized('{"error":"indexing is disabled in the demo"}')
-            )
-        if getenv("MILLFOLIO_RUN_SCRIPT", "") == "":
-            return _cors(
-                bad_request(
-                    '{"error":"indexing unavailable (engine runner not'
-                    ' configured)"}'
-                )
-            )
-        var raw: String
-        try:
-            var j = loads(req.text())
-            raw = j["path"].string_value()
-        except:
-            return _cors(bad_request('{"error":"expected {path}"}'))
-        var p = String(raw.strip())
-        if p == "":
-            return _cors(bad_request('{"error":"empty path"}'))
-        # A newline/CR would let the path break out of the shell command below.
-        if p.find("\n") != -1 or p.find("\r") != -1:
-            return _cors(bad_request('{"error":"invalid path"}'))
-        if not exists(p):
-            return _cors(
-                bad_request(
-                    '{"error":"path not found","path":' + json_escape(p) + "}"
-                )
-            )
-        if _index_running():
-            return _cors(
-                bad_request('{"error":"an index job is already running"}')
-            )
-        # Union of the already-tracked paths + this one (dedup, order-preserving).
-        var union = _read_tracked_paths()
-        var seen = False
-        for i in range(len(union)):
-            if union[i] == p:
-                seen = True
-                break
-        if not seen:
-            union.append(p.copy())
-        if not _start_index_run(union, "index"):
-            return _cors(bad_request('{"error":"could not start indexing"}'))
-        return _cors(ok_json('{"ok":true,"state":"indexing"}'))
-
-    def handle_index_reindex(self, req: Request) raises -> Response:
-        """POST /api/index/reindex {"path"?:…} → re-run indexing to pick up new/changed
-        files. Whether a specific `path` is given or not, the WHOLE union of tracked
-        paths is re-indexed (see handle_index: indexing a subset would clobber the
-        rest); a given `path` must be one of the tracked ones. No-op error when nothing
-        is tracked yet."""
-        if _is_demo():
-            return _cors(
-                unauthorized('{"error":"indexing is disabled in the demo"}')
-            )
-        if getenv("MILLFOLIO_RUN_SCRIPT", "") == "":
-            return _cors(
-                bad_request(
-                    '{"error":"indexing unavailable (engine runner not'
-                    ' configured)"}'
-                )
-            )
-        if _index_running():
-            return _cors(
-                bad_request('{"error":"an index job is already running"}')
-            )
-        var tracked = _read_tracked_paths()
-        if len(tracked) == 0:
-            return _cors(bad_request('{"error":"no tracked folders to re-index"}'))
-        # An explicit `path`, when present, must be tracked (we still index the union).
-        try:
-            var j = loads(req.text())
-            var want = String(j["path"].string_value().strip())
-            if want != "":
-                var ok = False
-                for i in range(len(tracked)):
-                    if tracked[i] == want:
-                        ok = True
-                        break
-                if not ok:
-                    return _cors(
-                        bad_request('{"error":"path is not tracked"}')
-                    )
-        except:
-            pass  # no/empty body → re-index all tracked
-        if not _start_index_run(tracked, "reindex"):
-            return _cors(bad_request('{"error":"could not start indexing"}'))
-        return _cors(ok_json('{"ok":true,"state":"indexing"}'))
-
-    def handle_index_folder_remove(self, req: Request) raises -> Response:
-        """POST /api/index/folders/remove {"path":…} → stop TRACKING a folder. This
-        only forgets the path (so it's no longer re-indexed); the already-embedded
-        chunks stay in the index until the next full re-index rebuilds the store from
-        the remaining tracked paths. Returns the updated list."""
-        var p: String
-        try:
-            var j = loads(req.text())
-            p = String(j["path"].string_value().strip())
-        except:
-            return _cors(bad_request('{"error":"expected {path}"}'))
-        if p == "":
-            return _cors(bad_request('{"error":"empty path"}'))
-        var cur = _read_tracked()
-        var keep_paths = List[String]()
-        var keep_epochs = List[String]()
-        for i in range(len(cur.paths)):
-            if cur.paths[i] != p:
-                keep_paths.append(cur.paths[i].copy())
-                keep_epochs.append(cur.epochs[i].copy())
-        _write_tracked(keep_paths, keep_epochs)
-        return _cors(ok_json(_tracked_folders_json()))
-
-    def handle_tags_add(self, req: Request) raises -> Response:
-        """POST /api/tags/add {"name":…, "prompt"?:…, "keywords"?:…} → append a new
-        category rule (AI rule when `prompt` is set, else a keyword rule) to
-        categories.txt and re-tag. Returns {"ok":true,"retagged":N}. An AI rule
-        backfills afterwards via the worker / Backfill now."""
-        var name: String
-        var prompt: String
-        var keywords: String
-        try:
-            var j = loads(req.text())
-            name = j["name"].string_value()
-            try:
-                prompt = j["prompt"].string_value()
-            except:
-                prompt = String("")
-            try:
-                keywords = j["keywords"].string_value()
-            except:
-                keywords = String("")
-        except:
-            return _cors(
-                bad_request('{"error":"expected {name, prompt|keywords}"}')
-            )
-        if String(name.strip()) == "":
-            return _cors(bad_request('{"error":"empty name"}'))
-        var changed = add_category(name, keywords, prompt)
-        return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
-
-    def handle_tags_missing_defaults(self) raises -> Response:
-        """GET /api/tags/missing-defaults → {"tags":[{name,description},…]}: the
-        built-in default tags NOT present in the user's category set. Non-empty only
-        after an upgrade added a default the user's edited categories.txt never got
-        (e.g. `transfers`, `rewards`) — the Tags view offers to add them. Read-only."""
-        return _cors(
-            ok_json('{"tags":' + missing_default_tags_json() + "}")
-        )
-
-    def handle_tags_add_defaults(self, req: Request) raises -> Response:
-        """POST /api/tags/add-defaults {"names":[…]} → APPEND those built-in default
-        rules that are missing from categories.txt (preserving the user's edits) and
-        re-tag. Returns {"ok":true,"added":N}. A name that isn't a missing default is
-        ignored. Not available in the demo (its registry is fixed)."""
-        if _is_demo():
-            return _cors(_forbidden('{"error":"not available in demo"}'))
-        var names = List[String]()
-        try:
-            var j = loads(req.text())
-            var arr = j["names"]
-            for i in range(arr.array_count()):
-                names.append(String(arr[i].string_value()))
-        except:
-            return _cors(bad_request('{"error":"expected {names:[…]}"}'))
-        var added = add_default_tags(names)
-        return _cors(ok_json('{"ok":true,"added":' + String(added) + "}"))
 
 
 def _progress_label(line: String) raises -> String:
@@ -1334,985 +467,6 @@ def _dur(ms: Float64) -> String:
 def _ms_since(t0: UInt) -> Float64:
     """Milliseconds elapsed since a perf_counter_ns() timestamp."""
     return Float64(perf_counter_ns() - t0) / 1.0e6
-
-
-def _model_label() -> String:
-    """The on-device model name shown in the UI's bottom bar + stamped on each stats
-    record. MILLFOLIO_MODEL_LABEL (set by run-demo.sh from the engine's /v1/models)
-    overrides; defaults to the Qwen the demo ships."""
-    return String(getenv("MILLFOLIO_MODEL_LABEL", "Qwen2.5-3B-Instruct"))
-
-
-# ── Model selection (on-device engine model) ────────────────────────────────
-# The engine serves ONE model per process (chosen at launch); the selector below
-# switches it by rewriting the engine config's `model` and restarting the engine
-# LaunchAgent. The config is the single source of truth (the launch agent no longer
-# hard-codes the model arg — see cli/Bootstrapper writeLaunchAgent).
-
-
-def _hf_hub_dir() -> String:
-    """The HuggingFace cache `hub/` dir (holds `models--<slug>` snapshots)."""
-    var h = String(getenv("HF_HOME", "").strip())
-    if h == "":
-        h = getenv("HOME", ".") + "/Library/Application Support/Millfolio/hf"
-    return h + "/hub"
-
-
-def _engine_config_path() -> String:
-    """The engine's config.json — the single source of truth for the served model.
-    """
-    var o = String(getenv("MILLFOLIO_CONFIG", "").strip())
-    if o != "":
-        return o^
-    return getenv("HOME", ".") + "/.config/millfolio/config.json"
-
-
-def _slug_to_id(slug: String) -> String:
-    """`models--Qwen--Qwen2.5-3B-Instruct` -> `Qwen/Qwen2.5-3B-Instruct`
-    (HF uses `--` between org and name; the name itself has no `--`)."""
-    var s = slug
-    if s.startswith("models--"):
-        s = String(s[byte=8:])
-    var i = s.find("--")
-    if i == -1:
-        return s^
-    return String(s[byte=:i]) + "/" + String(s[byte = i + 2 :])
-
-
-def _model_short(id: String) -> String:
-    """The label after the last `/` (`Qwen/Qwen2.5-3B-Instruct` -> `Qwen2.5-3B-Instruct`).
-    """
-    var sl = id.find("/")
-    if sl == -1:
-        return id
-    return String(id[byte = sl + 1 :])
-
-
-def _id_to_slug(id: String) -> String:
-    """`Qwen/Qwen2.5-3B-Instruct` -> `Qwen--Qwen2.5-3B-Instruct` (the HF cache dir
-    name; inverse of `_slug_to_id`). Mirrors engine/src/download.mojo `slug()`.
-    """
-    var out = String("")
-    var b = id.as_bytes()
-    for i in range(len(b)):
-        if b[i] == 47:  # '/'
-            out += "--"
-        else:
-            out += chr(Int(b[i]))
-    return out^
-
-
-def _model_downloaded(id: String) -> Bool:
-    """A checkpoint is fully materialized when its `refs/main` ref (the downloader's
-    last write) is present under the HF hub cache."""
-    return exists(_hf_hub_dir() + "/models--" + _id_to_slug(id) + "/refs/main")
-
-
-def _catalog() -> List[List[String]]:
-    """The supported chat models offered in the UI catalog: each `[id, label, GB]`.
-    The FIRST entry is the default. Ids are PUBLIC HF repos the native downloader can
-    fetch with no auth token (the gated google/* repos would 401); the engine loads
-    every one (Qwen2.5 / Qwen3 / gemma-4 families). The demo is filtered to Qwen.
-    """
-    var out = List[List[String]]()
-    out.append(
-        [String("Qwen/Qwen2.5-3B-Instruct"), String("Qwen2.5-3B"), String("6")]
-    )
-    out.append(
-        [
-            String("mlx-community/gemma-4-e2b-it-bf16"),
-            String("Gemma-4 E2B"),
-            String("5"),
-        ]
-    )
-    out.append(
-        [
-            String("mlx-community/gemma-4-12b-it-bf16"),
-            String("Gemma-4 12B"),
-            String("24"),
-        ]
-    )
-    return out^
-
-
-def _is_supported(id: String) -> Bool:
-    """Is `id` one of the catalog's downloadable chat models?"""
-    var cat = _catalog()
-    for i in range(len(cat)):
-        if cat[i][0] == id:
-            return True
-    return False
-
-
-def _available_models_json() raises -> String:
-    """JSON array [{"id","label","gb","downloaded"}] — the CATALOG of supported chat
-    models each flagged downloaded/not (a `refs/main` ref present), PLUS any other
-    fully-cached chat checkpoint the user fetched manually (offered as Use). The
-    embedding model is excluded (it's a required dependency, not a chat choice). The
-    public demo is Qwen-only."""
-    var demo = _is_demo()
-    var out = String("[")
-    var n = 0
-    var emitted = List[String]()
-    var cat = _catalog()
-    for i in range(len(cat)):
-        var id = cat[i][0].copy()
-        if demo and id.find("Qwen") == -1:
-            continue
-        var dl = _model_downloaded(id)
-        if n > 0:
-            out += ","
-        out += (
-            '{"id":'
-            + json_escape(id)
-            + ',"label":'
-            + json_escape(cat[i][1])
-            + ',"gb":'
-            + cat[i][2]
-            + ',"downloaded":'
-            + ("true" if dl else "false")
-            + "}"
-        )
-        emitted.append(id^)
-        n += 1
-    # Any OTHER fully-cached chat model not in the catalog → offer it as Use.
-    var hub = _hf_hub_dir()
-    if exists(hub):
-        var entries = listdir(hub)
-        for i in range(len(entries)):
-            var name = String(entries[i])
-            if not name.startswith("models--"):
-                continue
-            if not exists(hub + "/" + name + "/refs/main"):
-                continue
-            var id = _slug_to_id(name)
-            if id.find("Embedding") != -1 or id.find("embedding") != -1:
-                continue
-            if not (
-                id.find("Qwen2.5") != -1
-                or id.find("Qwen3") != -1
-                or id.find("gemma-4") != -1
-                or id.find("Gemma-4") != -1
-            ):
-                continue
-            if demo and id.find("Qwen") == -1:
-                continue
-            var seen = False
-            for j in range(len(emitted)):
-                if emitted[j] == id:
-                    seen = True
-                    break
-            if seen:
-                continue
-            if n > 0:
-                out += ","
-            out += (
-                '{"id":'
-                + json_escape(id)
-                + ',"label":'
-                + json_escape(_model_short(id))
-                + ',"gb":0,"downloaded":true}'
-            )
-            emitted.append(id^)
-            n += 1
-    out += "]"
-    return out^
-
-
-# ── weight downloads (native-Mojo downloader, run as a detached subprocess) ────
-# Downloads moved out of the `mill` installer into this server: it runs the built
-# `build/download` binary (MILLFOLIO_DOWNLOAD_BIN) — the SAME native-Mojo HF fetcher
-# the CLI used to run — as a DETACHED process, tracking one download at a time via
-# small state files in the config dir so a status endpoint can report progress.
-
-
-def _download_bin() -> String:
-    """Absolute path to the native-Mojo weights downloader (`build/download`), set by
-    the CLI in the app-server LaunchAgent. Empty in dev / unmanaged runs → downloads
-    are unavailable (the endpoints say so; the provisioner no-ops)."""
-    return String(getenv("MILLFOLIO_DOWNLOAD_BIN", "").strip())
-
-
-def _dl_state_path() -> String:
-    # one word: running|done|error. KV marker (`_kv_set(KV_DL_STATE, …)`); the full
-    # path is still needed for the detached-download shell redirect + provision reads.
-    return _config_dir() + "/" + KV_DL_STATE
-
-
-def _dl_model_path() -> String:
-    return _config_dir() + "/" + KV_DL_MODEL  # the in-flight model id (KV marker)
-
-
-def _dl_log_path() -> String:
-    return _config_dir() + "/.model_download.log"  # captured stdout+stderr
-
-
-def _dl_progress() -> String:
-    """The last non-empty line of the downloader's captured output — a human-readable
-    progress detail (e.g. `wrote model-00001-of-00002.safetensors ( … bytes )`).
-    """
-    try:
-        var s: String
-        with open(_dl_log_path(), "r") as f:
-            s = f.read()
-        var lines = s.split("\n")
-        var last = String("")
-        for i in range(len(lines)):
-            var ln = String(lines[i].strip())
-            if ln != "":
-                last = ln^
-        return last^
-    except:
-        return String("")
-
-
-def _dl_read_model() -> String:
-    try:
-        return String(default_kv_store().get(KV_DL_MODEL).strip())
-    except:
-        return String("")
-
-
-def _catalog_gb(id: String) -> Int:
-    """The catalog's approximate download size (whole GB) for `id`, or 0 if unknown
-    (a manually-cached model not in the catalog). Used as the progress denominator."""
-    var cat = _catalog()
-    for i in range(len(cat)):
-        if cat[i][0] == id:
-            var out = 0
-            var b = cat[i][2].as_bytes()
-            for j in range(len(b)):
-                var c = Int(b[j])
-                if c >= 48 and c <= 57:
-                    out = out * 10 + (c - 48)
-            return out
-    return 0
-
-
-def _du_bytes(path: String) -> Int:
-    """On-disk size of `path` in bytes via `du -sk` (KiB blocks → bytes) — the
-    subprocess-to-temp-file pattern of `_gpu_util_pct`. Robust to the downloader's
-    verbosity: we measure what has actually landed on disk. Returns -1 on miss."""
-    if not exists(path):
-        return 0
-    var out_path = _config_dir() + "/.dl_du"
-    var cmd = (
-        String("cd / 2>/dev/null; du -sk '") + path + "' > '" + out_path + "'"
-        " 2>/dev/null"
-    )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-    try:
-        var s: String
-        with open(out_path, "r") as f:
-            s = f.read()
-        var kb = 0
-        var indig = False
-        var b = s.as_bytes()
-        for i in range(len(b)):
-            var c = Int(b[i])
-            if c >= 48 and c <= 57:
-                kb = kb * 10 + (c - 48)
-                indig = True
-            elif indig:
-                break  # stop at the first non-digit (the tab before the path)
-        return (kb * 1024) if indig else -1
-    except:
-        return -1
-
-
-def _dl_progress_pct(id: String, done: Bool) raises -> Int:
-    """Download progress 0–100 for `id`. `done` (refs/main present) short-circuits to
-    100. Otherwise it's the on-disk size of the model's cache dir over the catalog's
-    expected total. The catalog GB is the bf16 download size — a slight over-estimate
-    of the final on-disk bytes — so the ratio can approach but should be clamped to
-    <100 until genuinely done, avoiding a premature 100%. Returns -1 when unknown (no
-    catalog size, or du failed) so the client falls back to the indeterminate spinner.
-    """
-    if done:
-        return 100
-    var gb = _catalog_gb(id)
-    if gb <= 0:
-        return -1
-    var repo = _hf_hub_dir() + "/models--" + _id_to_slug(id)
-    var on_disk = _du_bytes(repo)
-    if on_disk < 0:
-        return -1
-    var total = gb * (1 << 30)  # GiB → bytes
-    var pct = (on_disk * 100) // total
-    if pct < 0:
-        pct = 0
-    if pct > 99:
-        pct = 99  # never report 100 until refs/main lands (see docstring)
-    return pct
-
-
-def _download_status_json() raises -> String:
-    """{"model","state","detail","progress","bytesDone","bytesTotal"} for the in-flight
-    (or last) download. `state` is idle|running|done|error; `detail` is the latest
-    downloader progress line. `progress` is 0–100 (integer; -1 when unknown → the
-    client shows an indeterminate spinner). Self-heals to `done`/100 when `refs/main`
-    appears (the fetch's final write)."""
-    var model = _dl_read_model()
-    var state = String("idle")
-    var progress = -1
-    var bytes_done = -1
-    var bytes_total = -1
-    if model != "":
-        try:
-            state = String(default_kv_store().get(KV_DL_STATE).strip())
-        except:
-            state = String("running")
-        var done = _model_downloaded(model)
-        if done:
-            state = String("done")
-        # Only surface a live percentage while the fetch is active (or done).
-        if state == "running" or state == "done":
-            progress = _dl_progress_pct(model, done)
-            var gb = _catalog_gb(model)
-            if gb > 0:
-                bytes_total = gb * (1 << 30)
-                bytes_done = bytes_total if done else _du_bytes(
-                    _hf_hub_dir() + "/models--" + _id_to_slug(model)
-                )
-    return (
-        '{"model":'
-        + json_escape(model)
-        + ',"state":'
-        + json_escape(state)
-        + ',"detail":'
-        + json_escape(_dl_progress())
-        + ',"progress":'
-        + String(progress)
-        + ',"bytesDone":'
-        + String(bytes_done)
-        + ',"bytesTotal":'
-        + String(bytes_total)
-        + "}"
-    )
-
-
-def _download_running() raises -> Bool:
-    """True iff a download is genuinely in flight (state==running AND not yet on
-    disk) — the guard against starting a second concurrent download."""
-    var model = _dl_read_model()
-    if model == "" or _model_downloaded(model):
-        return False
-    try:
-        return String(default_kv_store().get(KV_DL_STATE).strip()) == "running"
-    except:
-        return False
-
-
-def _dl_core_cmd(id: String) -> String:
-    """The shell command that runs the downloader for `id`, appending output to the
-    capture log. Runs from the runner dir (two levels up from build/download) with
-    CONDA_PREFIX/MODULAR_HOME cleared — matching the CLI's runtimeEnv so flare loads
-    its own libflare_tls.so next to the binary, not from the toolchain prefix. HF_HOME
-    + SSL_CERT_FILE are inherited from this server's environment."""
-    var bin = _download_bin()
-    return (
-        "d=\"$(dirname '"
-        + bin
-        + '\')/.."; cd "$d" && env -u CONDA_PREFIX -u MODULAR_HOME \''
-        + bin
-        + "' '"
-        + id
-        + "' >> '"
-        + _dl_log_path()
-        + "' 2>&1"
-    )
-
-
-def _begin_download_state(id: String):
-    """Mark `id` as the in-flight download (running) and truncate the capture log.
-    """
-    _kv_set(KV_DL_MODEL, id)
-    _kv_set(KV_DL_STATE, "running")
-    _write_small(_dl_log_path(), "")  # capture log (not a KV marker) — truncate
-
-
-def _start_download_detached(id: String) -> Bool:
-    """Start a DETACHED download of `id` (returns immediately). Wraps the core command
-    so the shell flips the state file to done/error on completion; backgrounded +
-    </dev/null so it outlives the request and never becomes our zombie. False when the
-    downloader isn't configured."""
-    if _download_bin() == "":
-        return False
-    _begin_download_state(id)
-    var state = _dl_state_path()
-    var cmd = (
-        "( "
-        + _dl_core_cmd(id)
-        + " && printf done > '"
-        + state
-        + "' || printf error > '"
-        + state
-        + "' ) </dev/null &"
-    )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-    return True
-
-
-def _provision_fetch(id: String) -> Bool:
-    """BLOCKING fetch of `id` to completion (called on the provisioner thread, so it
-    doesn't block the reactor). No-op True when already present; False when the
-    downloader isn't available. Updates the SAME state files as the endpoint, so the
-    catalog reflects provisioning progress + the concurrency guard holds."""
-    if _model_downloaded(id):
-        return True
-    if _download_bin() == "":
-        return False
-    _begin_download_state(id)
-    var cc = _cstr(_dl_core_cmd(id))
-    _ = external_call["system", Int32](cc)  # waits (no trailing &)
-    cc.free()
-    var ok = _model_downloaded(id)  # refs/main appears only on full success
-    _kv_set(KV_DL_STATE, "done" if ok else "error")
-    return ok
-
-
-# ── sample vault (first-run onboarding) ────────────────────────────────────────
-# A new user with an empty vault can "try it with sample data": the import is a single
-# `demo-download` WORK ITEM the orchestrator loop drains (ORCHESTRATOR.md §2.1) — it
-# fetches the small hosted zip (MILLFOLIO_DEMO_URL) in a SEPARATE PROCESS (we re-exec
-# this server binary in `--fetch-demo` mode — flare's blocking HTTP client runs in that
-# child, NEVER on the serving reactor; an in-loop flare GET can stall the shared reactor,
-# the "History timed out" we saw — no `curl` either), unpacks it into `<data>/demo-vault/`,
-# then enqueues a normal per-file index run over it. So the download and the per-file
-# indexing BOTH flow through the one scheduler and surface in Operations, and the download
-# never blocks the single-threaded HTTP reactor. State is tracked in small files the status
-# endpoint reports; the whole import is recorded as ONE `demo` operation (the index run
-# reuses `_start_index_run` with `record_op=False`).
-
-
-def _demo_state_path() -> String:
-    return _config_dir() + "/" + KV_DEMO_STATE  # downloading|indexing|done|error
-
-
-def _demo_op_path() -> String:
-    """Marker written when the sample-data import STARTS (its kind + start epoch),
-    read back once the import settles to record ONE operation-history row — the same
-    lazy-finalize pattern index/reindex runs use (`_pending_op_path`). The full path is
-    still used for the atomic-rename claim in `_finalize_demo_op`."""
-    return _config_dir() + "/" + KV_DEMO_OP
-
-
-def _demo_read_state() -> String:
-    try:
-        return String(default_kv_store().get(KV_DEMO_STATE).strip())
-    except:
-        return String("idle")
-
-
-def _demo_effective_state() -> String:
-    """The sample-data import's state, SETTLED against the index queue. While the raw
-    `.demo.state` file says `indexing`, the actual per-file work runs as a normal index
-    run through the orchestrator — so the demo is still `indexing` while any index-family
-    item is queued/running, and once that drains it reflects the index run's outcome
-    (`done`, or `error` if a step failed). The settled outcome is persisted back to
-    `.demo.state` so the import records its Operations row exactly once. Other raw states
-    (downloading/done/error/idle) pass through unchanged."""
-    var raw = _demo_read_state()
-    if raw != "indexing":
-        return raw^
-    if index_active(_wq_list_safe()):
-        return String("indexing")
-    # The index run settled — reflect + persist its outcome.
-    if _index_read_state_raw() == "error":
-        _kv_set(KV_DEMO_STATE, "error")
-        return String("error")
-    _kv_set(KV_DEMO_STATE, "done")
-    return String("done")
-
-
-def _demo_running() -> Bool:
-    """True while the import is genuinely in flight (downloading or indexing).
-    """
-    var st = _demo_effective_state()
-    return st == "downloading" or st == "indexing"
-
-
-def _demo_progress() -> String:
-    """The last non-empty captured line — a human-readable progress detail."""
-    try:
-        var s: String
-        with open(_demo_log_path(), "r") as f:
-            s = f.read()
-        var lines = s.split("\n")
-        var last = String("")
-        for i in range(len(lines)):
-            var ln = String(lines[i].strip())
-            if ln != "":
-                last = ln^
-        return last^
-    except:
-        return String("")
-
-
-def _demo_status_json() raises -> String:
-    """{"state","detail","present","progress","bytesDone","bytesTotal"[,"current",
-    "total"]} for the sample-vault import. `state` (settled via `_demo_effective_state`)
-    is idle|downloading|indexing|done|error; `present` is whether the folder exists.
-
-    The zip is tiny, so DOWNLOADING is a single full-body GET (in the `--fetch-demo`
-    subprocess) with no incremental byte progress → `progress`/bytesDone/bytesTotal stay
-    -1 (the client shows a spinner).
-    While INDEXING, the per-file work runs as a normal index run through the orchestrator,
-    so we surface its `current`/`total` files (the SAME queue-derived count as
-    /api/index/status) plus a `progress` percent, mirroring the download → indexing n/M
-    onboarding progress. Also finalizes the operations-history row once settled (see
-    `_finalize_demo_op`)."""
-    _finalize_demo_op()
-    var state = _demo_effective_state()
-    var detail = _demo_progress()
-    var progress = -1
-    var idx_current = -1
-    var idx_total = -1
-    if state == "indexing":
-        detail = _index_progress()  # the indexer's `[k/M] name` per-file line
-        var total = _read_runtotal()
-        if total > 0:
-            idx_total = total
-            idx_current = index_current(total, wq_list())
-            var pct = (idx_current * 100) // total
-            if pct < 0:
-                pct = 0
-            if pct > 99:
-                pct = 99  # 100 only once the run is genuinely done
-            progress = pct
-    elif state == "done":
-        progress = 100
-    var out = (
-        '{"state":'
-        + json_escape(state)
-        + ',"detail":'
-        + json_escape(detail)
-        + ',"present":'
-        + ("true" if _demo_present() else "false")
-        + ',"progress":'
-        + String(progress)
-        + ',"bytesDone":-1,"bytesTotal":-1'
-    )
-    if idx_total > 0:
-        out += ',"current":' + String(idx_current)
-        out += ',"total":' + String(idx_total)
-    out += "}"
-    return out^
-
-
-def _write_demo_pending_op(started: Int64):
-    """Stamp the pending-operation marker for a just-launched sample-data import."""
-    _kv_set(
-        KV_DEMO_OP,
-        String('{"type":"demo","started":') + String(started) + "}",
-    )
-
-
-def _finalize_demo_op():
-    """If the sample-data import has SETTLED (state done|error) and its pending marker
-    is still present, record ONE `demo` operation for it and clear the marker. The
-    marker is claimed with an atomic rename so whichever caller (a status poll or a GET
-    /api/operations) wins records the run exactly once. Best-effort; never raises."""
-    if not default_kv_store().exists(KV_DEMO_OP):
-        return
-    var state = _demo_effective_state()
-    if state != "done" and state != "error":
-        return  # still downloading / indexing — nothing settled to record yet
-    var claimed = _demo_op_path() + ".claiming"
-    var op = _cstr(_demo_op_path())
-    var cl = _cstr(claimed)
-    var rc = external_call["rename", c_int](op, cl)
-    op.free()
-    cl.free()
-    if Int(rc) != 0:
-        return  # another caller already claimed it (or it vanished)
-    var started = Int64(0)
-    try:
-        var text: String
-        with open(claimed, "r") as f:
-            text = f.read()
-        var j = loads(text)
-        started = j["started"].int_value()
-    except:
-        pass
-    var finished = _epoch_s()
-    if started <= 0 or (finished - started) > Int64(86400):
-        started = finished  # missing / stale marker → clamp to ~0s (see _finalize_index_op)
-    _append_operation(
-        String("demo"),
-        started,
-        finished,
-        state,
-        _demo_progress(),
-        _indexed_file_count(),
-        _stored_txn_count(),
-        -1,  # tagged: n/a for a sample-data import
-    )
-    try:
-        remove(claimed)
-    except:
-        pass
-
-
-def _fetch_demo_run(url: String, dest: String) -> Bool:
-    """Body of the `millfolio-server --fetch-demo <url> <dest>` mode: GET `url` with
-    flare (in THIS separate process — off the server's serving reactor) and write the
-    bytes to `dest`. Prints a short status line (captured into the demo log by the
-    caller's `>>` redirect). Returns False on any HTTP/write failure; the parent treats a
-    missing/empty `dest` as the error signal, so we simply do NOT write the file on a
-    non-200/exception."""
-    if url == "" or dest == "":
-        print("fetch-demo: usage: --fetch-demo <url> <dest>")
-        return False
-    try:
-        var req = Request(method="GET", url=url)
-        var client = HttpClient()  # follows redirects (millfolio.app → asset)
-        var resp = client.send(req)
-        if resp.status != 200:
-            print("Download failed (HTTP " + String(resp.status) + ")")
-            return False
-        with open(dest, "w") as f:
-            f.write_bytes(Span(resp.body))
-        print("Downloaded sample data (" + String(len(resp.body)) + " bytes)")
-        return True
-    except e:
-        print("Download error: " + String(e))
-        return False
-
-
-# ── general folder/file indexing (Vault/Files) ────────────────────────────────
-# The SAME detached-job + state/log-file pattern as the sample-vault import above,
-# generalised to any local path, plus a small tracked-folders registry so a re-index
-# can pick up new files. See `handle_index` for the append-not-clobber rationale.
-
-
-def _index_state_path() -> String:
-    return _config_dir() + "/" + KV_INDEX_STATE  # idle|indexing|done|error
-
-
-def _index_pid_path() -> String:
-    return _config_dir() + "/" + KV_INDEX_PID  # detached index worker's PID
-
-
-def _tracked_paths_path() -> String:
-    return _config_dir() + "/indexed-paths.json"  # the tracked-folders registry
-
-
-def _index_read_pid() -> Int:
-    """The detached index worker's PID (the backgrounded subshell that runs the
-    indexer), or -1 when unknown (no pid file / unparsable)."""
-    try:
-        return Int(String(default_kv_store().get(KV_INDEX_PID).strip()))
-    except:
-        return -1
-
-
-def _index_runtotal_path() -> String:
-    return _config_dir() + "/" + KV_INDEX_RUNTOTAL  # file count for current run
-
-
-def _orchestrator_queue_json() raises -> String:
-    """GET /api/orchestrator/queue → {"items":[…]} — the work-queue contents (pending
-    + running) so Operations can show what's queued behind the running job. Ordered
-    running-first (the active job), then pending in run-order (priority, then FIFO —
-    the order `wq_list` returns). Payloads are shortened to a basename/count so no
-    absolute on-device path leaks. Read-only."""
-    var items = wq_list()
-    var out = String('{"items":[')
-    var first = True
-    # Two passes: running items first (the active job), then pending, each preserving
-    # wq_list's priority/FIFO order.
-    for pass_ix in range(2):
-        var want_running = pass_ix == 0
-        for i in range(len(items)):
-            var is_running = items[i].state == "running"
-            if is_running != want_running:
-                continue
-            if not first:
-                out += ","
-            first = False
-            out += '{"id":' + String(items[i].id)
-            out += ',"kind":' + json_escape(items[i].kind)
-            out += ',"payload":' + json_escape(
-                short_payload(items[i].kind, items[i].payload)
-            )
-            out += ',"prio":' + String(items[i].prio)
-            out += ',"state":' + json_escape(items[i].state)
-            out += ',"pid":' + String(items[i].pid)
-            out += ',"startedTs":' + String(items[i].started_ts)
-            out += "}"
-    out += "]}"
-    return out
-
-
-def _index_running() -> Bool:
-    """True while an index run is in flight — an index/prepare/finalize item is queued
-    or running. The single source of truth for the "already running" guard and status.
-    """
-    return index_active(_wq_list_safe())
-
-
-def _index_status_json() raises -> String:
-    """{"state","detail"[,"current","total"]} for the folder-index job — same shape
-    as the demo status. `state` is idle|indexing|done|error. When the progress line
-    carries a `[n/M]` per-file counter (the embedding phase), `current`/`total` are
-    included so the UI can show an "n of M files" bar; they're omitted otherwise
-    (scanning phase, non-file lines, done/idle)."""
-    var state = _index_read_state()
-    var detail = _index_progress()
-    var out = String('{"state":') + json_escape(state)
-    out += ',"detail":' + json_escape(detail)
-    # current/total = the queue-derived "n of M files": M is this run's file total
-    # (stamped at enqueue); n = files started-or-done = M − pending index items.
-    if state == "indexing":
-        var total = _read_runtotal()
-        if total > 0:
-            out += ',"current":' + String(index_current(total, wq_list()))
-            out += ',"total":' + String(total)
-    else:
-        # Settled: fall back to any [n/M] counter still in the last progress line.
-        var counter = parse_progress_counter(detail)
-        if counter[1] > 0:
-            out += ',"current":' + String(counter[0])
-            out += ',"total":' + String(counter[1])
-    out += "}"
-    return out
-
-
-# ── Operations history (operations.jsonl) ─────────────────────────────────────
-# A durable, append-only log of COMPLETED index/reindex/backfill runs — the same
-# on-device JSONL pattern as asks.jsonl. The detached indexer is a shell chain the
-# server doesn't directly observe finishing (it only flips the `.index.state`
-# file), so we record an index/reindex op LAZILY: whenever a caller first observes
-# the state has settled (done|error) with the run's pending marker still present,
-# we append one record and atomically claim the marker (rename) so concurrent
-# pollers record the run exactly ONCE. Backfill runs are recorded by the worker
-# itself, which does observe each drain.
-
-
-def _operations_path() -> String:
-    """Where completed operations accumulate (JSONL) — durable, on-device beside
-    asks.jsonl. MILLFOLIO_OPS_FILE overrides. Now resolved by the storage seam
-    (`operations_log_path`), which the `default_operations_store()` also uses."""
-    return operations_log_path()
-
-
-@fieldwise_init
-struct _Tracked(Copyable, Movable):
-    """The tracked-folders registry, split into parallel lists: `paths[i]` was last
-    indexed at epoch-seconds `epochs[i]` (stored as a string)."""
-
-    var paths: List[String]
-    var epochs: List[String]
-
-
-def _read_tracked() raises -> _Tracked:
-    """Parse indexed-paths.json → parallel (path, lastIndexed) lists. Empty when the
-    file is missing/blank/corrupt (best-effort — a bad registry never wedges the UI).
-    """
-    var paths = List[String]()
-    var epochs = List[String]()
-    if not exists(_tracked_paths_path()):
-        return _Tracked(paths^, epochs^)
-    var text = default_indexed_paths_store().load(DOC_INDEXED_PATHS)
-    if String(text.strip()) == "":
-        return _Tracked(paths^, epochs^)
-    try:
-        var j = loads(text)
-        var arr = j["folders"]
-        for i in range(arr.array_count()):
-            paths.append(String(arr[i]["path"].string_value()))
-            try:
-                epochs.append(String(arr[i]["lastIndexed"].string_value()))
-            except:
-                epochs.append(String(""))
-    except:
-        pass
-    return _Tracked(paths^, epochs^)
-
-
-def _read_tracked_paths() raises -> List[String]:
-    """Just the tracked folder paths (convenience for the index/reindex handlers)."""
-    var t = _read_tracked()
-    return t.paths.copy()
-
-
-def _tracked_folders_json() raises -> String:
-    """GET /api/index/folders body: {"folders":[{"path","lastIndexed"}]}. Re-serialised
-    from the parsed registry so a hand-mangled file still returns valid JSON."""
-    var t = _read_tracked()
-    var out = String('{"folders":[')
-    for i in range(len(t.paths)):
-        if i > 0:
-            out += ","
-        out += (
-            '{"path":'
-            + json_escape(t.paths[i])
-            + ',"lastIndexed":'
-            + json_escape(t.epochs[i])
-            + "}"
-        )
-    out += "]}"
-    return out^
-
-
-def _autofetch_default() -> Bool:
-    """Whether to auto-fetch the DEFAULT chat model on startup. On by default; set
-    MILLFOLIO_AUTOFETCH_DEFAULT_MODEL=0 to "start empty" and let the user pick from
-    the catalog. (The embedding model is always fetched — it's a hard dependency.)
-    """
-    return (
-        String(getenv("MILLFOLIO_AUTOFETCH_DEFAULT_MODEL", "1").strip()) != "0"
-    )
-
-
-def _provision_worker(arg: _OpaquePtr) -> _OpaquePtr:
-    """Detached startup thread: ensure the REQUIRED embedding model is present (the
-    engine 503s /v1/embeddings without it → indexing + search break), then — unless
-    disabled — a DEFAULT chat model so the app works out of the box after a weights-
-    free install. Both are no-ops when already cached. Once a servable model is on
-    disk but the engine isn't serving (it exited earlier when weights were missing),
-    kickstart it. This routine is non-raising by signature (every helper it calls is),
-    so a pthread start routine can never raise out of it."""
-    if _download_bin() == "":
-        return arg  # no downloader configured → nothing to provision
-    # 1. Embedding model — a hard dependency, always fetched (not in the catalog).
-    _ = _provision_fetch(String(EMBED_MODEL))
-    # 2. Default chat model — toggleable (start-empty deploys flip it off).
-    if _autofetch_default() and not _model_downloaded(
-        String(DEFAULT_CHAT_MODEL)
-    ):
-        _ = _provision_fetch(String(DEFAULT_CHAT_MODEL))
-    # 3. Make the engine serve a downloaded model. If its configured model isn't on
-    #    disk but the default now is, repoint config at the default; then, if a
-    #    servable model is present but the engine isn't serving, kickstart it.
-    var want = _current_model_id()
-    if not _model_downloaded(want) and _model_downloaded(
-        String(DEFAULT_CHAT_MODEL)
-    ):
-        _ = _config_set_model(String(DEFAULT_CHAT_MODEL))
-        want = String(DEFAULT_CHAT_MODEL)
-    if _model_downloaded(want) and _engine_loaded_model() == "":
-        _restart_engine()
-    return arg
-
-
-def _current_model_id() -> String:
-    """The engine's selected model id, read from its config.json (falls back to the
-    label env / the Qwen default)."""
-    try:
-        var text: String
-        with open(_engine_config_path(), "r") as f:
-            text = f.read()
-        var m = String(loads(text)["model"].string_value())
-        if m != "":
-            return m^
-    except:
-        pass
-    return String(getenv("MILLFOLIO_MODEL_LABEL", "Qwen/Qwen2.5-3B-Instruct"))
-
-
-def _config_set_model(id: String) -> Bool:
-    """Rewrite the engine config's `model` field to `id`, preserving port/q4/
-    kv_budget_mb. Returns True on success."""
-    var path = _engine_config_path()
-    var port = Int64(8000)
-    var q4 = False
-    var kv = Int64(8192)
-    try:
-        var text: String
-        with open(path, "r") as f:
-            text = f.read()
-        var j = loads(text)
-        try:
-            port = j["port"].int_value()
-        except:
-            pass
-        try:
-            q4 = j["q4"].bool_value()
-        except:
-            pass
-        try:
-            kv = j["kv_budget_mb"].int_value()
-        except:
-            pass
-    except:
-        pass
-    if String(getenv("MILLFOLIO_CONFIG", "").strip()) == "":
-        try:
-            makedirs(getenv("HOME", ".") + "/.config/millfolio", exist_ok=True)
-        except:
-            pass
-    var body = (
-        '{\n  "port": '
-        + String(port)
-        + ',\n  "model": '
-        + json_escape(id)
-        + ',\n  "q4": '
-        + ("true" if q4 else "false")
-        + ',\n  "kv_budget_mb": '
-        + String(kv)
-        + "\n}\n"
-    )
-    try:
-        with open(path, "w") as f:
-            f.write(body)
-        return True
-    except:
-        return False
-
-
-def _restart_engine():
-    """Kick the engine LaunchAgent (me.millfolio.server) so it reloads with the
-    newly-selected model. `-k` stops the running instance first."""
-    var uid = Int(external_call["getuid", UInt32]())
-    var cmd = (
-        "launchctl kickstart -k gui/"
-        + String(uid)
-        + "/me.millfolio.server >/dev/null 2>&1"
-    )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-
-
-def _engine_loaded_model() -> String:
-    """The chat model the engine is ACTUALLY serving right now, from its
-    /v1/models — the readiness signal the UI polls during a switch. Empty when the
-    engine is down (e.g. mid-restart) or unreachable; best-effort, fails fast.
-    """
-    try:
-        var req = Request(method="GET", url=_engine_url() + "/models")
-        var client = HttpClient()
-        var v = client.send(req).json()
-        var arr = v["data"]
-        for i in range(arr.array_count()):
-            var mid = String(arr[i]["id"].string_value())
-            if mid.find("Embedding") == -1 and mid.find("embedding") == -1:
-                return mid^  # the chat model (skip the embeddings model)
-    except:
-        pass
-    return String("")
-
-
-def _app_version() -> String:
-    """The deployed build label (matches the UI's bottom-bar stamp: '<sha> · <date>').
-    Stamped on each stats record so the Stats page can average per deployed version.
-    MILLFOLIO_VERSION is set by run-demo.sh from the deploy stamp; 'dev' otherwise.
-    """
-    return String(getenv("MILLFOLIO_VERSION", "dev"))
-
-
-def _stats_path() -> String:
-    """Where per-question usage records accumulate (JSONL). MILLFOLIO_STATS_FILE
-    overrides; defaults under the config dir (which `cp -R` deploys never delete).
-    Resolved by the storage seam (`stats_log_path`) — the System page reads it here;
-    the read/append go through `default_stats_store()`."""
-    return stats_log_path()
 
 
 def _append_stats(
@@ -2379,16 +533,6 @@ def _append_stats(
         default_stats_store().append(line)
     except:
         log("[stats] append failed (non-fatal)")
-
-
-def _asks_path() -> String:
-    """Where the FULL per-ask history accumulates (JSONL): the question, the
-    GENERATED program, and the answer. Durable + on-device under the config dir
-    (which `cp -R` deploys never delete) — survives a browser-data clear, unlike
-    the UI's localStorage. MILLFOLIO_ASKS_FILE overrides. Resolved by the storage
-    seam (`asks_log_path`); the System page reads it here, read/append/delete go
-    through `default_asks_store()`."""
-    return asks_log_path()
 
 
 def _append_ask(
@@ -2598,7 +742,9 @@ def on_connect(mut conn: WsConnection) raises:
             code = supplied_program.copy()
             pre_ms = 0.0
         else:
-            conn.send_text(status("manifest", "Aliasing vault manifest", "running"))
+            conn.send_text(
+                status("manifest", "Aliasing vault manifest", "running")
+            )
             var _t = perf_counter_ns()
             var manifest = orch.vault_manifest(vault_dir)
             _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
@@ -2665,7 +811,9 @@ def on_connect(mut conn: WsConnection) raises:
                     "text",
                 )
             )
-            conn.send_text(status("manifest", "Aliasing vault manifest", "done"))
+            conn.send_text(
+                status("manifest", "Aliasing vault manifest", "done")
+            )
 
             conn.send_text(status("codegen", "Writing the program", "running"))
             _t = perf_counter_ns()
@@ -2704,7 +852,9 @@ def on_connect(mut conn: WsConnection) raises:
                 )
             )
             conn.send_text(
-                approval("run", "Run the generated program over your vault?", code)
+                approval(
+                    "run", "Run the generated program over your vault?", code
+                )
             )
             var decision = conn.recv()
             if (
@@ -3025,7 +1175,7 @@ def main() raises:
     if len(cli) >= 2 and String(cli[1]) == "--fetch-demo":
         var url = String(cli[2]) if len(cli) >= 3 else String("")
         var dest = String(cli[3]) if len(cli) >= 4 else String("")
-        _ = _fetch_demo_run(url, dest)
+        _ = handlers_demo._fetch_demo_run(url, dest)
         return
 
     var cfg = load_config()
@@ -3114,9 +1264,15 @@ def main() raises:
     try:
         var mth = ThreadHandle.spawn[_orchestrator_worker](_null_ptr())
         mth.detach()
-        print("  work orchestrator: on (indexing + AI-tag backfill, one at a time)")
+        print(
+            "  work orchestrator: on (indexing + AI-tag backfill, one at a"
+            " time)"
+        )
     except:
-        print("  work orchestrator: could not start (index-time backfill still works)")
+        print(
+            "  work orchestrator: could not start (index-time backfill still"
+            " works)"
+        )
     # Background weight provisioner: ensure the required embedding model + a default
     # chat model are present (both no-ops when cached), so indexing/search + chat work
     # out of the box after a weights-free install; then kickstart the engine to serve
@@ -3124,7 +1280,9 @@ def main() raises:
     # replay engine, synthetic data). No-op when the downloader isn't configured.
     if not _is_demo():
         try:
-            var pth = ThreadHandle.spawn[_provision_worker](_null_ptr())
+            var pth = ThreadHandle.spawn[handlers_models._provision_worker](
+                _null_ptr()
+            )
             pth.detach()
             print(
                 "  weight provisioner: on (embedding + default chat model,"
