@@ -82,7 +82,7 @@ from vault.index.manifest import (
     manifest_for_files,
 )
 from osutil import _config_dir, _cstr, _epoch_s, _is_demo, _engine_url
-from store import operation_record_line
+from record_builders import operation_record_line
 from events import json_escape
 from logging import log
 from json import loads

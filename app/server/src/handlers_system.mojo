@@ -38,7 +38,11 @@ from osutil import _config_dir, _model_label, _app_version
 from sysmetrics import _gpu_util_pct, _memory_used_pct, _disk_used_pct
 from httputil import _cors
 from events import json_escape
-from store import history_records_array, system_json, delete_ask_records
+from record_builders import (
+    history_records_array,
+    system_json,
+    delete_ask_records,
+)
 
 
 def handle_health() raises -> Response:

@@ -2,7 +2,7 @@
 
 Separated from server.mojo (which wraps these with the actual file I/O + HTTP
 Response) so they unit-test as a plain Mojo program with no flare/privacy_box —
-mirrors events.mojo. Covered by test/store_test.mojo.
+mirrors events.mojo. Covered by test/record_builders_test.mojo.
 
 Two stores + one info blob:
   • the per-ask HISTORY (`asks.jsonl`) — `ask_record_line` builds one JSONL record

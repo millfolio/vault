@@ -9,7 +9,7 @@ Covers the contract the three logs (operations/stats/asks) rely on:
   - append ordering: records read back in the exact order they were appended
   - read_all on a MISSING file RAISES (so each caller keeps its try/except→empty)
   - torn/malformed line: read_all returns the RAW bytes; the pure builder
-    (operations_records_array, unchanged in store.mojo) skips it — the split of
+    (operations_records_array, unchanged in record_builders.mojo) skips it — the split of
     responsibility the seam preserves, byte-identical to before
   - rewrite: whole-file overwrite (the asks delete-record compaction)
   - the default_*_store factory + its path helper honor the per-log env override
@@ -20,7 +20,7 @@ from vault.storage import (
     default_operations_store,
     operations_log_path,
 )
-from store import operations_records_array
+from record_builders import operations_records_array
 
 
 def expect(cond: Bool, msg: String) -> Int:

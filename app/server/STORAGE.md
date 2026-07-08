@@ -306,7 +306,7 @@ the layer) so both the app server AND the vault-side owners share it in-process:
     tag-name rules are UNCHANGED**. The store performs only the I/O the registry used to do
     inline; the registry still decides WHEN to read/refresh/write. `write_categories`
     keeps its best-effort `try/except` swallow + `ensure_data_dir()`. Proven byte-identical
-    by `test-store` / `test-persist` / **`test-missing-defaults`** (the categories-refresh
+    by `test-record-builders` / `test-persist` / **`test-missing-defaults`** (the categories-refresh
     test), all still green unchanged.
   - **`manifest.tsv`** (`vault.index`): `_load_manifest` read + `_write_manifest` write route
     through `default_manifest_store(config_dir())`; the `#meta` header + TSV serialize/parse
@@ -339,7 +339,7 @@ Smallest-surface / lowest-risk first, each shippable on its own:
 
 1. **queue ✓** — slice 1 (one file, already had a clean API + atomic writes).
 2. **logs ✓** — slice 2: `operations.jsonl` · `asks.jsonl` · `stats.jsonl`. Append +
-   raw read behind `LogStore`; the builders stay in `store.mojo` (`ask_record_line`,
+   raw read behind `LogStore`; the builders stay in `record_builders.mojo` (`ask_record_line`,
    `operation_record_line`, `*_records_array`), so the store is a thin bytes-mover over
    the file append/read. Uniform, well-bounded. See §4a.
 3. **kv ✓** — slice 3: the `.index.*` / `.*.state` / `.*.op` / `.model_download.*` markers

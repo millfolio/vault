@@ -52,7 +52,7 @@ from work_orchestrator import (
 )
 from scheduler import index_active, index_current, short_payload
 from work_queue import wq_list
-from store import operations_records_array, parse_progress_counter
+from record_builders import operations_records_array, parse_progress_counter
 
 import handlers_demo
 from osutil import _is_demo, _config_dir
