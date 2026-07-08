@@ -5,8 +5,13 @@ Cheap, stateless samples read WITHOUT root via short `ioreg`/`sysctl`/`vm_stat`/
 pattern throughout). Each returns -1 when unavailable so the UI can hide the
 indicator. Plus `_dir_size`, the recursive byte-size walk the System page uses.
 
+Split for testability (Phase-1 tail): the FETCH side (`_sample_int` — run the
+pipeline, read its temp file) is a thin shell wrapper; the PARSE side
+(`_parse_leading_int`) is pure and unit-tested (test/sysmetrics_test.mojo).
+Each reader is now just "build the pipeline → `_sample_int`".
+
 Depends only on `osutil` (`_config_dir`, `_cstr`) + the stdlib — no import cycle.
-Pure moves out of server.mojo — behaviour is identical.
+Behaviour is identical to the pre-split readers.
 """
 
 from std.ffi import external_call
@@ -14,6 +19,39 @@ from std.os import listdir
 from std.os.path import isfile, isdir, getsize
 
 from osutil import _config_dir, _cstr
+
+
+def _parse_leading_int(s: String) -> Int:
+    """The FIRST run of ASCII digits in `s` as a non-negative Int; -1 when `s`
+    contains no digit. Pure — the parse half of every sampler below (their
+    pipelines emit a single integer, possibly with surrounding whitespace)."""
+    var cur = 0
+    var indig = False
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c >= 48 and c <= 57:
+            cur = cur * 10 + (c - 48)
+            indig = True
+        elif indig:
+            break
+    return cur if indig else -1
+
+
+def _sample_int(cmd: String, out_path: String) -> Int:
+    """The FETCH half: run the shell pipeline `cmd` (which redirects its single
+    integer into `out_path`), read the file back, and parse. Returns -1 on any
+    failure (spawn, read, or no digits) so callers can hide the indicator."""
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
+    try:
+        var s: String
+        with open(out_path, "r") as f:
+            s = f.read()
+        return _parse_leading_int(s)
+    except:
+        return -1
 
 
 def _gpu_util_pct() -> Int:
@@ -36,26 +74,7 @@ def _gpu_util_pct() -> Int:
         + out_path
         + "' 2>/dev/null"
     )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-    try:
-        var s: String
-        with open(out_path, "r") as f:
-            s = f.read()
-        var cur = 0
-        var indig = False
-        var b = s.as_bytes()
-        for i in range(len(b)):
-            var c = Int(b[i])
-            if c >= 48 and c <= 57:
-                cur = cur * 10 + (c - 48)
-                indig = True
-            elif indig:
-                break
-        return cur if indig else -1
-    except:
-        return -1
+    return _sample_int(cmd, out_path)
 
 
 def _memory_gb() -> Int:
@@ -74,30 +93,12 @@ def _memory_gb() -> Int:
         + out_path
         + "' 2>/dev/null"
     )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-    try:
-        var s: String
-        with open(out_path, "r") as f:
-            s = f.read()
-        var bytes = 0
-        var indig = False
-        var b = s.as_bytes()
-        for i in range(len(b)):
-            var c = Int(b[i])
-            if c >= 48 and c <= 57:
-                bytes = bytes * 10 + (c - 48)
-                indig = True
-            elif indig:
-                break
-        if not indig:
-            return -1
-        # Bytes → GiB (macOS reports hw.memsize as a power-of-two capacity, e.g.
-        # a "24 GB" Mac is 25769803776 = 24 * 1024^3). Round to nearest whole GB.
-        return (bytes + (1 << 29)) >> 30
-    except:
+    var bytes = _sample_int(cmd, out_path)
+    if bytes < 0:
         return -1
+    # Bytes → GiB (macOS reports hw.memsize as a power-of-two capacity, e.g.
+    # a "24 GB" Mac is 25769803776 = 24 * 1024^3). Round to nearest whole GB.
+    return (bytes + (1 << 29)) >> 30
 
 
 def _memory_used_pct() -> Int:
@@ -121,26 +122,7 @@ def _memory_used_pct() -> Int:
         + out_path
         + "' 2>/dev/null"
     )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-    try:
-        var s: String
-        with open(out_path, "r") as f:
-            s = f.read()
-        var cur = 0
-        var indig = False
-        var b = s.as_bytes()
-        for i in range(len(b)):
-            var c = Int(b[i])
-            if c >= 48 and c <= 57:
-                cur = cur * 10 + (c - 48)
-                indig = True
-            elif indig:
-                break
-        return cur if indig else -1
-    except:
-        return -1
+    return _sample_int(cmd, out_path)
 
 
 def _disk_used_pct() -> Int:
@@ -159,26 +141,7 @@ def _disk_used_pct() -> Int:
         + out_path
         + "' 2>/dev/null"
     )
-    var cc = _cstr(cmd)
-    _ = external_call["system", Int32](cc)
-    cc.free()
-    try:
-        var s: String
-        with open(out_path, "r") as f:
-            s = f.read()
-        var cur = 0
-        var indig = False
-        var b = s.as_bytes()
-        for i in range(len(b)):
-            var c = Int(b[i])
-            if c >= 48 and c <= 57:
-                cur = cur * 10 + (c - 48)
-                indig = True
-            elif indig:
-                break
-        return cur if indig else -1
-    except:
-        return -1
+    return _sample_int(cmd, out_path)
 
 
 def _dir_size(path: String) -> Int:

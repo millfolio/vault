@@ -21,9 +21,11 @@ acyclic — none of these import `server.mojo`:
 
 `server.mojo` still **spawns** the loop
 (`ThreadHandle.spawn[_orchestrator_worker]`) at startup and runs the boot
-`_reconcile_stale()`, and it keeps the **HTTP handlers** (`/api/orchestrator/*`,
+`_reconcile_stale()`. The **HTTP handlers** (`/api/orchestrator/*`,
 `/api/index|reindex`, `/api/demo/download`) + the **status-JSON builders**
-(`_index_status_json`, `_demo_status_json`, `_orchestrator_queue_json`, …) — those
+(`_index_status_json`, `_demo_status_json`, `_orchestrator_queue_json`, …) live in
+`handlers_operations.mojo` / `handlers_demo.mojo` (the Phase-1B per-domain carve-up;
+`server.mojo` is only the route dispatcher + `main()`) — those
 call into `work_orchestrator`'s enqueue/run/state helpers. Global **pause + priority**
 + the readiness/backfill drain live in `vault.derive.store`
 (`is_paused`/`get_priority`/`nap_ms_for_priority`/`ml_backfill_slice`).
