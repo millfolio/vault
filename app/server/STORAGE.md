@@ -81,12 +81,17 @@ SqliteKvStore  SqliteLogStore SqliteQueueStore   SqliteDocStore   ← Phase 5 (o
 `Variant[FileQueueStore, SqliteQueueStore]` and dispatches once. No `wq_*` caller,
 no `scheduler.mojo`, no `server.mojo` handler changes.
 
-> **Phase 5 is out of scope here.** `SqliteStore` needs a Mojo `libsqlite3` FFI
-> binding that does not exist yet (like flare's TLS/HTTP FFI shims, it would be a
-> small `external_call` wrapper over the system `libsqlite3.dylib`). Building that
-> binding — and the four `Sqlite*Store` impls — is Phase 5. This cleanup only lands
-> the traits + the `File*Store` impls, so the seam is real and tested before the
-> backend swap.
+> **The real backend is a FUTURE step — and not necessarily SQLite.** SQLite here is
+> just an illustrative swap target; it would need a Mojo `libsqlite3` FFI binding that
+> doesn't exist yet. **LanceDB is ALREADY in the system** (it backs the vector store —
+> `vault.index` + `lancedb.mojo`), so a `LanceStore` adds **no new dependency** and is
+> the pragmatic backend when one is warranted. Because the swap points are **per shape**
+> (`default_*_store()`), backends can be **mixed**: LanceDB fits the **doc/registry +
+> analytical** shapes (it's columnar), while the tiny **kv-markers** and the
+> **high-frequency queue** can stay file-backed where a DB's per-write overhead wouldn't
+> pay. This cleanup lands the traits + the `File*Store` impls, so the seam is real and
+> tested before any backend swap. (Read the `Sqlite*Store` mentions above as the original
+> illustration — "a real DB backend, e.g. LanceDB".)
 
 ## 4. This slice — the queue seam (implemented)
 
