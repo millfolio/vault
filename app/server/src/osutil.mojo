@@ -200,3 +200,10 @@ def _sort_names(mut names: List[String]):
             names[j - 1] = names[j].copy()
             names[j] = tmp^
             j -= 1
+
+
+def _engine_url() -> String:
+    """The on-device inference server's OpenAI-style root — where ML-tag
+    classification (`ml_backfill_slice`) POSTs its yes/no batches. Same env the
+    `millfolio` CLI reads, so the app and the CLI hit the one engine."""
+    return String(getenv("MILLFOLIO_LOCAL_URL", "http://127.0.0.1:8000/v1"))

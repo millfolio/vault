@@ -1,10 +1,32 @@
 # Work Orchestrator — design
 
-Status: **proposal** (target architecture). This document describes where we want
-the app server's background work — **indexing** and **AI-tag backfill** — to land,
-and how to get there incrementally from today's point-fixes. It is the plan behind
+Status: **implemented** (Phases 0–4 landed; Phase 5 optional). This document describes
+where the app server's background work — **indexing** and **AI-tag backfill** — lands,
+and how we got there incrementally from the old point-fixes. It is the plan behind
 unifying the System/Backfill UI under **Operations** and making **pause + priority
 global**.
+
+### Code layout (where the pieces live)
+
+The orchestrator is split across small modules over `vault.storage`, all imported
+by `server.mojo` (which keeps only the HTTP surface). The dependency graph is
+acyclic — none of these import `server.mojo`:
+
+| Module | Owns |
+|--------|------|
+| `work_queue.mojo` | the disk-backed `WorkItem` queue facade (`wq_*`) over `vault.storage` |
+| `scheduler.mojo` | the PURE scheduling seams (enqueue plan, queue-derived status, pause/query gating, reconcile predicate, backfill readiness) — unit-tested, no I/O |
+| `runqueue.mojo` | the interactive chat/ask FIFO ticket (the "a query is running" signal) |
+| **`work_orchestrator.mojo`** | **the orchestrator RUNTIME: the `_orchestrator_worker` pthread loop (§2.3) + its job runners (`_run_index_item`/`_run_index_child`/`_run_demo_download_item`/`_demo_fetch_and_unpack`), the boot/loop `_reconcile_stale` (§2.5), the `_start_index_run` generator (§2.1), and the index/demo run STATE + OPERATIONS-recording helpers those read/write (markers, `operations.jsonl` append, `_finalize_index_op`).** |
+
+`server.mojo` still **spawns** the loop
+(`ThreadHandle.spawn[_orchestrator_worker]`) at startup and runs the boot
+`_reconcile_stale()`, and it keeps the **HTTP handlers** (`/api/orchestrator/*`,
+`/api/index|reindex`, `/api/demo/download`) + the **status-JSON builders**
+(`_index_status_json`, `_demo_status_json`, `_orchestrator_queue_json`, …) — those
+call into `work_orchestrator`'s enqueue/run/state helpers. Global **pause + priority**
++ the readiness/backfill drain live in `vault.derive.store`
+(`is_paused`/`get_priority`/`nap_ms_for_priority`/`ml_backfill_slice`).
 
 ## 1. Why
 
@@ -223,7 +245,9 @@ Each step is shippable on its own; we already did Phase 0.
   instead of running directly.
 - **Phase 3 — the orchestrator loop.** Replace `_backfill_worker`'s free poll with the
   single loop (§2.3); one background job at a time; running marker generalized from
-  `.index.pid`.
+  `.index.pid`. **(Later isolated into `work_orchestrator.mojo` — see "Code layout"
+  above — lifting the loop + job runners + run-state/operations helpers out of the
+  `server.mojo` god-file with zero behaviour change; `server.mojo` imports them back.)**
 - **Phase 4 — UI unification.** Absorb System + Backfill into Operations; surface
   failed pids; show the queue.
 - **Phase 5 — (optional) interactive preemption.** Let a chat/ask *preempt* a

@@ -197,12 +197,14 @@ The three **append-only JSONL logs** move behind one tiny trait, mirroring the q
   `default_asks_store()` over `operations_log_path()` / `stats_log_path()` /
   `asks_log_path()` (honoring `MILLFOLIO_OPS_FILE` / `MILLFOLIO_STATS_FILE` /
   `MILLFOLIO_ASKS_FILE`). These are the Phase-5 swap points.
-- **`server.mojo` is the thin facade**: `_append_operation` / `_append_stats` /
+- **The thin facade over the store**: `_append_operation` / `_append_stats` /
   `_append_ask` keep their best-effort `try/except → log("[…] append failed")`, now
   wrapping `store.append(...)`; the read handlers call `store.read_all()`; the delete
   handler calls `store.rewrite()`. `_operations_path` / `_stats_path` / `_asks_path`
   delegate to the storage path helpers (the System page still reads them). Behavior is
   unchanged. Unit-tested by `test/log_store_test.mojo` (`pixi run test-logstore`).
+  (Phase 3: `_append_operation` moved with the orchestrator runtime to
+  `work_orchestrator.mojo`; `server.mojo` imports it back — still the same thin facade.)
 
 > **Out of scope (kv slice):** `operations.jsonl` pairs with the lazy-finalize **KV
 > markers** `.index.op` / `.demo.op` (`_pending_op_path`, `_write_pending_op`) — those
@@ -231,11 +233,14 @@ queue + log slices:
   of one `kv(k,v)` table.
 - **`default_kv_store()`** over `_config_dir()` — the Phase-5 swap point; reproduces every
   marker's old `_config_dir() + "/.<name>"` path byte-for-byte.
-- **`server.mojo` is the thin facade**: the marker path helpers (`_index_state_path`,
+- **The thin facade over the store**: the marker path helpers (`_index_state_path`,
   `_dl_state_path`, `_demo_state_path`, `_pending_op_path`, …) now derive from the key
   constants; writes go through `_kv_set(KEY, …)`, reads through `default_kv_store().get(KEY)`
   (inside their existing `try/except → default`), and the pending-op finalizers' presence
-  check through `.exists(KEY)`. Behavior is unchanged. Unit-tested by
+  check through `.exists(KEY)`. Behavior is unchanged. (Phase 3: the `_kv_set` / `_write_small`
+  facades + the index/demo marker path helpers they back moved with the orchestrator runtime
+  to `work_orchestrator.mojo`; `server.mojo` imports the ones its handlers still call.)
+  Unit-tested by
   `test/kv_store_test.mojo` (`pixi run test-kvstore`, hermetic over a temp `MILLFOLIO_DATA_DIR`).
 
 **Eight migrated markers** (logical keys, all written/read WHOLE in-process):
