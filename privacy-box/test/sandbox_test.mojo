@@ -10,7 +10,7 @@ served vault dir — never an empty string or "/", which would defeat read-scopi
 """
 
 from std.os import makedirs
-from sandbox import (
+from security.sandbox import (
     _index_source_dir,
     Sandbox,
     SandboxPolicy,

@@ -20,7 +20,7 @@ from flare.http import HttpClient, Request
 from flare.tls import TlsStream, TlsConfig
 from json import loads
 from logging import log
-from egress import EgressGuard
+from security import EgressGuard
 from vaultcfg import resource_path
 from codegen_cache import (
     codegen_cache_enabled,

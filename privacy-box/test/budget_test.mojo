@@ -1,6 +1,6 @@
 """Budget-test — unit-test the remote-API token Budget. `pixi run budget-test`."""
 
-from budget import Budget, parse_budget
+from security.budget import Budget, parse_budget
 
 
 def _expect(name: String, cond: Bool, prev: Bool) -> Bool:

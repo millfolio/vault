@@ -17,7 +17,7 @@ See run_vault_task for the full confidentiality argument.
 from std.os import getenv, setenv
 from logging import log
 
-from budget import Budget
+from security import Budget
 from transport import (
     LocalClient,
     RemoteClient,
@@ -25,8 +25,8 @@ from transport import (
     _codegen_system,
     DeltaSink,
 )
-from sandbox import Sandbox, RunHandle
-from broker import CapabilityBroker
+from security import Sandbox, RunHandle
+from security import CapabilityBroker
 from vaultcfg import millfolio_bin, vault_include_paths
 
 # The tag-registry READ layer, shared IN-PROCESS with the CLI + app server. It's

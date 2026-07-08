@@ -18,7 +18,7 @@ Recognized keys (all optional):
 
 from std.os import getenv
 from json import loads
-from budget import parse_budget
+from security import parse_budget
 
 
 struct Config(Movable):

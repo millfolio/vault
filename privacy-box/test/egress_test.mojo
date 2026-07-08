@@ -6,7 +6,7 @@ carrying a real-data fingerprint OR a canary token is blocked (the guard raises,
 so transport aborts the send).
 """
 
-from egress import EgressGuard
+from security.egress import EgressGuard
 
 
 def _blocks(guard: EgressGuard, payload: String) -> Bool:

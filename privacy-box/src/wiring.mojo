@@ -7,12 +7,12 @@ server.mojo can import it without pulling in a second `main`.
 
 from std.os import getenv, makedirs
 
-from budget import Budget
+from security import Budget
 from settings import Config
-from egress import EgressGuard
+from security import EgressGuard
 from transport import LocalClient, RemoteClient
-from sandbox import Sandbox, SandboxPolicy
-from broker import CapabilityBroker
+from security import Sandbox, SandboxPolicy
+from security import CapabilityBroker
 from orchestrator import Orchestrator
 from vaultcfg import vault_index_dir
 

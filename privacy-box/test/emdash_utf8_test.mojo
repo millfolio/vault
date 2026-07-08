@@ -16,7 +16,7 @@ character (C3 A2, the double-encode tell), plus a `_raw` helper for lone bytes.
 """
 
 from std.os import makedirs
-from sandbox import Sandbox, SandboxPolicy, _write, RunHandle
+from security.sandbox import Sandbox, SandboxPolicy, _write, RunHandle
 
 
 def _expect(name: String, cond: Bool, prev: Bool) -> Bool:
