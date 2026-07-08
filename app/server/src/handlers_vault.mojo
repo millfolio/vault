@@ -32,7 +32,7 @@ from osutil import _config_dir, _tsv_unescape, _atoi
 from sysmetrics import _dir_size
 from httputil import _cors
 from events import json_escape
-from sandbox import _spawn_capture
+from security.sandbox import _spawn_capture
 
 # Qwen3-Embedding-0.6B — mirrors vault/core embed.mojo. Surfaced in /api/vault.
 comptime EMBED_DIM = 1024
