@@ -56,4 +56,7 @@ from vault.storage.storage import (
     DOC_CATEGORIES,
     DOC_MANIFEST,
     DOC_INDEXED_PATHS,
+    # ── persisted-path portability (write ~-relative, read both forms) ──
+    contract_home,
+    expand_home,
 )

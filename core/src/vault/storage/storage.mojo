@@ -129,6 +129,36 @@ def _storage_config_dir() -> String:
     )
 
 
+def contract_home(path: String) -> String:
+    """CONTRACT an absolute path for PERSISTENCE: a path under $HOME is stored
+    home-relative (`~` + the rest) so the derived state survives a copy to a
+    machine with a different username (`mill export` / `mill import`). A path
+    outside $HOME — or one already contracted — passes through unchanged.
+    Inverse: `expand_home`. Every persisted-path write site (the manifest's
+    `source_dir`, `indexed-paths.json`) routes through this; in-memory paths
+    stay absolute."""
+    var home = String(getenv("HOME", ""))
+    if home.byte_length() == 0 or home == "/":
+        return path.copy()
+    if path == home:
+        return String("~")
+    if path.startswith(home + "/"):
+        return "~" + String(path.removeprefix(home))
+    return path.copy()
+
+
+def expand_home(path: String) -> String:
+    """EXPAND a persisted path on READ: `~` / `~/…` becomes the CURRENT $HOME.
+    An absolute path passes through unchanged — readers accept both forms, so
+    rows written before contraction existed (or paths outside $HOME) keep
+    working. Inverse: `contract_home`."""
+    if path == "~":
+        return String(getenv("HOME", "."))
+    if path.startswith("~/"):
+        return String(getenv("HOME", ".")) + String(path.removeprefix("~"))
+    return path.copy()
+
+
 def work_queue_path() -> String:
     """The queue state file. `MILLFOLIO_WORKQ_PATH` overrides it (tests use that).
     """

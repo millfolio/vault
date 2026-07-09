@@ -56,7 +56,12 @@ from vault.extract.transactions import (
     tsv_to_txn_rows,
 )
 from vault.extract.location import parse_location
-from vault.storage import default_manifest_store, DOC_MANIFEST
+from vault.storage import (
+    default_manifest_store,
+    DOC_MANIFEST,
+    contract_home,
+    expand_home,
+)
 from vault.derive.store import (
     config_dir,
     load_registry,
@@ -460,7 +465,9 @@ def _load_manifest() raises -> Manifest:
             if len(cols) >= 4:
                 next_id = _atoi(String(cols[1]))
                 next_alias = _atoi(String(cols[2]))
-                source_dir = _tsv_unescape(String(cols[3]))
+                # Stored home-relative (`~/…`) for cross-machine portability;
+                # legacy absolute rows pass through expand_home unchanged.
+                source_dir = expand_home(_tsv_unescape(String(cols[3])))
             if len(cols) >= 5:
                 next_gen = _atoi(String(cols[4]))
             continue
@@ -530,7 +537,9 @@ def _write_manifest(m: Manifest) raises:
         + "\t"
         + String(m.next_alias)
         + "\t"
-        + _tsv_escape(m.source_dir)
+        # Persist under-home paths as `~/…` (expand_home on read) so a copied
+        # data dir works on a Mac with a different username. In-memory stays abs.
+        + _tsv_escape(contract_home(m.source_dir))
         + "\t"
         + String(m.next_gen)
         + "\n"

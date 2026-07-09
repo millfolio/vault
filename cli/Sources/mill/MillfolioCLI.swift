@@ -15,7 +15,7 @@ struct Millfolio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mill",
         abstract: "The millfolio personal data vault — install, start, stop, index, and ask.",
-        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self, Run.self, Get.self, SetCmd.self, Doctor.self]
+        subcommands: [Install.self, Update.self, Version.self, Start.self, Stop.self, Status.self, Index.self, Ask.self, Run.self, Export.self, Import.self, Get.self, SetCmd.self, Doctor.self]
     )
 }
 
