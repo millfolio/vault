@@ -195,5 +195,12 @@ test-prompt-examples = { cmd = "bash scripts/check_prompt_examples.sh" }
 # precompiles vault.mojoc — a drift breaks the vault surface at install time
 # (the v0.4.34 .mojoc-version mismatch). pixi.toml is the source of truth.
 test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
-# The whole pure-Mojo suite — what CI runs (no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-docstore", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-codegen-cache", "test-result", "test-strip", "test-mojo-version"] }
+# Gate: `mill export`/`import` end-to-end (cli/VaultTransfer.swift) — hermetic
+# roundtrip under fake $HOMEs + MILLFOLIO_DATA_DIR + the env passphrase: data
+# restored byte-identically minus excludes, documents (nested + TSV-escaped
+# names) restored without clobbering, secrets/queue never travel, legacy
+# /Users/<x> rewrite, wrong-passphrase refusal, --no-documents. Builds the CLI
+# (swift) and drives hdiutil — macOS-only (self-skips elsewhere).
+test-transfer = { cmd = "bash cli/test_transfer.sh" }
+# The whole suite — what CI runs (pure Mojo + the macOS-only transfer gate; no FFI shims / network needed).
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-docstore", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-codegen-cache", "test-result", "test-strip", "test-transfer", "test-mojo-version"] }
