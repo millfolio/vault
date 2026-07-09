@@ -57,6 +57,7 @@ from scheduler import (
     KIND_DEMO,
 )
 from vault.storage import (
+    contract_home,
     default_kv_store,
     default_operations_store,
     default_indexed_paths_store,
@@ -754,8 +755,10 @@ def _write_tracked(paths: List[String], epochs: List[String]) raises:
             out += ","
         var ep = epochs[i] if i < len(epochs) else String("")
         out += (
+            # Persisted home-relative (`~/…`) so a copied data dir re-indexes
+            # the right folders on a Mac with a different username.
             '{"path":'
-            + json_escape(paths[i])
+            + json_escape(contract_home(paths[i]))
             + ',"lastIndexed":'
             + json_escape(ep)
             + "}"

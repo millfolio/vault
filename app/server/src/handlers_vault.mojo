@@ -25,7 +25,7 @@ from flare.prelude import *
 
 from json import loads
 
-from vault.storage import default_manifest_store, DOC_MANIFEST
+from vault.storage import default_manifest_store, DOC_MANIFEST, expand_home
 
 from state import MillfolioState
 from osutil import _config_dir, _tsv_unescape, _atoi
@@ -65,10 +65,12 @@ def handle_vault(
             if line.byte_length() == 0:
                 continue
             var cols = line.split("\t")
-            # Meta row: #meta <next_id> <next_alias> <source_dir>.
+            # Meta row: #meta <next_id> <next_alias> <source_dir>. The dir is
+            # stored home-relative (`~/…`); expand for display + the mismatch
+            # comparison (legacy absolute rows pass through unchanged).
             if String(cols[0]) == "#meta":
                 if len(cols) >= 4:
-                    source_dir = _tsv_unescape(String(cols[3]))
+                    source_dir = expand_home(_tsv_unescape(String(cols[3])))
                 continue
             # File row: alias name kind size sha256 id_start chunk_count.
             if len(cols) < 7:
@@ -137,7 +139,8 @@ def handle_doc(req: Request) raises -> Response:
         var cols = line.split("\t")
         if String(cols[0]) == "#meta":
             if len(cols) >= 4:
-                source_dir = _tsv_unescape(String(cols[3]))
+                # Stored `~/…`; expand so the file open below hits the real path.
+                source_dir = expand_home(_tsv_unescape(String(cols[3])))
             continue
         if len(cols) < 7:
             continue

@@ -40,6 +40,7 @@ from vault.storage import (
     default_operations_store,
     default_indexed_paths_store,
     DOC_INDEXED_PATHS,
+    expand_home,
 )
 from work_orchestrator import (
     _finalize_index_op,
@@ -337,7 +338,9 @@ def _read_tracked() raises -> _Tracked:
         var j = loads(text)
         var arr = j["folders"]
         for i in range(arr.array_count()):
-            paths.append(String(arr[i]["path"].string_value()))
+            # Stored `~/…` (see _write_tracked); expand to the current home.
+            # Legacy absolute rows pass through unchanged.
+            paths.append(expand_home(String(arr[i]["path"].string_value())))
             try:
                 epochs.append(String(arr[i]["lastIndexed"].string_value()))
             except:

@@ -61,9 +61,11 @@ test-apikey = { cmd = "mkdir -p build && mojo build test/apikey_test.mojo -I src
 test-osutil = { cmd = "mkdir -p build && mojo build test/osutil_test.mojo -I src -o build/osutil-test && ./build/osutil-test" }
 # Unit-test the system-stat samplers' parse/fetch split (sysmetrics.mojo) — pure parse + printf-driven fetch, no ioreg/vm_stat.
 test-sysmetrics = { cmd = "mkdir -p build && mojo build test/sysmetrics_test.mojo -I src -o build/sysmetrics-test && rm -f /tmp/millfolio-sysmetrics-test.out && ./build/sysmetrics-test" }
+# Unit-test the persisted-path portability helpers (vault.storage contract_home/expand_home) — hermetic via setenv HOME.
+test-homepath = { cmd = "mkdir -p build && mojo build test/home_path_test.mojo -I src -I ../../vault/core/src -I ../../flare -o build/homepath-test && ./build/homepath-test" }
 # Unit-test the HTTP response builders + host allow-list (httputil.mojo) — flare only.
 test-httputil = { cmd = "mkdir -p build && mojo build test/httputil_test.mojo -I src -I ../../flare -I ../../json -o build/httputil-test && rm -f /tmp/millfolio-httputil-test.txt && ./build/httputil-test" }
 # Unit-test the secrets/tokens + in-app API-key store (auth.mojo). MILLFOLIO_DATA_DIR → temp dir (hermetic); rm's it after.
 test-auth = { cmd = "mkdir -p build && mojo build test/auth_test.mojo -I src -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../logging.mojo/src -o build/auth-test && rm -rf /tmp/millfolio-auth-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-auth-test ./build/auth-test; rm -rf /tmp/millfolio-auth-test" }
 # Full unit suite — what `moon run app-server:check` runs (events + run-queue + work-queue + record-builders + log-store + kv-store + scheduler + apikey + osutil + sysmetrics + httputil + auth).
-test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-record-builders", "test-logstore", "test-kvstore", "test-scheduler", "test-apikey", "test-osutil", "test-sysmetrics", "test-httputil", "test-auth"] }
+test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-record-builders", "test-logstore", "test-kvstore", "test-scheduler", "test-apikey", "test-osutil", "test-sysmetrics", "test-homepath", "test-httputil", "test-auth"] }
