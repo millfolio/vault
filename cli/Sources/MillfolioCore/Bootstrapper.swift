@@ -1709,12 +1709,35 @@ public final class Bootstrapper: ObservableObject {
     public func waitForHttp(_ port: Int, path: String = "/", timeout: Double = 25) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let code = try? run("/bin/bash", ["-c",
-                "curl -s -o /dev/null -w '%{http_code}' --max-time 2 'http://localhost:\(port)\(path)' 2>/dev/null"]),
-                code.trimmingCharacters(in: .whitespacesAndNewlines) == "200" { return true }
+            if Self.httpGet("http://localhost:\(port)\(path)")?.code == 200 { return true }
             Thread.sleep(forTimeInterval: 0.3)
         }
         return false
+    }
+
+    /// GET `url` with a short timeout — Foundation URLSession, NOT a shelled
+    /// `curl` (no subprocess, structured errors). Synchronous (semaphore) — fine
+    /// for the CLI, which has no UI thread to protect; the APP copy of this file
+    /// uses an async variant instead. nil on any transport failure (connection
+    /// refused = "not serving yet").
+    nonisolated private static func httpGet(_ url: String, timeout: Double = 2)
+        -> (code: Int, body: String)?
+    {
+        guard let u = URL(string: url) else { return nil }
+        var req = URLRequest(url: u)
+        req.timeoutInterval = timeout
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        let sem = DispatchSemaphore(value: 0)
+        var result: (code: Int, body: String)?
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            if let http = resp as? HTTPURLResponse {
+                result = (http.statusCode,
+                          data.flatMap { String(data: $0, encoding: .utf8) } ?? "")
+            }
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + timeout + 3)
+        return result
     }
 
     /// `mill start`: ensure the combined inference server is running (launchd),
@@ -1784,9 +1807,9 @@ public final class Bootstrapper: ObservableObject {
     /// not just launchctl state.) Returns the reported build version, or nil if it
     /// isn't answering yet.
     public func inferenceVersion() -> String? {
-        guard let out = try? run("/bin/bash", ["-c",
-            "curl -s --max-time 2 http://127.0.0.1:8000/v1/version 2>/dev/null"]),
-            out.contains("\"version\"") else { return nil }
+        guard let r = Self.httpGet("http://127.0.0.1:8000/v1/version"),
+              r.code == 200, case let out = r.body,
+              out.contains("\"version\"") else { return nil }
         // Pull the version string out of {"engine":"millfolio","version":"…"}.
         guard let r = out.range(of: "\"version\"") ,
               let q1 = out.range(of: "\"", range: r.upperBound..<out.endIndex),
