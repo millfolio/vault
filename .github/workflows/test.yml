@@ -15,6 +15,10 @@ on:
 jobs:
   test:
     runs-on: macos-14
+    env:
+      # One workspace-level Mojo compile cache, restored across runs (see the
+      # matching cache step below; same scheme as bundle.yml).
+      MODULAR_CACHE_DIR: ${{ github.workspace }}/.mojo-ci-cache
     steps:
       - uses: actions/checkout@v6
         with: { path: vault }
@@ -36,6 +40,21 @@ jobs:
         with: { repository: millfolio/jinja2.mojo, path: jinja2.mojo }
       - uses: actions/checkout@v6
         with: { repository: millfolio/logging.mojo, path: logging.mojo }
+      # Same two caches as bundle.yml: the conda package downloads (the Mojo
+      # toolchain) and the Mojo compile cache — together they turn the cold
+      # toolchain-fetch + full recompile into a mostly-warm run.
+      - name: Cache pixi/conda packages (Mojo toolchain + deps)
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/rattler
+          key: rattler-${{ runner.os }}-${{ hashFiles('**/pixi.lock') }}
+          restore-keys: rattler-${{ runner.os }}-
+      - name: Cache the Mojo compile cache
+        uses: actions/cache@v4
+        with:
+          path: .mojo-ci-cache
+          key: mojo-cache-${{ runner.os }}-${{ hashFiles('vault/pixi.lock') }}-${{ github.sha }}
+          restore-keys: mojo-cache-${{ runner.os }}-${{ hashFiles('vault/pixi.lock') }}-
       - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           manifest-path: vault/pixi.toml

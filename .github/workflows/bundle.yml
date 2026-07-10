@@ -19,6 +19,11 @@ permissions:
 jobs:
   bundle:
     runs-on: macos-14
+    env:
+      # Relocate the Mojo compile cache (default: inside each project's .pixi env,
+      # where a pixi install could clobber it) to ONE workspace path we can cache
+      # across runs — every `mojo build` in every project shares + reuses it.
+      MODULAR_CACHE_DIR: ${{ github.workspace }}/.mojo-ci-cache
     steps:
       # Lay the repos out as siblings under the workspace, matching what the
       # component packagers + package_bundle.sh expect (engine/, app/, the libs).
@@ -96,6 +101,18 @@ jobs:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('app/web/package-lock.json') }}
           restore-keys: npm-${{ runner.os }}-
+      # The Mojo COMPILE cache (see MODULAR_CACHE_DIR above) — the dominant cold
+      # cost once the toolchain download is cached. The github.sha key suffix
+      # means every run SAVES its incrementally-warmed cache and restores the
+      # nearest prior one; keyed on pixi.lock so a nightly bump starts clean
+      # (stale-compiler cache entries are useless). The post-job save uploads
+      # AFTER the release assets attach, so it never delays a waiting rc publish.
+      - name: Cache the Mojo compile cache
+        uses: actions/cache@v4
+        with:
+          path: .mojo-ci-cache
+          key: mojo-cache-${{ runner.os }}-${{ hashFiles('vault/pixi.lock') }}-${{ github.sha }}
+          restore-keys: mojo-cache-${{ runner.os }}-${{ hashFiles('vault/pixi.lock') }}-
 
       - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
