@@ -51,6 +51,36 @@ def _is_yes(a: String) raises -> Bool:
     return c0 == 121 and c1 == 101 and c2 == 115  # 'y' 'e' 's'
 
 
+def _lower_prefix(s: String, n: Int) raises -> String:
+    """The first `n` bytes of `s`, ASCII-lowercased (answers are ASCII)."""
+    var b = s.as_bytes()
+    var out = String("")
+    var i = 0
+    while i < len(b) and i < n:
+        var c = Int(b[i])
+        if c >= 65 and c <= 90:
+            c += 32
+        out += chr(c)
+        i += 1
+    return out^
+
+
+def _answer_kind(a: String) raises -> Int:
+    """0 = yes · 1 = no · 2 = 'none' (the batch protocol's does-not-apply /
+    unparsed fallback) · 3 = other. Separating these is what tells a real
+    all-negative verdict apart from a protocol/parse failure: a wall of
+    'none' means the answers never parsed (or the model chose the wrapper's
+    escape hatch), NOT that the model judged every row a no."""
+    var s = String(a.strip())
+    if _is_yes(s):
+        return 0
+    if _lower_prefix(s, 4) == "none":
+        return 2
+    if _lower_prefix(s, 2) == "no":
+        return 1
+    return 3
+
+
 def _pct(num: Int, den: Int) -> String:
     """num/den as 'NN.N%' ('n/a' when the denominator is 0)."""
     if den == 0:
@@ -253,6 +283,41 @@ def main() raises:
         "  (keyword tags are imperfect truth — a disagreement is model-vs-rule,"
         " not a certified model error)\n"
     )
+    # The raw answer mix — the diagnostic that separates "the model said no to
+    # everything" (mostly `no`) from "the batch protocol failed / the model took
+    # the wrapper's 'none' escape hatch" (mostly `none`).
+    var n_yes = 0
+    var n_no = 0
+    var n_none = 0
+    var n_other = 0
+    for j in range(len(answers)):
+        var kind = _answer_kind(String(answers[j]))
+        if kind == 0:
+            n_yes += 1
+        elif kind == 1:
+            n_no += 1
+        elif kind == 2:
+            n_none += 1
+        else:
+            n_other += 1
+    out += (
+        "  answer mix: "
+        + String(n_yes)
+        + " yes · "
+        + String(n_no)
+        + " no · "
+        + String(n_none)
+        + " none · "
+        + String(n_other)
+        + " other\n"
+    )
+    if n_yes == 0 and n_none > n_no:
+        out += (
+            "  ⚠ mostly 'none' — the numbered replies didn't parse or the model"
+            " used the batch wrapper's 'does not apply' escape instead of"
+            " yes/no. Inspect one raw exchange in the run capture before"
+            " trusting the ML numbers.\n"
+        )
     out += "\nOperational:\n"
     out += (
         "  "
