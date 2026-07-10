@@ -383,7 +383,11 @@ struct Orchestrator(Movable):
                 if ln.startswith(PROGRESS_SENTINEL):
                     log("  … " + String(ln.removeprefix(PROGRESS_SENTINEL)))
             if running:
-                _ = external_call["usleep", Int32](UInt32(150_000))  # 150 ms
+                # Same external_call signature as the app server's _usleep —
+                # both compile into one module (server.mojo imports wiring →
+                # here), and two `usleep` declarations with different
+                # Int32/UInt32 shapes hard-error the combined build.
+                _ = external_call["usleep", Int](Int(150_000))  # 150 ms
         return self.vault_run_finish(h)
 
     # ── streaming run (steps 4a–4d) ──────────────────────────────────────────────
