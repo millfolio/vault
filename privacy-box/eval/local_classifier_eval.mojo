@@ -33,8 +33,9 @@ comptime MAX_DISTINCT = 400  # cap on model work; stride-sampled above this
 comptime TIME_BUDGET_S = 120  # stop classifying after ~this long (0 = no cap);
 # metrics are computed over whatever was classified — a couple of minutes is
 # plenty to characterize both quality and throughput.
-comptime CHUNK = 20  # distinct descriptions per ask_local_batch call (the
-# time check runs between chunks, so the budget overshoots by ≤ one chunk)
+comptime CHUNK = 10  # distinct descriptions per ask_local_batch call — one
+# engine call per chunk, so the between-chunk time check bounds the budget
+# overshoot to a single model call (~20s at observed rates)
 
 
 def _is_yes(a: String) raises -> Bool:
