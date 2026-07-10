@@ -30,6 +30,11 @@ comptime QUESTION = (
     " AT&T, T-Mobile)? Answer only yes or no."
 )
 comptime MAX_DISTINCT = 400  # cap on model work; stride-sampled above this
+comptime TIME_BUDGET_S = 120  # stop classifying after ~this long (0 = no cap);
+# metrics are computed over whatever was classified — a couple of minutes is
+# plenty to characterize both quality and throughput.
+comptime CHUNK = 20  # distinct descriptions per ask_local_batch call (the
+# time check runs between chunks, so the budget overshoots by ≤ one chunk)
 
 
 def _is_yes(a: String) raises -> Bool:
@@ -107,21 +112,59 @@ def main() raises:
         k += stride
 
     progress(
-        "classifying "
+        "classifying up to "
         + String(len(sampled))
-        + " distinct descriptions on-device"
+        + " distinct descriptions on-device ("
+        + String(TIME_BUDGET_S)
+        + "s budget)"
     )
     var t0 = perf_counter_ns()
-    var answers = ask_local_batch(String(QUESTION), sampled)
+    var budget_s = Float64(TIME_BUDGET_S)  # runtime copy (0.0 = no cap)
+    var answers = List[String]()
+    var done = 0
+    while done < len(sampled):
+        var elapsed_s = Float64(perf_counter_ns() - t0) / 1.0e9
+        if budget_s > 0.0 and elapsed_s >= budget_s and done > 0:
+            progress(
+                "time budget reached — evaluating the "
+                + String(done)
+                + " classified so far"
+            )
+            break
+        var chunk = List[String]()
+        var j = done
+        while j < len(sampled) and j < done + CHUNK:
+            chunk.append(sampled[j].copy())
+            j += 1
+        var res = ask_local_batch(String(QUESTION), chunk)
+        for r in range(len(res)):
+            answers.append(res[r].copy())
+        done = j
+        elapsed_s = Float64(perf_counter_ns() - t0) / 1.0e9
+        var eta = String("")
+        if done < len(sampled) and elapsed_s > 0.0:
+            var left_s = Int(
+                Float64(len(sampled) - done) * elapsed_s / Float64(done) + 0.5
+            )
+            eta = ", ~" + String(left_s) + "s for the rest"
+        progress(
+            "classified "
+            + String(done)
+            + "/"
+            + String(len(sampled))
+            + " distinct — "
+            + String(Int(elapsed_s + 0.5))
+            + "s elapsed"
+            + eta
+        )
     var elapsed_ms = Float64(perf_counter_ns() - t0) / 1.0e6
 
-    # Model verdict per sampled distinct-description id.
+    # Model verdict per CLASSIFIED distinct-description id. Items past the time
+    # budget get NO verdict (their rows are skipped below) — defaulting them to
+    # "no" would fabricate false negatives.
     var verdict = Dict[Int, Bool]()
-    for j in range(len(sampled_ids)):
-        var yes = False
-        if j < len(answers):
-            yes = _is_yes(String(answers[j]))
-        verdict[sampled_ids[j]] = yes
+    for j in range(len(answers)):
+        verdict[sampled_ids[j]] = _is_yes(String(answers[j]))
 
     # Row-level confusion vs the keyword tag, over rows whose description was
     # sampled. Row-level (not distinct-level) so a recurring charge counts the
@@ -151,9 +194,9 @@ def main() raises:
         else:
             tn += 1
 
-    var calls = (len(sampled) + 9) // 10  # ask_local_batch groups ~10 per call
+    var calls = (len(answers) + 9) // 10  # ask_local_batch groups ~10 per call
     var per_desc_ms = (
-        elapsed_ms / Float64(len(sampled)) if len(sampled) > 0 else 0.0
+        elapsed_ms / Float64(len(answers)) if len(answers) > 0 else 0.0
     )
 
     var out = String("On-device classifier eval — aggregates only.\n")
@@ -173,16 +216,13 @@ def main() raises:
         + _x10(len(rows), len(distinct))
         + "x dedup)"
     )
-    if stride > 1:
-        out += (
-            "; evaluated "
-            + String(len(sampled))
-            + " distinct (every "
-            + String(stride)
-            + "th) covering "
-            + String(covered)
-            + " rows"
-        )
+    if stride > 1 or len(answers) < len(sampled):
+        out += "; classified " + String(len(answers))
+        if stride > 1:
+            out += " (every " + String(stride) + "th)"
+        if len(answers) < len(sampled):
+            out += " — time-boxed at " + String(TIME_BUDGET_S) + "s"
+        out += " covering " + String(covered) + " rows"
     out += "\n\nML (row-level, model vs keyword rule):\n"
     out += (
         "  agreement "
@@ -215,7 +255,7 @@ def main() raises:
     out += "\nOperational:\n"
     out += (
         "  "
-        + String(len(sampled))
+        + String(len(answers))
         + " descriptions in ~"
         + String(calls)
         + " model calls (batched ~10/call), "
@@ -224,7 +264,7 @@ def main() raises:
     )
     out += (
         "  "
-        + _per_sec(len(sampled), elapsed_ms)
+        + _per_sec(len(answers), elapsed_ms)
         + " distinct/s  ·  "
         + _per_sec(covered, elapsed_ms)
         + " rows/s effective after dedup fan-out  ·  ~"

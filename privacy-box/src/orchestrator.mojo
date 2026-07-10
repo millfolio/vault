@@ -14,6 +14,7 @@ VAULT-ONLY. Wires the layers into the privacy flow (README.md):
 See run_vault_task for the full confidentiality argument.
 """
 
+from std.ffi import external_call
 from std.os import getenv, setenv
 from logging import log
 
@@ -361,22 +362,29 @@ struct Orchestrator(Movable):
         data (network-denied EXCEPT 127.0.0.1, so search()/ask_local() reach the
         local models but the program cannot phone home). MILLFOLIO_VAULT points the
         tools at the vault dir. Returns stdout (print_answer) — local; a runtime
-        error surfaces here and is NEVER fed upstream."""
-        log("• running it locally over your vault…")
-        # setenv is process-global and NOT thread-safe: with multiple server workers a
-        # per-run setenv races other threads' getenv and corrupts environ, hanging the
-        # next posix_spawn. Only write when it actually changes (a no-op after the first
-        # run / when the launcher already exports MILLFOLIO_VAULT) — no realloc, no race.
-        if String(getenv("MILLFOLIO_VAULT", "")) != vault_dir:
-            _ = setenv("MILLFOLIO_VAULT", vault_dir, True)
-        var bin = self.sandbox.scratch_bin()
-        var out = self.sandbox.run(bin, List[String]()).output.copy()
-        _session_append(
-            "\n===== RESULT (local — never sent upstream) =====\n" + out + "\n"
-        )
-        # Strip the internal progress/stat sentinel lines so the CLI reply is just
-        # the program's answer (the WS path streams those live instead).
-        return _strip_progress(out)
+        error surfaces here and is NEVER fed upstream.
+
+        STREAMS progress to the terminal: this used to block in `sandbox.run` and
+        print nothing until the child exited — a long `mill run`/`mill ask` (a
+        batch classification over a big vault) looked hung for minutes. It now
+        drives the SAME non-blocking poll machinery the WS server uses
+        (run_start/poll/reap/finish) and logs each `progress(...)` line the
+        program emits as it happens. Stat/local/result sentinels stay internal;
+        the returned reply is unchanged (full capture minus sentinel lines)."""
+        var h = self.vault_run_start(vault_dir)
+        var running = True
+        while running:
+            # Reap FIRST, then poll — the final poll after exit still drains
+            # every progress line written just before the child finished.
+            running = self.vault_run_reap(h) == -1
+            var lines = self.vault_run_poll(h)
+            for i in range(len(lines)):
+                var ln = lines[i].copy()
+                if ln.startswith(PROGRESS_SENTINEL):
+                    log("  … " + String(ln.removeprefix(PROGRESS_SENTINEL)))
+            if running:
+                _ = external_call["usleep", Int32](UInt32(150_000))  # 150 ms
+        return self.vault_run_finish(h)
 
     # ── streaming run (steps 4a–4d) ──────────────────────────────────────────────
     # The blocking `vault_run` above stays for the CLI / run_vault_task. The WS
