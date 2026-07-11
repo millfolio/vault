@@ -175,6 +175,37 @@
       active = d?.active ?? active;
     } catch {}
   }
+  // ── model-assisted edit: the instruction goes to the frontier via the
+  // server (privacy-box transport); the reply is linted by the same validator
+  // as a hand edit before it becomes a version. Errors surface verbatim.
+  let assistDraft = $state("");
+  let assistBusy = $state(false);
+  let assistNote = $state("");
+  async function assist() {
+    const instruction = assistDraft.trim();
+    if (!instruction || assistBusy) return;
+    assistBusy = true;
+    assistNote = "";
+    try {
+      const r = await fetch("/api/millwright/assist", {
+        method: "POST",
+        body: JSON.stringify({ instruction }),
+      });
+      const d = await r.json();
+      if (!r.ok || d?.error) {
+        assistNote = d?.error ?? `HTTP ${r.status}`;
+      } else {
+        assistNote = d?.message ? `✓ ${d.message}` : "✓ done";
+        assistDraft = "";
+        await load();
+      }
+    } catch (e) {
+      assistNote = String(e);
+    } finally {
+      assistBusy = false;
+    }
+  }
+
   async function revertTo(hash: string) {
     await fetch("/api/millwright/revert", {
       method: "POST",
@@ -195,6 +226,23 @@
       {/if}
     </div>
   </div>
+
+  {#if !demo && ordered.length > 0}
+    <div class="assist">
+      <input
+        class="assist-in"
+        type="text"
+        placeholder="Change the board… (e.g. “three columns, groceries first”)"
+        bind:value={assistDraft}
+        disabled={assistBusy}
+        onkeydown={(e) => e.key === "Enter" && assist()}
+      />
+      <button type="button" class="chrome-btn" disabled={assistBusy || !assistDraft.trim()} onclick={assist}>
+        {assistBusy ? "editing…" : "edit with AI"}
+      </button>
+      {#if assistNote}<span class="assist-note" class:err={!assistNote.startsWith("✓")}>{assistNote}</span>{/if}
+    </div>
+  {/if}
 
   {#if loadError}
     <p class="board-err">Couldn't load the board: {loadError}</p>
@@ -308,6 +356,29 @@
   }
   .chrome-btn.on {
     background: color-mix(in srgb, currentColor 12%, transparent);
+  }
+  .assist {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin-bottom: 0.8rem;
+  }
+  .assist-in {
+    flex: 1;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.55rem;
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 0.45rem;
+    background: transparent;
+    color: inherit;
+  }
+  .assist-note {
+    font-size: 0.78rem;
+    opacity: 0.75;
+  }
+  .assist-note.err {
+    color: #c0392b;
   }
   .board-empty,
   .pending {

@@ -40,6 +40,10 @@ from json import loads, Value
 
 from osutil import _is_demo, _epoch_s
 from httputil import unauthorized, _cors
+from settings import load_config
+from wiring import build_vault_orchestrator
+from vaultcfg import vault_dir as resolve_vault_dir
+from auth import _apply_persisted_apikey
 from events import json_escape
 from record_builders import history_records_array, millwright_version_line
 from vault.storage import (
@@ -569,6 +573,115 @@ def handle_millwright_program(req: Request) raises -> Response:
             + json_escape(id)
             + ',"program":'
             + json_escape(program)
+            + "}"
+        )
+    )
+
+
+# ── model-assisted spec edit (v1 slice 3) ────────────────────────────────────
+
+
+def _widget_catalog() raises -> String:
+    """The catalog the view-editing model sees: per widget its id, title, the
+    original question, and the SHAPES of its cached result (block kinds only —
+    "kpi"/"table"/"series"/"map"/"pie"). Names and shapes, never values — the
+    same alias boundary the manifest keeps for programs."""
+    var docs = default_millwright_docs_store()
+    var out = String("[")
+    var first = True
+    var spec = loads(_active_spec_text())
+    var widgets = spec["widgets"].array_items()
+    for i in range(len(widgets)):
+        ref w = widgets[i]
+        if not _has(w, "id") or not w["id"].is_string():
+            continue
+        var id = w["id"].string_value()
+        var entry = String("{")
+        entry += '"id":' + json_escape(id)
+        if _has(w, "title") and w["title"].is_string():
+            entry += ',"title":' + json_escape(w["title"].string_value())
+        if _has(w, "q") and w["q"].is_string():
+            entry += ',"q":' + json_escape(w["q"].string_value())
+        entry += ',"shapes":['
+        try:
+            var snap = loads(docs.load(_result_doc(id)))
+            if _has(snap, "result") and _has(snap["result"], "data"):
+                var blocks = snap["result"]["data"].array_items()
+                for b in range(len(blocks)):
+                    if (
+                        _has(blocks[b], "kind")
+                        and blocks[b]["kind"].is_string()
+                    ):
+                        if b > 0:
+                            entry += ","
+                        entry += json_escape(blocks[b]["kind"].string_value())
+        except:
+            pass  # no snapshot yet — an empty shape list is honest
+        entry += "]}"
+        if not first:
+            out += ","
+        out += entry
+        first = False
+    out += "]"
+    return out^
+
+
+def handle_millwright_assist(req: Request) raises -> Response:
+    """POST /api/millwright/assist {"instruction"} → the model edits the spec.
+    The call rides privacy-box's transport (the app's ONLY Anthropic egress:
+    EgressGuard, budget, codegen disk cache, prompt caching) with the viewgen
+    system prompt. The reply is validated by the SAME lint as a hand edit before
+    it becomes a version — the model can propose, only `_accept_spec` disposes.
+    """
+    if _is_demo():
+        return _cors(
+            unauthorized('{"error":"the demo dashboard is read-only"}')
+        )
+    var instruction: String
+    try:
+        instruction = String(loads(req.text())["instruction"].string_value())
+    except:
+        return _cors(bad_request('{"error":"expected {instruction}"}'))
+    if instruction.strip().byte_length() == 0:
+        return _cors(bad_request('{"error":"empty instruction"}'))
+    var spec_text = _active_spec_text()
+    var reply: String
+    try:
+        var cfg = load_config()
+        _apply_persisted_apikey(cfg)
+        var orch = build_vault_orchestrator(cfg, resolve_vault_dir())
+        reply = orch.viewgen_edit(instruction, spec_text, _widget_catalog())
+    except e:
+        return _cors(bad_request('{"error":' + json_escape(String(e)) + "}"))
+    var new_spec: String
+    var message = String("model edit")
+    try:
+        var v = loads(reply)
+        new_spec = v["spec"].raw_json()
+        if _has(v, "message") and v["message"].is_string():
+            var m = v["message"].string_value()
+            if m.byte_length() > 0:
+                message = m^
+    except:
+        return _cors(
+            bad_request(
+                '{"error":"the model did not return a valid spec edit — try'
+                ' rephrasing"}'
+            )
+        )
+    var hash: String
+    try:
+        hash = _accept_spec(new_spec, message, "model")
+    except e2:
+        # The lint rejected the model's spec — surface WHY (the UI shows it and
+        # the user can rephrase); nothing was committed.
+        return _cors(bad_request('{"error":' + json_escape(String(e2)) + "}"))
+    return _cors(
+        ok_json(
+            '{"ok":true,"hash":'
+            + json_escape(hash)
+            + ',"message":'
+            + json_escape(message)
             + "}"
         )
     )

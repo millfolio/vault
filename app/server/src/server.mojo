@@ -219,6 +219,8 @@ struct Api(Copyable, Handler, Movable):
             return handlers_millwright.handle_millwright_pin(req)
         if req.method == Method.POST and path == "/api/millwright/result":
             return handlers_millwright.handle_millwright_result(req)
+        if req.method == Method.POST and path == "/api/millwright/assist":
+            return handlers_millwright.handle_millwright_assist(req)
         # Category tags: the panel's list (names + keywords + per-tag counts) and
         # the editable registry file. All in-process via vault.derive.store.
         if path == "/api/tags":
