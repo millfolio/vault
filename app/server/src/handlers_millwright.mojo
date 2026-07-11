@@ -46,12 +46,21 @@ from vaultcfg import vault_dir as resolve_vault_dir
 from auth import _apply_persisted_apikey
 from events import json_escape
 from record_builders import history_records_array, millwright_version_line
+from millwright_seed import (
+    SEED_AUTHOR,
+    SEED_MESSAGE,
+    SEED_SPEC,
+    seed_widget_ids,
+    seed_programs,
+    seed_results,
+)
 from vault.storage import (
     default_millwright_versions_store,
     default_millwright_docs_store,
     default_kv_store,
     default_asks_store,
     millwright_dir,
+    millwright_log_path,
     KV_MILLWRIGHT_ACTIVE,
 )
 
@@ -338,10 +347,45 @@ def _slug_title(q: String) -> String:
 # ── HTTP handlers ────────────────────────────────────────────────────────────
 
 
+def _seed_if_empty():
+    """First run only: materialize the CURATED STARTER BOARD (millwright_seed) as
+    version 1 — programs + preview-flagged results first (the lint requires the
+    program docs), then the seed spec through the ordinary _accept_spec path.
+    Idempotent and deliberately conservative: it runs ONLY when NO version chain
+    exists at all — an emptied board stays empty (deletions are respected). Any
+    failure is swallowed: a seeding hiccup must never take down GET /api/millwright
+    (the board just starts blank, as v1 did)."""
+    try:
+        if exists(millwright_log_path()):
+            return
+        if default_kv_store().exists(KV_MILLWRIGHT_ACTIVE):
+            return
+        try:
+            makedirs(millwright_dir())
+        except:
+            pass  # already exists
+        var docs = default_millwright_docs_store()
+        var ids = seed_widget_ids()
+        var programs = seed_programs()
+        var previews = seed_results()
+        for i in range(len(ids)):
+            docs.save(_program_doc(ids[i]), programs[i])
+            docs.save(
+                _result_doc(ids[i]),
+                '{"ts":0,"preview":true,"result":' + previews[i] + "}",
+            )
+        _ = _accept_spec(
+            String(SEED_SPEC), String(SEED_MESSAGE), String(SEED_AUTHOR)
+        )
+    except:
+        pass  # never let seeding break the board
+
+
 def handle_millwright() raises -> Response:
     """GET /api/millwright → {"active","spec","results":{id:{ts,result}}} —
     everything the dashboard tab needs in one call. Widgets whose cached result
     is missing/torn simply have no entry (the tile renders as pending)."""
+    _seed_if_empty()  # first run → the curated starter board (v2 §1)
     var spec_text = _active_spec_text()
     var out = String("{")
     out += '"active":' + json_escape(_active_hash())

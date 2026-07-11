@@ -17,7 +17,7 @@
     widgets: Widget[];
     layout?: { cols?: number; order?: string[] };
   };
-  type Snapshot = { ts: number; result: ResultSpec };
+  type Snapshot = { ts: number; result: ResultSpec; preview?: boolean };
   type Version = { hash: string; parent: string; ts: number; author: string; message: string };
 
   let spec = $state<Spec | null>(null);
@@ -66,6 +66,7 @@
   const cols = $derived(Math.min(Math.max(spec?.layout?.cols ?? 2, 1), 6));
 
   function asOf(id: string): string {
+    if (results[id]?.preview) return "example data — ↻ to run on your vault";
     const ts = results[id]?.ts;
     if (!ts) return "not run yet";
     const d = new Date(ts * 1000);
@@ -256,7 +257,7 @@
       {#each ordered as w (w.id)}
         <section class="tile" style={`grid-column: span ${Math.min(w.w ?? 1, cols)}`}>
           <header class="tile-head">
-            <h3 title={w.q ?? w.title}>{w.title}</h3>
+            <h3 title={w.q ?? w.title}>{w.title}{#if results[w.id]?.preview}<span class="preview-badge">example</span>{/if}</h3>
             <div class="tile-tools">
               <span class="stamp">{asOf(w.id)}</span>
               {#if !demo}
@@ -419,6 +420,17 @@
     align-items: center;
     gap: 0.35rem;
     flex: none;
+  }
+  .preview-badge {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.55;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-radius: 0.3rem;
+    padding: 0 0.3rem;
+    margin-left: 0.4rem;
+    vertical-align: middle;
   }
   .stamp {
     font-size: 0.72rem;
