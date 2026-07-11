@@ -7,6 +7,7 @@
   import OperationsView from "$lib/components/OperationsView.svelte";
   import DisclaimerNotice from "$lib/components/DisclaimerNotice.svelte";
   import { createMockClient } from "$lib/client";
+  import MillwrightPanel from "$lib/components/MillwrightPanel.svelte";
   import { createWsClient } from "$lib/wsClient";
   import { fmtEta, shortId } from "$lib/format";
   import type { ServerEvent, Session, MillfolioClient, StepState, ResultSpec } from "$lib/protocol";
@@ -89,18 +90,20 @@
   // → the Operations sub-tab (the old System info now lives under Operations/Logs).
   // The public demo is the exception — it has no Operations tab, so "/stats" there
   // still opens the standalone StatsPanel top-level.
-  const view = $derived<"chat" | "vault" | "stats" | "operations" | "tags">(
+  const view = $derived<"chat" | "vault" | "stats" | "operations" | "tags" | "board">(
     page.params.tab === "vault"
       ? "vault"
       : page.params.tab === "tags"
         ? "tags"
-        : page.params.tab === "operations" || page.params.tab === "system"
-          ? "operations"
-          : page.params.tab === "stats"
-            ? isDemo
-              ? "stats"
-              : "operations"
-            : "chat",
+        : page.params.tab === "board"
+          ? "board"
+          : page.params.tab === "operations" || page.params.tab === "system"
+            ? "operations"
+            : page.params.tab === "stats"
+              ? isDemo
+                ? "stats"
+                : "operations"
+              : "chat",
   );
   // Which Operations sub-tab a URL lands on: "/stats" → stats, everything else
   // (/operations, /system) → the main Operations sub-tab. Used to re-key OperationsView
@@ -768,6 +771,10 @@
   <header class="topbar">
     <nav class="tabs">
       <a class:active={view === "chat"} href="/">Chat</a>
+      {#if !isDemo}
+        <!-- Millwright: the pinned-answers board (hidden in the demo — read-only there). -->
+        <a class:active={view === "board"} href="/board">Board</a>
+      {/if}
       <a class:active={view === "vault" || view === "tags"} href="/vault">Vault</a>
       {#if isDemo}
         <!-- The public demo has no Operations tab, so Stats stays top-level. -->
@@ -850,6 +857,9 @@
   <div class="single">
     {#if view === "chat"}
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />
+    {:else if view === "board"}
+      <!-- Millwright: the versioned dashboard of pinned answers (trusted chrome). -->
+      <MillwrightPanel {client} demo={isDemo} />
     {:else if view === "vault"}
       <VaultPanel demo={isDemo} initialSub="records" />
     {:else if view === "tags"}
