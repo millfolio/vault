@@ -66,6 +66,7 @@ import handlers_tags
 import handlers_models
 import handlers_demo
 import handlers_operations
+import handlers_millwright
 
 # The extracted free-helper modules (Phase-1 slice A). `osutil` is the BASE
 # (stdlib-only) layer the others build on — no import cycle. See each module's
@@ -202,6 +203,22 @@ struct Api(Copyable, Handler, Movable):
             return handlers_system.handle_history()
         if path == "/api/system":
             return handlers_system.handle_system()
+        # Millwright — the versioned, user-owned dashboard (spec + version chain
+        # + widget snapshots). See handlers_millwright / designs/MILLWRIGHT.md.
+        if path == "/api/millwright":
+            return handlers_millwright.handle_millwright()
+        if path == "/api/millwright/versions":
+            return handlers_millwright.handle_millwright_versions()
+        if path.find("/api/millwright/program") == 0:
+            return handlers_millwright.handle_millwright_program(req)
+        if req.method == Method.POST and path == "/api/millwright/spec":
+            return handlers_millwright.handle_millwright_spec(req)
+        if req.method == Method.POST and path == "/api/millwright/revert":
+            return handlers_millwright.handle_millwright_revert(req)
+        if req.method == Method.POST and path == "/api/millwright/pin":
+            return handlers_millwright.handle_millwright_pin(req)
+        if req.method == Method.POST and path == "/api/millwright/result":
+            return handlers_millwright.handle_millwright_result(req)
         # Category tags: the panel's list (names + keywords + per-tag counts) and
         # the editable registry file. All in-process via vault.derive.store.
         if path == "/api/tags":

@@ -186,6 +186,30 @@ def delete_ask_records(raw: String, q: String) raises -> String:
     return out^
 
 
+def millwright_version_line(
+    hash: String,
+    parent: String,
+    ts: Int64,
+    author: String,
+    message: String,
+    spec_json: String,
+) -> String:
+    """ONE self-contained JSON record (no trailing newline) for the Millwright
+    version chain (`millwright.jsonl`): an immutable, content-addressed dashboard-
+    spec version. `spec_json` is embedded RAW — it is validated JSON by the time a
+    version is built (`validate_spec` gates `_accept_spec`); everything else is
+    escaped. The writer appends the `\\n` that makes the file JSONL."""
+    var line = String("{")
+    line += '"hash":' + json_escape(hash)
+    line += ',"parent":' + json_escape(parent)
+    line += ',"ts":' + String(ts)
+    line += ',"author":' + json_escape(author)
+    line += ',"message":' + json_escape(message)
+    line += ',"spec":' + spec_json
+    line += "}"
+    return line
+
+
 def system_json(
     home: String,
     version: String,
