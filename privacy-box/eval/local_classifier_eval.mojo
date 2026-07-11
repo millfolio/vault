@@ -24,10 +24,10 @@ work so a huge vault still finishes in minutes.
 from vault import *
 from std.time import perf_counter_ns
 
-comptime TRUTH_TAG = "phone"
+comptime TRUTH_TAG = "groceries"
 comptime QUESTION = (
-    "Is this a mobile phone carrier bill (cell phone service such as Verizon,"
-    " AT&T, T-Mobile)? Answer only yes or no."
+    "Is this a grocery store or supermarket purchase (food shopping — NOT"
+    " dining out, restaurants, or coffee shops)? Answer only yes or no."
 )
 comptime MAX_DISTINCT = 400  # cap on model work; stride-sampled above this
 comptime TIME_BUDGET_S = 120  # stop classifying after ~this long (0 = no cap);
