@@ -24,6 +24,11 @@ work so a huge vault still finishes in minutes.
 from vault import *
 from std.time import perf_counter_ns
 
+# Loopback-only (the sandbox allows 127.0.0.1): ask the ENGINE which chat model
+# is actually serving — provenance for the numbers, and the fastest way to spot
+# "wrong model selected" when the answer mix comes back broken.
+from flare.http import HttpClient, Request
+
 comptime TRUTH_TAG = "groceries"
 # Phrased to COOPERATE with the ask_local_batch wrapper (which tells the model
 # "use 'none' when it does not apply"): an answer-only-yes-or-no question made
@@ -54,6 +59,26 @@ def _is_yes(a: String) raises -> Bool:
     var c1 = Int(b[1]) | 32
     var c2 = Int(b[2]) | 32
     return c0 == 121 and c1 == 101 and c2 == 115  # 'y' 'e' 's'
+
+
+def _engine_model() -> String:
+    """The chat model the local engine reports on /v1/version ("unknown" when
+    the probe fails). Aggregate-safe — a model name, never data."""
+    try:
+        var req = Request(method="GET", url="http://127.0.0.1:8000/v1/version")
+        var client = HttpClient()
+        var resp = client.send(req)
+        var t = resp.text()
+        var r = t.find('"model":"')
+        if r == -1:
+            return String("unknown")
+        var rest = String(t[byte = r + 9 :])
+        var q = rest.find('"')
+        if q <= 0:
+            return String("unknown")
+        return String(rest[byte=:q])
+    except:
+        return String("unknown")
 
 
 def _lower_prefix(s: String, n: Int) raises -> String:
@@ -268,6 +293,7 @@ def main() raises:
     )
 
     var out = String("On-device classifier eval — aggregates only.\n")
+    out += "Model: " + _engine_model() + "\n"
     out += (
         'Question: "'
         + String(QUESTION)
