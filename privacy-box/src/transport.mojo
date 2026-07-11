@@ -151,6 +151,23 @@ def _prompt_path() raises -> String:
     return resource_path(String("resources/privacy_box-system.md"))
 
 
+def _viewgen_system() raises -> String:
+    """System prompt for the Millwright VIEW-plane editor (dashboard-spec edits).
+    Loaded from `resources/millwright-viewgen-system.md` (PRIVACY_BOX_VIEWGEN_PROMPT
+    overrides; resolved by ABSOLUTE path like the codegen prompt, never cwd).
+    Same fail-loud contract as `_codegen_system`."""
+    var override = getenv("PRIVACY_BOX_VIEWGEN_PROMPT", "")
+    var path = override if override != "" else resource_path(
+        String("resources/millwright-viewgen-system.md")
+    )
+    var text: String
+    with open(path, "r") as f:
+        text = f.read()
+    if String(text.strip()).byte_length() == 0:
+        raise Error("viewgen system prompt is empty: " + path)
+    return text^
+
+
 def _codegen_system() raises -> String:
     """System prompt for the frontier code generator. Loaded at runtime from
     `resources/privacy_box-system.md` (resolved by ABSOLUTE path — PRIVACY_BOX_HOME /
@@ -319,8 +336,25 @@ struct RemoteClient(Movable):
             return Generated(code.copy(), 0)
         return self._anthropic(checked)
 
+    def viewgen(self, user_msg: String) raises -> Generated:
+        """Millwright view-plane edit: same egress guard + Anthropic path as
+        codegen, but with the VIEWGEN system prompt. The prompt carries only the
+        dashboard spec + the widget CATALOG (names/shapes) + the instruction —
+        never vault values (the same alias boundary as the manifest). No mock:
+        an offline/no-key install can't edit specs with a model, so fail loud.
+        """
+        var checked = self.guard.check(user_msg)  # raises -> aborts send
+        if self.mock or self.api_key == "":
+            raise Error(
+                "model-assisted board edits need the frontier model — add your"
+                " Anthropic API key in Settings"
+            )
+        return self._anthropic_sys(checked, _viewgen_system())
+
     def _anthropic(self, prompt: String) raises -> Generated:
-        var sys = _codegen_system()
+        return self._anthropic_sys(prompt, _codegen_system())
+
+    def _anthropic_sys(self, prompt: String, sys: String) raises -> Generated:
         # 8192 (was 2048): a fuller program — search + per-chunk ask_local loop with
         # progress(), parse_amount/iso_date, both branches — plus any reasoning the
         # model emits can exceed 2048 and get cut mid-line, which then never compiles
