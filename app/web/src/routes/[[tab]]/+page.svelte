@@ -771,10 +771,9 @@
   <header class="topbar">
     <nav class="tabs">
       <a class:active={view === "chat"} href="/">Chat</a>
-      {#if !isDemo}
-        <!-- Millwright: the pinned-answers board (hidden in the demo — read-only there). -->
-        <a class:active={view === "board"} href="/board">Board</a>
-      {/if}
+      <!-- Millwright: the pinned-answers board. In the demo it's a read-only
+           showcase (every write is rejected server-side; the chrome hides them). -->
+      <a class:active={view === "board"} href="/board">Board</a>
       <a class:active={view === "vault" || view === "tags"} href="/vault">Vault</a>
       {#if isDemo}
         <!-- The public demo has no Operations tab, so Stats stays top-level. -->

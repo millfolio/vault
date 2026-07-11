@@ -249,8 +249,12 @@
     <p class="board-err">Couldn't load the board: {loadError}</p>
   {:else if ordered.length === 0}
     <p class="board-empty">
-      Nothing pinned yet. Ask a question in <a href="/">Chat</a> — answers with a
-      chart or table get a <strong>Pin</strong> button that adds them here.
+      {#if demo}
+        Nothing here yet — the demo board is read-only.
+      {:else}
+        Nothing pinned yet. Ask a question in <a href="/">Chat</a> — answers with a
+        chart or table get a <strong>Pin</strong> button that adds them here.
+      {/if}
     </p>
   {:else}
     <div class="grid" style={`grid-template-columns: repeat(${cols}, minmax(0, 1fr))`}>
