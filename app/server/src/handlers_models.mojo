@@ -250,6 +250,13 @@ def _catalog() -> List[List[String]]:
     )
     out.append(
         [
+            String("mlx-community/gemma-4-e4b-it-bf16"),
+            String("Gemma-4 E4B"),
+            String("10"),
+        ]
+    )
+    out.append(
+        [
             String("mlx-community/gemma-4-12b-it-bf16"),
             String("Gemma-4 12B"),
             String("24"),
