@@ -25,14 +25,19 @@ from vault import *
 from std.time import perf_counter_ns
 
 comptime TRUTH_TAG = "groceries"
+# Phrased to COOPERATE with the ask_local_batch wrapper (which tells the model
+# "use 'none' when it does not apply"): an answer-only-yes-or-no question made
+# the model flood 'none'/free-text (0 yes AND 0 no in a real run). Spell out
+# both branches and forbid the escape hatch.
 comptime QUESTION = (
-    "Is this a grocery store or supermarket purchase (food shopping — NOT"
-    " dining out, restaurants, or coffee shops)? Answer only yes or no."
+    "For each snippet: answer 'yes' if it is a grocery store or supermarket"
+    " purchase (food shopping), answer 'no' for everything else (dining out,"
+    " restaurants, coffee shops, and any non-grocery charge). Every answer"
+    " must be exactly 'yes' or 'no' — never 'none', never anything else."
 )
 comptime MAX_DISTINCT = 400  # cap on model work; stride-sampled above this
-comptime TIME_BUDGET_S = 120  # stop classifying after ~this long (0 = no cap);
-# metrics are computed over whatever was classified — a couple of minutes is
-# plenty to characterize both quality and throughput.
+comptime TIME_BUDGET_S = 300  # stop classifying after ~this long (0 = no cap);
+# metrics are computed over whatever was classified.
 comptime CHUNK = 10  # distinct descriptions per ask_local_batch call — one
 # engine call per chunk, so the between-chunk time check bounds the budget
 # overshoot to a single model call (~20s at observed rates)
@@ -121,26 +126,58 @@ def main() raises:
         return
 
     # Distinct descriptions, first-seen order (the backfiller's dedup): classify
-    # each description once, fan the verdict out to every row sharing it.
+    # each description once, fan the verdict out to every row sharing it. Record
+    # per-distinct truth (keyword tags are desc-deterministic, so the first row
+    # seen carries the answer) for the balanced sample below.
     var seen = Dict[String, Int]()  # desc -> index into `distinct`
     var distinct = List[String]()
+    var truth_by_id = List[Bool]()
     for i in range(len(rows)):
         if rows[i].desc not in seen:
             seen[rows[i].desc.copy()] = len(distinct)
             distinct.append(rows[i].desc.copy())
+            var is_pos = False
+            for t in range(len(rows[i].tags)):
+                if rows[i].tags[t] == String(TRUTH_TAG):
+                    is_pos = True
+                    break
+            truth_by_id.append(is_pos)
 
-    # Stride-sample the distinct list when it exceeds the cap (deterministic,
-    # so re-runs are comparable).
-    var stride = 1
-    if len(distinct) > MAX_DISTINCT:
-        stride = (len(distinct) + MAX_DISTINCT - 1) // MAX_DISTINCT
+    # BALANCED sample: interleave tag-positive and tag-negative distinct
+    # descriptions (first-seen order within each side), capped at MAX_DISTINCT.
+    # Interleaving means a time-budget cutoff keeps the ~50/50 mix — a natural
+    # low-base-rate vault no longer yields a sample with almost no positives.
+    # When one side runs out, the rest fills from the other (reported below).
+    var pos_ids = List[Int]()
+    var neg_ids = List[Int]()
+    for did in range(len(distinct)):
+        if truth_by_id[did]:
+            pos_ids.append(did)
+        else:
+            neg_ids.append(did)
     var sampled = List[String]()
     var sampled_ids = List[Int]()
-    var k = 0
-    while k < len(distinct):
-        sampled.append(distinct[k].copy())
-        sampled_ids.append(k)
-        k += stride
+    var pi = 0
+    var ni = 0
+    while len(sampled_ids) < MAX_DISTINCT and (
+        pi < len(pos_ids) or ni < len(neg_ids)
+    ):
+        if pi < len(pos_ids):
+            sampled_ids.append(pos_ids[pi])
+            sampled.append(distinct[pos_ids[pi]].copy())
+            pi += 1
+        if len(sampled_ids) >= MAX_DISTINCT:
+            break
+        if ni < len(neg_ids):
+            sampled_ids.append(neg_ids[ni])
+            sampled.append(distinct[neg_ids[ni]].copy())
+            ni += 1
+    if len(pos_ids) == 0:
+        progress(
+            "note: no '"
+            + String(TRUTH_TAG)
+            + "'-tagged rows — the sample is negatives only"
+        )
 
     progress(
         "classifying up to "
@@ -247,13 +284,22 @@ def main() raises:
         + _x10(len(rows), len(distinct))
         + "x dedup)"
     )
-    if stride > 1 or len(answers) < len(sampled):
-        out += "; classified " + String(len(answers))
-        if stride > 1:
-            out += " (every " + String(stride) + "th)"
-        if len(answers) < len(sampled):
-            out += " — time-boxed at " + String(TIME_BUDGET_S) + "s"
-        out += " covering " + String(covered) + " rows"
+    var cls_pos = 0
+    for j in range(len(answers)):
+        if truth_by_id[sampled_ids[j]]:
+            cls_pos += 1
+    out += (
+        "; classified "
+        + String(len(answers))
+        + " (balanced: "
+        + String(cls_pos)
+        + " tagged + "
+        + String(len(answers) - cls_pos)
+        + " untagged)"
+    )
+    if len(answers) < len(sampled):
+        out += " — time-boxed at " + String(TIME_BUDGET_S) + "s"
+    out += " covering " + String(covered) + " rows"
     out += "\n\nML (row-level, model vs keyword rule):\n"
     out += (
         "  agreement "
@@ -281,7 +327,8 @@ def main() raises:
     )
     out += (
         "  (keyword tags are imperfect truth — a disagreement is model-vs-rule,"
-        " not a certified model error)\n"
+        " not a certified model error; the sample is BALANCED, so base rate +"
+        " agreement reflect the sample, not the vault)\n"
     )
     # The raw answer mix — the diagnostic that separates "the model said no to
     # everything" (mostly `no`) from "the batch protocol failed / the model took
