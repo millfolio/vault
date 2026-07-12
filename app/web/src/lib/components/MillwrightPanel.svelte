@@ -18,14 +18,14 @@
 
   let { client, demo = false }: { client: MillfolioClient; demo?: boolean } = $props();
 
-  type Widget = { id: string; title: string; q?: string; w?: number; h?: number };
+  type Widget = { id: string; title: string; q?: string; w?: number; h?: number; program?: string };
   type Spec = {
     v: number;
     kind: string;
     widgets: Widget[];
     layout?: { cols?: number; order?: string[] };
   };
-  type Snapshot = { ts: number; result: ResultSpec; preview?: boolean };
+  type Snapshot = { ts: number; result: ResultSpec; preview?: boolean; program?: string };
   type Version = { hash: string; parent: string; ts: number; author: string; message: string };
 
   let spec = $state<Spec | null>(null);
@@ -227,6 +227,98 @@
       active = d?.active ?? active;
     } catch {}
   }
+  // ── inline per-tile editor (title + span; program on real installs) ──
+  let editId = $state("");
+  let editTitle = $state("");
+  let editW = $state(1);
+  let editH = $state(1);
+  let editCode = $state("");
+  let editCodeLoaded = $state(false);
+  let editCodeDirty = $state(false);
+  let editErr = $state("");
+  let editBusy = $state(false);
+
+  function openEdit(w: Widget) {
+    editId = w.id;
+    editTitle = w.title;
+    editW = w.w ?? 1;
+    editH = w.h ?? 1;
+    editCode = "";
+    editCodeLoaded = false;
+    editCodeDirty = false;
+    editErr = "";
+  }
+  async function loadEditCode() {
+    if (editCodeLoaded || demo) return;
+    try {
+      const r = await fetch(`/api/millwright/program?id=${encodeURIComponent(editId)}`);
+      const d = await r.json();
+      if (r.ok && d?.program) {
+        editCode = d.program;
+        editCodeLoaded = true;
+      } else {
+        editErr = d?.error ?? "couldn't load the program";
+      }
+    } catch (e) {
+      editErr = String(e);
+    }
+  }
+  function specWithTileEdits(): Spec | null {
+    if (!spec) return null;
+    return {
+      ...spec,
+      widgets: spec.widgets.map((x) =>
+        x.id === editId
+          ? { ...x, title: editTitle.trim() || x.title, w: editW, h: editH }
+          : x,
+      ),
+    };
+  }
+  async function saveEdit(andRun = false) {
+    if (!spec || editBusy) return;
+    editBusy = true;
+    editErr = "";
+    try {
+      const before = spec.widgets.find((x) => x.id === editId);
+      const dims =
+        !!before &&
+        (before.title !== editTitle.trim() || (before.w ?? 1) !== editW || (before.h ?? 1) !== editH);
+      // 1. the view-plane part (title/span) — a spec version
+      if (dims) {
+        const next = specWithTileEdits();
+        const msg = `edited "${editTitle.trim() || before!.title}"`;
+        if (demo && demoStore) {
+          applyDemo(demoAccept(demoStore, JSON.stringify(next), msg, "you"));
+        } else {
+          const r = await fetch("/api/millwright/spec", {
+            method: "POST",
+            body: JSON.stringify({ spec: next, message: msg }),
+          });
+          const d = await r.json();
+          if (!r.ok || d?.error) throw new Error(d?.error ?? `HTTP ${r.status}`);
+        }
+      }
+      // 2. the data-plane part (the program) — content-addressed snapshot +
+      //    rebinding version; server-only (the demo can't run programs anyway)
+      if (!demo && editCodeDirty && editCode.trim()) {
+        const r = await fetch("/api/millwright/program", {
+          method: "POST",
+          body: JSON.stringify({ id: editId, code: editCode }),
+        });
+        const d = await r.json();
+        if (!r.ok || d?.error) throw new Error(d?.error ?? `HTTP ${r.status}`);
+      }
+      const ranId = editId;
+      editId = "";
+      await load();
+      if (andRun && !demo) await refresh(ranId);
+    } catch (e) {
+      editErr = e instanceof Error ? e.message : String(e);
+    } finally {
+      editBusy = false;
+    }
+  }
+
   // Demo only: drop every local edit, back to the server's board.
   async function resetDemo() {
     resetDemoBoard();
@@ -328,13 +420,41 @@
           <header class="tile-head">
             <h3 title={w.q ?? w.title}>{w.title}{#if results[w.id]?.preview}<span class="preview-badge">example</span>{/if}</h3>
             <div class="tile-tools">
+              {#if w.program && results[w.id]?.program && results[w.id].program !== w.program}
+                <span class="stale-badge" title="The program was edited after this result was computed — ↻ to recompute">program changed</span>
+              {/if}
               <span class="stamp">{asOf(w.id)}</span>
+              <button type="button" class="tool" title="Edit this widget — title, size{demo ? '' : ', and its program'}" onclick={() => (editId === w.id ? (editId = "") : openEdit(w))}>✎</button>
               {#if !demo}
                 <button type="button" class="tool" disabled={refreshing[w.id]} title="Re-run this widget's saved program over your current vault — no model call" onclick={() => refresh(w.id)}>{refreshing[w.id] ? "…" : "↻"}</button>
               {/if}
               <button type="button" class="tool" title="Remove from the board (the version history keeps it)" onclick={() => removeWidget(w)}>×</button>
             </div>
           </header>
+          {#if editId === w.id}
+            <div class="tile-edit">
+              <div class="te-row">
+                <label class="te-lab">title <input class="te-in" type="text" bind:value={editTitle} /></label>
+                <label class="te-lab">w <input class="te-num" type="number" min="1" max="6" bind:value={editW} /></label>
+                <label class="te-lab">h <input class="te-num" type="number" min="1" max="6" bind:value={editH} /></label>
+              </div>
+              {#if !demo}
+                <details class="te-code" ontoggle={(e) => (e.currentTarget as HTMLDetailsElement).open && loadEditCode()}>
+                  <summary>program{editCodeDirty ? " (edited)" : ""}</summary>
+                  <p class="te-hint">The saved Mojo program this tile runs. Edits become a new snapshot on the version chain (revert undoes them); “save &amp; run” recomputes — compile errors stream back like any run.</p>
+                  <textarea class="te-src" rows={14} spellcheck="false" bind:value={editCode} oninput={() => (editCodeDirty = true)} disabled={!editCodeLoaded}></textarea>
+                </details>
+              {/if}
+              {#if editErr}<p class="board-err">{editErr}</p>{/if}
+              <div class="te-actions">
+                <button type="button" class="chrome-btn" disabled={editBusy} onclick={() => saveEdit(false)}>save</button>
+                {#if !demo}
+                  <button type="button" class="chrome-btn" disabled={editBusy} onclick={() => saveEdit(true)}>save &amp; run</button>
+                {/if}
+                <button type="button" class="chrome-btn" disabled={editBusy} onclick={() => (editId = "")}>cancel</button>
+              </div>
+            </div>
+          {/if}
           <svelte:boundary>
             {#if results[w.id]?.result}
               <ResultView result={results[w.id].result} />
@@ -505,6 +625,82 @@
     padding: 0 0.3rem;
     margin-left: 0.4rem;
     vertical-align: middle;
+  }
+  .stale-badge {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #b8860b;
+    border: 1px solid color-mix(in srgb, #b8860b 45%, transparent);
+    border-radius: 0.3rem;
+    padding: 0 0.3rem;
+  }
+  .tile-edit {
+    border-top: 1px dashed color-mix(in srgb, currentColor 15%, transparent);
+    margin: 0.4rem 0 0.5rem;
+    padding-top: 0.5rem;
+  }
+  .te-row {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .te-lab {
+    font-size: 0.75rem;
+    opacity: 0.8;
+    display: inline-flex;
+    gap: 0.3rem;
+    align-items: center;
+  }
+  .te-in {
+    font: inherit;
+    font-size: 0.82rem;
+    padding: 0.15rem 0.4rem;
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    min-width: 12rem;
+  }
+  .te-num {
+    width: 3rem;
+    font: inherit;
+    font-size: 0.82rem;
+    padding: 0.15rem 0.3rem;
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+  }
+  .te-code {
+    margin-top: 0.4rem;
+    font-size: 0.78rem;
+  }
+  .te-code summary {
+    cursor: pointer;
+    opacity: 0.75;
+  }
+  .te-hint {
+    font-size: 0.72rem;
+    opacity: 0.6;
+    margin: 0.25rem 0;
+  }
+  .te-src {
+    width: 100%;
+    font-family: ui-monospace, monospace;
+    font-size: 0.75rem;
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: inherit;
+    padding: 0.45rem;
+    box-sizing: border-box;
+  }
+  .te-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.45rem;
   }
   .stamp {
     font-size: 0.72rem;
