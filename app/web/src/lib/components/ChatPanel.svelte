@@ -166,6 +166,49 @@
   // Pick a past question → drop it into the box to edit/resend (non-destructive).
   // Copy a code box (the generated program) to the clipboard, with a transient ✓ on
   // the box that was copied (keyed so only that one shows the checkmark).
+  import { loadDemoBoard, pinDemo } from "$lib/demoBoard";
+
+  // Pin-from-Ask (Millwright): send an answer's question + rendered result spec
+  // to the board. The server snapshots the question's saved program from history
+  // (the same record "Run again" uses) — every widget is born from a program the
+  // user already saw run. Transient per-item state: "" → pinned ✓ / error text.
+  let pinState = $state<Record<string, string>>({});
+  function questionFor(idx: number): string {
+    for (let i = idx; i >= 0; i--) if (items[i].kind === "user") return items[i].text ?? "";
+    return "";
+  }
+  async function pinAnswer(idx: number) {
+    const it = items[idx];
+    if (!it?.result) return;
+    const q = questionFor(idx);
+    if (!q) {
+      pinState = { ...pinState, [it.id]: "couldn't find the question" };
+      return;
+    }
+    try {
+      if (demo) {
+        // Demo: the server is read-only — pin into THIS browser's local board
+        // (localStorage; the Board's "reset" clears it). Seed from the shared
+        // board first if this browser has no local chain yet.
+        const r = await fetch("/api/millwright");
+        const d = await r.json();
+        const store = loadDemoBoard({ spec: d?.spec, results: d?.results ?? {} });
+        const title = q.length > 60 ? q.slice(0, 57) + "…" : q;
+        pinDemo(store, q, title, it.result);
+        pinState = { ...pinState, [it.id]: "ok" };
+        return;
+      }
+      const r = await fetch("/api/millwright/pin", {
+        method: "POST",
+        body: JSON.stringify({ q, result: it.result }),
+      });
+      const d = await r.json();
+      pinState = { ...pinState, [it.id]: r.ok && !d?.error ? "ok" : (d?.error ?? `HTTP ${r.status}`) };
+    } catch (e) {
+      pinState = { ...pinState, [it.id]: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   let copiedKey = $state("");
   async function copyCode(text: string, key: string) {
     try {
@@ -507,13 +550,26 @@
     {#if items.length === 0}
       <p class="empty">Ask a question about the files in your vault</p>
     {/if}
-    {#each items as it (it.id)}
+    {#each items as it, idx (it.id)}
       {#if it.kind === "user" || it.kind === "assistant"}
         <div class="msg {it.kind}">
           <span class="who">{it.kind === "user" ? "you" : "millfolio"}</span>
           <p>{it.text}</p>
           {#if it.kind === "assistant" && it.result}
             <ResultView result={it.result} />
+            {#if pinState[it.id] === "ok"}
+              <p class="pinned-note">📌 Pinned — see the <a href="/board">Board</a>.</p>
+            {:else}
+              <button
+                type="button"
+                class="pin-btn"
+                title={demo
+                  ? "Add this answer to your local Board (kept in this browser)"
+                  : "Add this answer to your Board — it re-runs the saved program, no model call"}
+                onclick={() => pinAnswer(idx)}
+              >📌 Pin to Board</button>
+              {#if pinState[it.id]}<span class="pin-err">{pinState[it.id]}</span>{/if}
+            {/if}
           {/if}
           {#if it.kind === "assistant" && it.source && it.sourceAlias}
             <p class="source" title="the top document behind this answer — your vault may hold more">
@@ -1428,5 +1484,31 @@
   form button:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  .pin-btn {
+    font: inherit;
+    font-size: 0.75rem;
+    margin-top: 0.3rem;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: inherit;
+    opacity: 0.75;
+    cursor: pointer;
+  }
+  .pin-btn:hover {
+    opacity: 1;
+  }
+  .pinned-note {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    margin: 0.3rem 0 0;
+  }
+  .pin-err {
+    font-size: 0.72rem;
+    color: #c0392b;
+    margin-left: 0.4rem;
   }
 </style>
