@@ -24,6 +24,7 @@ from transport import (
     RemoteClient,
     ChatMessage,
     _codegen_system,
+    _strip_fences,
     DeltaSink,
 )
 from security import Sandbox, RunHandle
@@ -185,6 +186,40 @@ struct Orchestrator(Movable):
         var g = self.remote.fix_code(code, errors)
         self.budget.charge(g.tokens)
         return g.code.copy()
+
+    def viewgen_edit(
+        mut self, instruction: String, spec_json: String, catalog_json: String
+    ) raises -> String:
+        """Millwright view-plane edit — frontier model only, budget-charged like
+        codegen. The prompt carries the dashboard SPEC + the widget CATALOG
+        (ids/titles/questions/result shapes — never values) + the user's
+        instruction; the reply is the model's raw JSON
+        `{"spec": …, "message": …}` (fences stripped). The CALLER (the app's
+        millwright handler) validates the spec before it becomes a version —
+        this method only transports."""
+        if self.budget.depleted():
+            raise Error(_NO_REMOTE_MSG)
+        var user_msg = (
+            String("Current spec:\n")
+            + spec_json
+            + "\n\nWidget catalog (every widget you may reference):\n"
+            + catalog_json
+            + "\n\nInstruction: "
+            + instruction
+        )
+        log("• asking the frontier model to edit the board…")
+        var g = self.remote.viewgen(user_msg)
+        self.budget.charge(g.tokens)
+        _session_append(
+            "MILLWRIGHT INSTRUCTION: "
+            + instruction
+            + "\n\n===== PROMPT TO THE OUTSIDE MODEL (user turn) =====\n"
+            + user_msg
+            + "\n\n===== OUTSIDE MODEL OUTPUT (spec edit) =====\n"
+            + g.code
+            + "\n"
+        )
+        return _strip_fences(g.code.copy())
 
     # ── vault pipeline (steps) ──────────────────────────────────────────────────
     # The full flow is run_vault_task; it's split into these public steps so the

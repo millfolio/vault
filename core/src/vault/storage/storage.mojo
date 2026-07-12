@@ -618,6 +618,33 @@ def asks_log_path() -> String:
     )
 
 
+def millwright_log_path() -> String:
+    """millwright.jsonl — the dashboard-spec VERSION CHAIN (append-only; one
+    immutable version per line: hash, parent, ts, author, message, spec). List /
+    diff / revert read this log; the ACTIVE version is the `KV_MILLWRIGHT_ACTIVE`
+    marker, so reverting never rewrites history. `MILLFOLIO_MILLWRIGHT_FILE`
+    overrides."""
+    return String(
+        getenv(
+            "MILLFOLIO_MILLWRIGHT_FILE",
+            _storage_config_dir() + "/millwright.jsonl",
+        )
+    )
+
+
+def millwright_dir() -> String:
+    """<data>/millwright — the widget SNAPSHOT docs (per-widget pinned program +
+    latest result-spec JSON), keyed `w-<id>.program.mojo` / `w-<id>.result.json`
+    via the doc store. The spec (view plane) references widgets by id only; the
+    programs and results live here (data plane). `MILLFOLIO_MILLWRIGHT_DIR`
+    overrides."""
+    return String(
+        getenv(
+            "MILLFOLIO_MILLWRIGHT_DIR", _storage_config_dir() + "/millwright"
+        )
+    )
+
+
 trait LogStore(Copyable, Movable):
     """Persistence interface for an append-only JSONL event log.
 
@@ -690,6 +717,12 @@ def default_asks_store() -> FileLogStore:
     return FileLogStore(asks_log_path())
 
 
+def default_millwright_versions_store() -> FileLogStore:
+    """The Millwright spec-version chain — a swap point for Phase 5
+    (`millwright.jsonl`)."""
+    return FileLogStore(millwright_log_path())
+
+
 # ── Slice 3: KV / small-marker store (single-value dotfiles) ───────────────────
 # The tiny single-value marker files behind one `KvStore` trait, mirroring the queue +
 # log slices. Each marker is a bare text file read/written WHOLE — a state word, a pid,
@@ -714,6 +747,9 @@ comptime KV_DEMO_OP = (  # pending sample-data import marker (lazy-finalize)
 )
 comptime KV_DL_STATE = ".model_download.state"  # running|done|error
 comptime KV_DL_MODEL = ".model_download.model"  # the in-flight model id
+comptime KV_MILLWRIGHT_ACTIVE = (  # hash of the ACTIVE dashboard-spec version
+    ".millwright.active"
+)
 #
 # NOT migrated (deliberate): the auth secrets `.anthropic-key` / `.reveal-secret` keep
 # their `chmod 0600` semantics + own tests in `auth.mojo` (a plain KV set would widen the
@@ -890,3 +926,14 @@ def default_indexed_paths_store() -> FileDocStore:
     the data dir (`_storage_config_dir()`), matching `_tracked_paths_path()` byte-for-byte.
     """
     return FileDocStore(_storage_config_dir())
+
+
+def default_millwright_docs_store() -> FileDocStore:
+    """The Millwright widget-snapshot doc store — a Phase-5 swap point. Over
+    `millwright_dir()` (NOT the data dir: widgets are open-ended in number, so
+    they get their own subdirectory). Keys: `w-<id>.program.mojo` (the pinned
+    program, an immutable copy of the generating ask's code) and
+    `w-<id>.result.json` (the widget's latest result-spec). The DIRECTORY is
+    created by the owner (the app's millwright handlers) before first save —
+    the store itself only moves bytes."""
+    return FileDocStore(millwright_dir())
