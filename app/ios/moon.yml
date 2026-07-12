@@ -1,0 +1,14 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+layer: 'application'
+tags: ['swift', 'ios']
+
+tasks:
+  # Wrap the existing scripts/ios.sh (one source of truth — xcodegen + sim build).
+  build:
+    command: 'bash ../../scripts/ios.sh'
+    toolchain: 'system'
+    inputs: ['Millfolio/**/*', 'project.yml']
+  run: # build + install + launch on the simulator + screenshot
+    command: 'bash ../../scripts/ios.sh run'
+    toolchain: 'system'
+    deps: ['app-ios:build']

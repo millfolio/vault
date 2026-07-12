@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#
+# logts — prefix every line of stdin with a wall-clock timestamp [HH:MM:SS.mmm], so
+# gaps between lines reveal where something stalls. Line-buffered + flushed, so it works
+# live on a hanging stream. Like moreutils `ts`, but no install.
+#
+#   sudo HOME=/Users/bgent MILLFOLIO_WORKERS=1 bash scripts/run-demo.sh 2>&1 | scripts/logts
+#   tail -f ~/Library/Logs/millfolio-demo.log | scripts/logts
+#
+exec perl -MTime::HiRes=time -pe '
+  BEGIN { $| = 1 }
+  my $t = time; my @l = localtime $t;
+  $_ = sprintf("[%02d:%02d:%02d.%03d] %s", $l[2], $l[1], $l[0], ($t - int $t) * 1000, $_);
+'
