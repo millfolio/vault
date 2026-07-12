@@ -327,6 +327,11 @@ def main() raises:
     # itself survives the restart and RESUMES its pending items (see the loop below).
     _reconcile_stale()
 
+    # First run: materialize the curated starter board NOW (not on the first
+    # Board visit) so a fresh install opens with a populated dashboard. No-op
+    # whenever any version chain exists; failures are swallowed inside.
+    handlers_millwright._seed_if_empty()
+
     # Ensure the local-capability secret exists (0600) so the native menu-bar app's
     # Touch-ID unlock can bridge to a reveal token. Skipped in the demo (no gate).
     try:
