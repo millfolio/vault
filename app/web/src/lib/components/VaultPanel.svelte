@@ -1492,15 +1492,23 @@
     align-items: center;
     gap: 10px;
   }
+  /* Shrink priority: the MERCHANT is the row's content, the location is a
+     decoration — so when the column is tight (phones), .loc must give way
+     FIRST and .merchant keeps a readable minimum. The inverse (merchant
+     0 1 auto + loc flex:none) let flex take the whole deficit out of the
+     merchant, collapsing it to nothing while "City, ST · CCC" survived. */
   .records .descrow .merchant {
-    flex: 0 1 auto;
-    min-width: 0;
+    flex: 1 1 auto;
+    min-width: 8ch;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .records .descrow .loc {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     margin-left: auto;
     font-size: 11px;
     color: var(--text-dim);

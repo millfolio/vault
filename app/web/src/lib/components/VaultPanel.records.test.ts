@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { render, waitFor } from "@testing-library/svelte";
 import VaultPanel from "./VaultPanel.svelte";
 
 // Regression guard for P1: the Records table's file cell must render a CLICKABLE
@@ -154,5 +155,32 @@ describe("VaultPanel Records file cell (P1 regression)", () => {
     // The fixed-layout table constrains columns.
     const table = container.querySelector("table.records") as HTMLTableElement;
     expect(table.querySelector("colgroup col.c-desc")).not.toBeNull();
+  });
+});
+
+describe("Records desc-cell layout contract (P1 mobile regression)", () => {
+  // jsdom computes no layout, so the phone bug — .merchant flex-shrinking to
+  // ZERO width while the fixed .loc ("City, ST · CCC") kept the whole cell —
+  // was invisible to every DOM assertion above. Pin the CSS contract itself
+  // (the repo's lint-the-shape pattern): the LOCATION must be the shrinkable,
+  // truncatable element, and the MERCHANT must reserve a readable minimum.
+  // If a restyle changes this on purpose, update the rationale comment in
+  // VaultPanel.svelte alongside this test.
+  // vitest cwd = app/web (the vite root), so resolve from there.
+  const src = readFileSync("src/lib/components/VaultPanel.svelte", "utf-8");
+  const rule = (sel: string) =>
+    src.split(sel)[1]?.split("}")[0] ?? "";
+
+  it("the merchant keeps a readable minimum and may grow", () => {
+    const merchant = rule(".records .descrow .merchant {");
+    expect(merchant).toMatch(/flex:\s*1 1 auto/);
+    expect(merchant).toMatch(/min-width:\s*\d+ch/);
+  });
+
+  it("the location yields first: shrinkable + ellipsized, never flex:none", () => {
+    const loc = rule(".records .descrow .loc {");
+    expect(loc).toMatch(/flex:\s*0 1 auto/);
+    expect(loc).toMatch(/text-overflow:\s*ellipsis/);
+    expect(loc).not.toMatch(/flex:\s*none/);
   });
 });
