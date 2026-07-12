@@ -75,10 +75,22 @@ def _contains_ci(xs: List[String], s: String) -> Bool:
 
 def income_tag_names() -> List[String]:
     """The income-side tag names — applied ONLY to credits (money in). Every other
-    tag is expense-side (applied only to debits). THE single source of the
-    income/expense split (see the note above); moving to a per-tag attribute means
-    replacing this + `tag_is_income`, nothing else."""
-    return [String("transfers"), String("rewards")]
+    tag is expense-side (applied only to debits), EXCEPT the both-side set below.
+    THE single source of the income/expense split (see the note above); moving to
+    a per-tag attribute means replacing this + `tag_is_income` +
+    `both_side_tag_names`, nothing else."""
+    return [String("rewards")]
+
+
+def both_side_tag_names() -> List[String]:
+    """Tags that apply to EITHER direction. `transfers` MUST be here: a transfer
+    moves money, so it has two legs — the card-statement side is a credit, but
+    the checking-statement side ("Card Services Payment - ACH …") is a DEBIT.
+    When transfers was income-only, that debit leg could never be tagged, so
+    `spending()` (whose documented contract is "already excludes transfers — the
+    credit-card-payment guard") DOUBLE-COUNTED every card payment alongside the
+    card's own itemized purchases."""
+    return [String("transfers")]
 
 
 def tag_is_income(tag: String) -> Bool:
@@ -90,10 +102,12 @@ def tag_is_income(tag: String) -> Bool:
 def tag_allows_direction(tag: String, direction: String) -> Bool:
     """Whether a rule producing `tag` may apply to a transaction with this
     `direction` (`"debit"` = money out/expense, `"credit"` = money in/income).
-    Income tags apply only to credits; every other (expense) tag only to debits. A
-    row whose direction is unknown/empty is treated as a debit (the overwhelming
-    common case) so expense tagging never regresses on data lacking a direction.
-    """
+    Income tags apply only to credits; both-side tags (transfers) to either leg;
+    every other (expense) tag only to debits. A row whose direction is
+    unknown/empty is treated as a debit (the overwhelming common case) so expense
+    tagging never regresses on data lacking a direction."""
+    if _contains(both_side_tag_names(), tag):
+        return True
     if tag_is_income(tag):
         return direction == "credit"
     return direction != "credit"
