@@ -91,7 +91,7 @@ struct Start: AsyncParsableCommand {
         ~/Library/Logs/Millfolio/server.log.
         """)
     @MainActor func run() async throws {
-        let boot = Bootstrapper()
+        let boot = streaming()   // engine-load phases print as they happen
         try await boot.startVaultChat(vaultDir: boot.ensureVaultDir())
         print("✓ millfolio running in the background — http://localhost:10000")
         print("  logs: \(boot.millfolioLogDir.appendingPathComponent("server.log").path)")
