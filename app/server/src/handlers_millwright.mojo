@@ -132,7 +132,67 @@ def _path_safe_id(id: String) -> Bool:
 
 
 def _program_doc(id: String) -> String:
+    """LEGACY per-widget program doc (pre-content-addressing pins)."""
     return id + ".program.mojo"
+
+
+def _program_hash_doc(hash: String) -> String:
+    """Content-addressed program snapshot (v2 §3): immutable, keyed by the
+    FNV-1a of the code; a widget binds to it via its spec `program` field, so
+    program changes ride the SPEC version chain and revert coherently."""
+    return "p-" + hash + ".mojo"
+
+
+def _is_hex16(s: String) -> Bool:
+    if s.byte_length() != 16:
+        return False
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        var ok = (c >= ord("0") and c <= ord("9")) or (
+            c >= ord("a") and c <= ord("f")
+        )
+        if not ok:
+            return False
+    return True
+
+
+def _widget_program_hash(spec_text: String, id: String) raises -> String:
+    """The `program` hash of widget `id` in `spec_text` ("" when unbound —
+    a legacy widget still on its per-id doc)."""
+    try:
+        var spec = loads(spec_text)
+        var widgets = spec["widgets"].array_items()
+        for i in range(len(widgets)):
+            ref w = widgets[i]
+            if (
+                _has(w, "id")
+                and w["id"].is_string()
+                and w["id"].string_value() == id
+                and _has(w, "program")
+                and w["program"].is_string()
+            ):
+                return w["program"].string_value()
+    except:
+        pass
+    return String("")
+
+
+def _program_text(spec_text: String, id: String) raises -> String:
+    """Resolve widget `id`'s program: the content-addressed snapshot its spec
+    binding names, falling back to the legacy per-widget doc ("" when neither
+    exists)."""
+    var docs = default_millwright_docs_store()
+    var h = _widget_program_hash(spec_text, id)
+    if h.byte_length() > 0:
+        try:
+            return docs.load(_program_hash_doc(h))
+        except:
+            pass  # dangling binding — fall through to legacy
+    try:
+        return docs.load(_program_doc(id))
+    except:
+        return String("")
 
 
 def _result_doc(id: String) -> String:
@@ -194,9 +254,20 @@ def validate_spec(text: String) raises -> String:
             or w["h"].int_value() > 6
         ):
             return "widget " + id + ": h must be an int 1..6"
+        # Optional program binding: the content-addressed snapshot's hash.
+        var prog_hash = String("")
+        if _has(w, "program"):
+            if not w["program"].is_string() or not _is_hex16(
+                w["program"].string_value()
+            ):
+                return "widget " + id + ": program must be a 16-hex-char hash"
+            prog_hash = w["program"].string_value()
         # The view plane may only reference widgets whose DATA-plane snapshot
         # (the pinned program) exists — binding to results, never to raw reads.
-        if not exists(millwright_dir() + "/" + _program_doc(id)):
+        var bound = prog_hash.byte_length() > 0 and exists(
+            millwright_dir() + "/" + _program_hash_doc(prog_hash)
+        )
+        if not bound and not exists(millwright_dir() + "/" + _program_doc(id)):
             return "widget " + id + " has no pinned program"
         seen.append(id^)
     if _has(v, "layout"):
@@ -522,11 +593,18 @@ def handle_millwright_pin(req: Request) raises -> Response:
     except:
         pass  # already exists
     var docs = default_millwright_docs_store()
-    docs.save(_program_doc(id), code)
+    var prog_hash = _fnv1a64(code)
+    docs.save(_program_hash_doc(prog_hash), code)
     if result_text.byte_length() > 0:
         docs.save(
             _result_doc(id),
-            '{"ts":' + String(ts) + ',"result":' + result_text + "}",
+            '{"ts":'
+            + String(ts)
+            + ',"program":'
+            + json_escape(prog_hash)
+            + ',"result":'
+            + result_text
+            + "}",
         )
     # View-plane: append the widget + a layout slot, accept as a new version.
     # (json Values are copy-on-write views — mutate the child, then set() it
@@ -535,6 +613,7 @@ def handle_millwright_pin(req: Request) raises -> Response:
     widget_json += '"id":' + json_escape(id)
     widget_json += ',"title":' + json_escape(title)
     widget_json += ',"q":' + json_escape(q)
+    widget_json += ',"program":' + json_escape(prog_hash)
     widget_json += ',"w":1,"h":1}'
     var spec = loads(_active_spec_text())
     var widgets = spec["widgets"]
@@ -590,11 +669,23 @@ def handle_millwright_result(req: Request) raises -> Response:
         return _cors(
             bad_request('{"error":"remote URLs are not allowed in a result"}')
         )
-    if _active_spec_text().find(json_escape(id)) == -1:
+    var spec_text = _active_spec_text()
+    if spec_text.find(json_escape(id)) == -1:
         return _cors(bad_request('{"error":"widget not in the active spec"}'))
+    # Stamp the widget's CURRENT program hash so the tile can tell a fresh
+    # result from one computed by an older program (the staleness signal).
+    var prog_hash = _widget_program_hash(spec_text, id)
+    var stamp = String("")
+    if prog_hash.byte_length() > 0:
+        stamp = ',"program":' + json_escape(prog_hash)
     default_millwright_docs_store().save(
         _result_doc(id),
-        '{"ts":' + String(_epoch_s()) + ',"result":' + result_text + "}",
+        '{"ts":'
+        + String(_epoch_s())
+        + stamp
+        + ',"result":'
+        + result_text
+        + "}",
     )
     return _cors(ok_json('{"ok":true}'))
 
@@ -606,15 +697,16 @@ def handle_millwright_program(req: Request) raises -> Response:
     var id = String(req.query_param("id"))
     if not _path_safe_id(id):
         return _cors(bad_request('{"error":"bad widget id"}'))
-    var program: String
-    try:
-        program = default_millwright_docs_store().load(_program_doc(id))
-    except:
+    var spec_text = _active_spec_text()
+    var program = _program_text(spec_text, id)
+    if program.byte_length() == 0:
         return _cors(bad_request('{"error":"unknown widget"}'))
     return _cors(
         ok_json(
             '{"id":'
             + json_escape(id)
+            + ',"hash":'
+            + json_escape(_widget_program_hash(spec_text, id))
             + ',"program":'
             + json_escape(program)
             + "}"
@@ -726,6 +818,80 @@ def handle_millwright_assist(req: Request) raises -> Response:
             + json_escape(hash)
             + ',"message":'
             + json_escape(message)
+            + "}"
+        )
+    )
+
+
+def handle_millwright_program_save(req: Request) raises -> Response:
+    """POST /api/millwright/program {"id", "code"} → edit a widget's program
+    (v2 §3). The code becomes a NEW content-addressed snapshot and the widget's
+    spec `program` binding moves to it — so the edit is a spec version (message
+    names the widget, author "user") and reverting the spec reverts the program
+    binding too. The previous snapshot stays on disk (immutable), which is what
+    makes that revert work. Compile feedback is deliberately NOT here: the tile's
+    ↻ runs the program through the existing deterministic run path, which streams
+    compile errors back — same honesty as Run-again. The user's own edit needs no
+    approval card (self-approving; the sandbox is the safety boundary either way).
+    """
+    if _is_demo():
+        return _cors(
+            unauthorized('{"error":"the demo dashboard is read-only"}')
+        )
+    var id: String
+    var code: String
+    try:
+        var body = loads(req.text())
+        id = String(body["id"].string_value())
+        code = String(body["code"].string_value())
+    except:
+        return _cors(bad_request('{"error":"expected {id, code}"}'))
+    if not _path_safe_id(id):
+        return _cors(bad_request('{"error":"bad widget id"}'))
+    if code.strip().byte_length() == 0:
+        return _cors(bad_request('{"error":"empty program"}'))
+    if code.byte_length() > 65536:
+        return _cors(bad_request('{"error":"program too large (64 KB cap)"}'))
+    var spec = loads(_active_spec_text())
+    var widgets = spec["widgets"]
+    var items = widgets.array_items()
+    var found = -1
+    var title = String(id)
+    for i in range(len(items)):
+        ref w = items[i]
+        if (
+            _has(w, "id")
+            and w["id"].is_string()
+            and w["id"].string_value() == id
+        ):
+            found = i
+            if _has(w, "title") and w["title"].is_string():
+                title = w["title"].string_value()
+            break
+    if found < 0:
+        return _cors(bad_request('{"error":"widget not in the active spec"}'))
+    var prog_hash = _fnv1a64(code)
+    default_millwright_docs_store().save(_program_hash_doc(prog_hash), code)
+    # Rebind: copy-on-write Values — mutate the child, then set() the chain back.
+    var w2 = items[found].copy()
+    w2.set("program", Value(prog_hash))
+    widgets.set(found, w2)
+    spec.set("widgets", widgets)
+    var hash: String
+    try:
+        hash = _accept_spec(
+            spec.raw_json(),
+            String('edited the program for "') + title + '"',
+            "user",
+        )
+    except e:
+        return _cors(bad_request('{"error":' + json_escape(String(e)) + "}"))
+    return _cors(
+        ok_json(
+            '{"ok":true,"program":'
+            + json_escape(prog_hash)
+            + ',"hash":'
+            + json_escape(hash)
             + "}"
         )
     )

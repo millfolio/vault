@@ -16,7 +16,9 @@ instruction. You reply with the complete edited spec.
 }
 ```
 
-- `widgets[]` — each has a stable `id` (NEVER invent, rename, or fabricate ids;
+- `widgets[]` — each may carry a `program` field (a 16-hex-char snapshot hash):
+  PRESERVE it exactly; never invent, change, or remove it.
+- each has a stable `id` (NEVER invent, rename, or fabricate ids;
   only ids present in the CURRENT spec or the catalog may appear), a `title`
   (you may rewrite it), the original `q` (keep it verbatim), and a grid span
   `w`/`h` (integers 1..6).

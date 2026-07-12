@@ -209,6 +209,8 @@ struct Api(Copyable, Handler, Movable):
             return handlers_millwright.handle_millwright()
         if path == "/api/millwright/versions":
             return handlers_millwright.handle_millwright_versions()
+        if req.method == Method.POST and path == "/api/millwright/program":
+            return handlers_millwright.handle_millwright_program_save(req)
         if path.find("/api/millwright/program") == 0:
             return handlers_millwright.handle_millwright_program(req)
         if req.method == Method.POST and path == "/api/millwright/spec":
