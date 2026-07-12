@@ -80,8 +80,8 @@ export function validateSpec(
     if (!knownIds.has(w.id)) return `widget ${w.id} has no pinned result`;
     seen.add(w.id);
   }
-  if (v.layout !== undefined) {
-    const lo = v.layout;
+  const layoutErr = (lo: any, ids: Set<string>): string => {
+    if (lo === undefined) return "";
     if (typeof lo !== "object" || lo === null || Array.isArray(lo))
       return '"layout" must be an object';
     if (lo.cols !== undefined && (!Number.isInteger(lo.cols) || lo.cols < 1 || lo.cols > 6))
@@ -90,8 +90,44 @@ export function validateSpec(
       if (!Array.isArray(lo.order)) return "layout.order must be an array of widget ids";
       for (const id of lo.order) {
         if (typeof id !== "string") return "layout.order entries must be widget ids";
-        if (!seen.has(id)) return `layout.order references unknown widget: ${id}`;
+        if (!ids.has(id)) return `layout.order references unknown widget: ${id}`;
       }
+    }
+    return "";
+  };
+  let err = layoutErr(v.layout, seen);
+  if (err) return err;
+  // v2 §2: optional pages[] — additive nav boards, capped, globally-unique ids.
+  if (v.pages !== undefined) {
+    if (!Array.isArray(v.pages)) return '"pages" must be an array';
+    if (v.pages.length > 5) return "at most 5 pages (the nav is a shared, capped surface)";
+    const pageIds = new Set<string>();
+    for (const pg of v.pages) {
+      if (typeof pg !== "object" || pg === null) return "each page must be an object";
+      if (typeof pg.id !== "string" || !/^p-[a-z0-9-]+$/.test(pg.id))
+        return `page id must be p- followed by [a-z0-9-]: ${pg.id}`;
+      if (pageIds.has(pg.id)) return `duplicate page id: ${pg.id}`;
+      if (typeof pg.title !== "string" || pg.title.length === 0)
+        return `page ${pg.id} needs a non-empty title`;
+      if (!Array.isArray(pg.widgets)) return `page ${pg.id} needs a "widgets" array`;
+      const pageSeen = new Set<string>();
+      for (const w of pg.widgets) {
+        if (typeof w !== "object" || w === null) return "each widget must be an object";
+        if (!pathSafeId(w.id)) return `widget id must be w- followed by [a-z0-9-]: ${w.id}`;
+        if (seen.has(w.id)) return `duplicate widget id: ${w.id}`;
+        if (typeof w.title !== "string" || w.title.length === 0)
+          return `widget ${w.id} needs a non-empty title`;
+        for (const k of ["w", "h"] as const) {
+          if (w[k] !== undefined && (!Number.isInteger(w[k]) || w[k] < 1 || w[k] > 6))
+            return `widget ${w.id}: ${k} must be an int 1..6`;
+        }
+        if (!knownIds.has(w.id)) return `widget ${w.id} has no pinned result`;
+        seen.add(w.id);
+        pageSeen.add(w.id);
+      }
+      err = layoutErr(pg.layout, pageSeen);
+      if (err) return err;
+      pageIds.add(pg.id);
     }
   }
   return "";

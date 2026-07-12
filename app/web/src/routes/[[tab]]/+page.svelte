@@ -62,6 +62,37 @@
   }
   const isDemo = detectDemo();
 
+  // Millwright pages (v2 §2): spec-defined boards rendered as ADDITIVE nav
+  // entries after the built-in tabs (never instead of them), capped at 5.
+  // MillwrightPanel broadcasts the fresh list after every board load/edit;
+  // the initial fetch covers direct landings on non-board tabs.
+  let mwPages = $state<{ id: string; title: string }[]>([]);
+  function setMwPages(pages: unknown) {
+    if (!Array.isArray(pages)) return;
+    mwPages = pages
+      .filter((p: any) => typeof p?.id === "string" && typeof p?.title === "string")
+      .slice(0, 5)
+      .map((p: any) => ({ id: p.id, title: p.title }));
+  }
+  $effect(() => {
+    const onPages = (e: Event) => setMwPages((e as CustomEvent).detail);
+    window.addEventListener("millwright-pages", onPages);
+    (async () => {
+      try {
+        const r = await fetch("/api/millwright");
+        const d = await r.json();
+        if (isDemo) {
+          const { loadDemoBoard, activeSpec } = await import("$lib/demoBoard");
+          const store = loadDemoBoard({ spec: d?.spec, results: d?.results ?? {} });
+          setMwPages((activeSpec(store) as any)?.pages);
+        } else {
+          setMwPages(d?.spec?.pages);
+        }
+      } catch {} // board unreachable — nav just shows the built-ins
+    })();
+    return () => window.removeEventListener("millwright-pages", onPages);
+  });
+
   // The product name follows the domain it's served from: millfolio.* → "millfolio",
   // millfoil.* → "millfoil" — i.e. the registrable name, the second-to-last DNS label.
   // Falls back to "millfolio" for localhost / IPs / single-label hosts.
@@ -95,7 +126,7 @@
       ? "vault"
       : page.params.tab === "tags"
         ? "tags"
-        : page.params.tab === "board"
+        : page.params.tab === "board" || page.params.tab?.startsWith("p-")
           ? "board"
           : page.params.tab === "operations" || page.params.tab === "system"
             ? "operations"
@@ -771,9 +802,13 @@
   <header class="topbar">
     <nav class="tabs">
       <a class:active={view === "chat"} href="/">Chat</a>
-      <!-- Millwright: the pinned-answers board. In the demo it's a read-only
-           showcase (every write is rejected server-side; the chrome hides them). -->
-      <a class:active={view === "board"} href="/board">Board</a>
+      <!-- Millwright: the pinned-answers board. Demo edits live in the browser. -->
+      <a class:active={view === "board" && !page.params.tab?.startsWith("p-")} href="/board">Board</a>
+      <!-- Spec-defined pages: ADDITIVE nav only — the built-ins above are
+           hand-written routes no spec can move, rename, or remove. -->
+      {#each mwPages as p (p.id)}
+        <a class:active={page.params.tab === p.id} href="/{p.id}">{p.title}</a>
+      {/each}
       <a class:active={view === "vault" || view === "tags"} href="/vault">Vault</a>
       {#if isDemo}
         <!-- The public demo has no Operations tab, so Stats stays top-level. -->
@@ -858,7 +893,9 @@
       <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />
     {:else if view === "board"}
       <!-- Millwright: the versioned dashboard of pinned answers (trusted chrome). -->
-      <MillwrightPanel {client} demo={isDemo} />
+      {#key page.params.tab}
+        <MillwrightPanel {client} demo={isDemo} pageId={page.params.tab?.startsWith("p-") ? page.params.tab : ""} />
+      {/key}
     {:else if view === "vault"}
       <VaultPanel demo={isDemo} initialSub="records" />
     {:else if view === "tags"}

@@ -5,6 +5,7 @@
   import {
     acceptSpec as demoAccept,
     activeSpec as demoActiveSpec,
+    fnv1a64,
     loadDemoBoard,
     resetDemoBoard,
     revertTo as demoRevert,
@@ -16,14 +17,17 @@
   // generated spec as data. The spec never carries markup or URLs (the server
   // lints that before a version is accepted); every string renders as text.
 
-  let { client, demo = false }: { client: MillfolioClient; demo?: boolean } = $props();
+  let { client, demo = false, pageId = "" }: { client: MillfolioClient; demo?: boolean; pageId?: string } = $props();
 
   type Widget = { id: string; title: string; q?: string; w?: number; h?: number; program?: string };
+  type Layout = { cols?: number; order?: string[] };
+  type Page = { id: string; title: string; widgets: Widget[]; layout?: Layout };
   type Spec = {
     v: number;
     kind: string;
     widgets: Widget[];
-    layout?: { cols?: number; order?: string[] };
+    layout?: Layout;
+    pages?: Page[];
   };
   type Snapshot = { ts: number; result: ResultSpec; preview?: boolean; program?: string };
   type Version = { hash: string; parent: string; ts: number; author: string; message: string };
@@ -71,22 +75,36 @@
   }
   onMount(load);
 
+  // The CONTAINER this panel renders: the root board, or one spec page (v2 §2).
+  const container = $derived.by(() => {
+    if (!spec) return null;
+    if (!pageId) return { widgets: spec.widgets, layout: spec.layout, title: "Board" };
+    const pg = spec.pages?.find((p) => p.id === pageId);
+    return pg ? { widgets: pg.widgets, layout: pg.layout, title: pg.title } : null;
+  });
+
+  // Keep the top-level nav's page buttons fresh — +page.svelte listens.
+  $effect(() => {
+    if (spec)
+      window.dispatchEvent(new CustomEvent("millwright-pages", { detail: spec.pages ?? [] }));
+  });
+
   // Widgets in layout order (unknown/missing order entries fall back to spec order).
   const ordered = $derived.by(() => {
-    if (!spec) return [] as Widget[];
-    const byId = new Map(spec.widgets.map((w) => [w.id, w]));
+    if (!container) return [] as Widget[];
+    const byId = new Map(container.widgets.map((w) => [w.id, w]));
     const out: Widget[] = [];
-    for (const id of spec.layout?.order ?? []) {
+    for (const id of container.layout?.order ?? []) {
       const w = byId.get(id);
       if (w) {
         out.push(w);
         byId.delete(id);
       }
     }
-    for (const w of spec.widgets) if (byId.has(w.id)) out.push(w);
+    for (const w of container.widgets) if (byId.has(w.id)) out.push(w);
     return out;
   });
-  const cols = $derived(Math.min(Math.max(spec?.layout?.cols ?? 2, 1), 6));
+  const cols = $derived(Math.min(Math.max(container?.layout?.cols ?? 2, 1), 6));
 
   function asOf(id: string): string {
     if (results[id]?.preview) return "example data — ↻ to run on your vault";
@@ -177,34 +195,17 @@
     }
   }
   async function removeWidget(w: Widget) {
-    if (!spec) return;
-    if (demo && demoStore) {
-      const nextSpec: Spec = {
-        ...spec,
-        widgets: spec.widgets.filter((x) => x.id !== w.id),
-        layout: {
-          ...(spec.layout ?? {}),
-          order: (spec.layout?.order ?? []).filter((id) => id !== w.id),
-        },
-      };
-      try {
-        applyDemo(demoAccept(demoStore, JSON.stringify(nextSpec), `removed "${w.title}"`, "you"));
-      } catch {}
-      return;
-    }
-    const next: Spec = {
-      ...spec,
-      widgets: spec.widgets.filter((x) => x.id !== w.id),
+    const next = mapContainer((c) => ({
+      widgets: c.widgets.filter((x) => x.id !== w.id),
       layout: {
-        ...(spec.layout ?? {}),
-        order: (spec.layout?.order ?? []).filter((id) => id !== w.id),
+        ...(c.layout ?? {}),
+        order: (c.layout?.order ?? []).filter((id) => id !== w.id),
       },
-    };
-    await fetch("/api/millwright/spec", {
-      method: "POST",
-      body: JSON.stringify({ spec: next, message: `removed "${w.title}"` }),
-    });
-    await load();
+    }));
+    if (!next) return;
+    try {
+      await acceptSpecEdit(next, `removed "${w.title}"`);
+    } catch {}
   }
   async function openVersions() {
     showVersions = true;
@@ -263,40 +264,112 @@
       editErr = String(e);
     }
   }
-  function specWithTileEdits(): Spec | null {
+  // Apply `fn` to THIS panel's container (root board or the page) and return
+  // the whole edited spec — every mutation below goes through here so pages
+  // and the board share one code path.
+  function mapContainer(fn: (c: { widgets: Widget[]; layout?: Layout }) => { widgets: Widget[]; layout?: Layout }): Spec | null {
     if (!spec) return null;
+    if (!pageId) {
+      const c = fn({ widgets: spec.widgets, layout: spec.layout });
+      return { ...spec, widgets: c.widgets, layout: c.layout };
+    }
     return {
       ...spec,
-      widgets: spec.widgets.map((x) =>
+      pages: (spec.pages ?? []).map((p) => {
+        if (p.id !== pageId) return p;
+        const c = fn({ widgets: p.widgets, layout: p.layout });
+        return { ...p, widgets: c.widgets, layout: c.layout };
+      }),
+    };
+  }
+  function specWithTileEdits(): Spec | null {
+    return mapContainer((c) => ({
+      ...c,
+      widgets: c.widgets.map((x) =>
         x.id === editId
           ? { ...x, title: editTitle.trim() || x.title, w: editW, h: editH }
           : x,
       ),
+    }));
+  }
+  async function acceptSpecEdit(next: Spec, msg: string) {
+    if (demo && demoStore) {
+      applyDemo(demoAccept(demoStore, JSON.stringify(next), msg, "you"));
+      return;
+    }
+    const r = await fetch("/api/millwright/spec", {
+      method: "POST",
+      body: JSON.stringify({ spec: next, message: msg }),
+    });
+    const d = await r.json();
+    if (!r.ok || d?.error) throw new Error(d?.error ?? `HTTP ${r.status}`);
+    await load();
+  }
+
+  // "Save a program as a button": move a widget off the board into a NEW page
+  // rendered as a top-level nav entry — the v2 §2 on-ramp. One spec version.
+  let promoteErr = $state("");
+  async function promoteToPage(w: Widget) {
+    if (!spec) return;
+    promoteErr = "";
+    if ((spec.pages?.length ?? 0) >= 5) {
+      promoteErr = "at most 5 pages — dissolve one first";
+      return;
+    }
+    const pid = "p-" + fnv1a64(w.id + ":" + Date.now()).slice(0, 8);
+    const next: Spec = {
+      ...spec,
+      widgets: spec.widgets.filter((x) => x.id !== w.id),
+      layout: {
+        ...(spec.layout ?? {}),
+        order: (spec.layout?.order ?? []).filter((id) => id !== w.id),
+      },
+      pages: [
+        ...(spec.pages ?? []),
+        { id: pid, title: w.title, widgets: [{ ...w, w: 2 }], layout: { cols: 2, order: [w.id] } },
+      ],
     };
+    try {
+      await acceptSpecEdit(next, `made "${w.title}" a page`);
+    } catch (e) {
+      promoteErr = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // The inverse: the page's widgets return to the board, the nav entry goes.
+  async function dissolvePage() {
+    if (!spec || !pageId) return;
+    const pg = spec.pages?.find((p) => p.id === pageId);
+    if (!pg) return;
+    const next: Spec = {
+      ...spec,
+      widgets: [...spec.widgets, ...pg.widgets],
+      layout: {
+        ...(spec.layout ?? {}),
+        order: [...(spec.layout?.order ?? []), ...pg.widgets.map((w) => w.id)],
+      },
+      pages: (spec.pages ?? []).filter((p) => p.id !== pageId),
+    };
+    try {
+      await acceptSpecEdit(next, `dissolved page "${pg.title}"`);
+      location.href = "/board"; // the page's URL just stopped existing
+    } catch (e) {
+      promoteErr = e instanceof Error ? e.message : String(e);
+    }
   }
   async function saveEdit(andRun = false) {
     if (!spec || editBusy) return;
     editBusy = true;
     editErr = "";
     try {
-      const before = spec.widgets.find((x) => x.id === editId);
+      const before = container?.widgets.find((x) => x.id === editId);
       const dims =
         !!before &&
         (before.title !== editTitle.trim() || (before.w ?? 1) !== editW || (before.h ?? 1) !== editH);
       // 1. the view-plane part (title/span) — a spec version
       if (dims) {
         const next = specWithTileEdits();
-        const msg = `edited "${editTitle.trim() || before!.title}"`;
-        if (demo && demoStore) {
-          applyDemo(demoAccept(demoStore, JSON.stringify(next), msg, "you"));
-        } else {
-          const r = await fetch("/api/millwright/spec", {
-            method: "POST",
-            body: JSON.stringify({ spec: next, message: msg }),
-          });
-          const d = await r.json();
-          if (!r.ok || d?.error) throw new Error(d?.error ?? `HTTP ${r.status}`);
-        }
+        if (next) await acceptSpecEdit(next, `edited "${editTitle.trim() || before!.title}"`);
       }
       // 2. the data-plane part (the program) — content-addressed snapshot +
       //    rebinding version; server-only (the demo can't run programs anyway)
@@ -374,8 +447,11 @@
 
 <div class="board">
   <div class="board-head">
-    <h2>Board</h2>
+    <h2>{container?.title ?? "Board"}</h2>
     <div class="board-actions">
+      {#if pageId && container}
+        <button type="button" class="chrome-btn" title="Move this page's widgets back to the Board and drop the nav button" onclick={dissolvePage}>dissolve page</button>
+      {/if}
       {#if demo}
         <span class="demo-note" title="Demo edits live in THIS browser's localStorage — the shared demo is untouched">edits stay in your browser</span>
         <button type="button" class="chrome-btn" title="Drop your local edits — back to the shared demo board" onclick={resetDemo}>reset</button>
@@ -402,8 +478,11 @@
     </div>
   {/if}
 
+  {#if promoteErr}<p class="board-err">{promoteErr}</p>{/if}
   {#if loadError}
     <p class="board-err">Couldn't load the board: {loadError}</p>
+  {:else if pageId && !container}
+    <p class="board-empty">This page no longer exists — it may have been dissolved or reverted away. Head back to the <a href="/board">Board</a>.</p>
   {:else if ordered.length === 0}
     <p class="board-empty">
       {#if demo}
@@ -448,6 +527,9 @@
               {#if editErr}<p class="board-err">{editErr}</p>{/if}
               <div class="te-actions">
                 <button type="button" class="chrome-btn" disabled={editBusy} onclick={() => saveEdit(false)}>save</button>
+                {#if !pageId}
+                  <button type="button" class="chrome-btn" disabled={editBusy} title="Move this widget to its own page — a new button in the top nav" onclick={() => promoteToPage(w)}>make page</button>
+                {/if}
                 {#if !demo}
                   <button type="button" class="chrome-btn" disabled={editBusy} onclick={() => saveEdit(true)}>save &amp; run</button>
                 {/if}
