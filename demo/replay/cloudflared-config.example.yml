@@ -1,0 +1,29 @@
+# Cloudflare Tunnel config for the millfolio demo. Copy to cloudflared-config.yml
+# and fill in TUNNEL_ID + the credentials path printed by `cloudflared tunnel create`.
+# Outbound-only: the Mac dials Cloudflare; no inbound ports. Visitors need nothing.
+
+tunnel: TUNNEL_ID_HERE
+credentials-file: /Users/<demo-account>/.cloudflared/TUNNEL_ID_HERE.json
+
+ingress:
+  # One rule per public hostname → the local demo app. The demo app is host-agnostic
+  # (serves on :10010; the UI derives its brand name from the host), so the SAME local
+  # service backs every domain. Each hostname ALSO needs a proxied CNAME → <TUNNEL_ID>.
+  # cfargotunnel.com in ITS zone — either `cloudflared tunnel route dns <tunnel> <host>`
+  # (needs the cert authorized for that zone via `cloudflared tunnel login`) or a manual
+  # dashboard CNAME. cloudflared hot-reloads this file (or SIGHUP it) to pick up changes.
+  - hostname: demo.millfolio.app
+    service: http://localhost:10010
+  - hostname: demo.millfoil.app
+    service: http://localhost:10010
+  - hostname: demo.millfolio.com
+    service: http://localhost:10010
+  - hostname: demo.millfoil.com
+    service: http://localhost:10010
+  # everything else → 404
+  - service: http_status:404
+
+# Optional hardening (do most of this in the Cloudflare dashboard for demo.millfolio.app):
+#   - a rate-limit rule (public demo → cap requests/min per IP)
+#   - WAF / bot-fight mode
+#   - cache static assets

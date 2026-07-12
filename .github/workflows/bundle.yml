@@ -10,7 +10,7 @@ on:
     # tested rc's assets — they must NOT trigger a rebuild that would clobber them.
     tags: ["v*-*"]
   pull_request:
-    paths: ["scripts/package_bundle.sh", ".github/workflows/bundle.yml"]
+    paths: ["scripts/package_bundle.sh", "app/**", ".github/workflows/bundle.yml"]
   workflow_dispatch:
 
 permissions:
@@ -26,7 +26,8 @@ jobs:
       MODULAR_CACHE_DIR: ${{ github.workspace }}/.mojo-ci-cache
     steps:
       # Lay the repos out as siblings under the workspace, matching what the
-      # component packagers + package_bundle.sh expect (engine/, app/, the libs).
+      # component packagers + package_bundle.sh expect (engine/, the libs;
+      # app/ now lives INSIDE this repo at vault/app).
       - uses: actions/checkout@v6
         with: { path: vault }
 
@@ -58,8 +59,6 @@ jobs:
 
       - uses: actions/checkout@v6
         with: { repository: millfolio/engine, path: engine, ref: "${{ env.PIN_ENGINE }}" }
-      - uses: actions/checkout@v6
-        with: { repository: millfolio/app, path: app, ref: "${{ env.PIN_APP }}" }
       - uses: actions/checkout@v6
         with: { repository: millfolio/flare, path: flare, ref: "${{ env.PIN_FLARE }}" }
       - uses: actions/checkout@v6
@@ -99,7 +98,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('app/web/package-lock.json') }}
+          key: npm-${{ runner.os }}-${{ hashFiles('vault/app/web/package-lock.json') }}
           restore-keys: npm-${{ runner.os }}-
       # The Mojo COMPILE cache (see MODULAR_CACHE_DIR above) — the dominant cold
       # cost once the toolchain download is cached. The github.sha key suffix

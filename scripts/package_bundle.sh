@@ -9,7 +9,7 @@
 #   ├── millfolio/     ← vault       (package_millfolio.sh:   core + FFI shims + flare/json/lancedb/pdftotext/zlib/csv)
 #   └── app/           ← app         (package-app.sh:         ws_server src + built web UI)
 #
-# Layout: sibling repos under one umbrella dir (engine/, app/, the mojo libs next
+# Layout: sibling repos under one umbrella dir (engine/, the mojo libs next
 # to this vault/ checkout). The component packagers need their prebuilt FFI shims,
 # so each runs inside its repo's pixi env (one unified Mojo toolchain now).
 set -euo pipefail
@@ -17,7 +17,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 VAULT="$(cd "$HERE/.." && pwd)"
 UMBRELLA="$(cd "$VAULT/.." && pwd)"
 ENGINE="${ENGINE:-$UMBRELLA/engine}"
-APP="${APP:-$UMBRELLA/app}"
+APP="${APP:-$VAULT/app}"   # in-repo since the Tier-1 consolidation
 OUT="${1:-$VAULT/millfolio.zip}"; case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT

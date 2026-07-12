@@ -6,7 +6,7 @@ tasks:
   build:
     command: 'pixi run build'
     toolchain: 'system'
-    # The server compiles with `-I ../../vault/core/src -I ../../vault/privacy-box/src`,
+    # The server compiles with `-I ../../core/src -I ../../privacy-box/src`,
     # so it IMPORTS those sibling sources — declare them as inputs (workspace-relative,
     # `/`-prefixed) or moon can't see a vault change and serves a STALE cached binary.
     inputs:
@@ -19,7 +19,7 @@ tasks:
     command: 'pixi run test-all'
     toolchain: 'system'
     # The work-queue/log/kv/scheduler tests now build against `vault.storage`
-    # (`-I ../../vault/core/src`), so a change there must re-trigger them.
+    # (`-I ../../core/src`), so a change there must re-trigger them.
     inputs:
       - 'src/**/*.mojo'
       - 'test/**/*.mojo'

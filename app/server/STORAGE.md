@@ -165,9 +165,9 @@ kv/doc shapes the `mill` CLI and the server use in-process).
   dependency.
 - **Re-wire.** `app/server`'s facades now `from vault.storage import …`: `work_queue.mojo`
   (the `wq_*` delegators), `server.mojo` (the log/kv facades), the test tasks. app/server
-  already built with `-I ../../vault/core/src` (for `vault.derive.*`), so the server build
+  already built with `-I ../../core/src` (for `vault.derive.*`), so the server build
   needed no new include; the `test-workqueue` / `test-logstore` / `test-kvstore` /
-  `test-scheduler` pixi tasks each gained `-I ../../vault/core/src`.
+  `test-scheduler` pixi tasks each gained `-I ../../core/src`.
 - **Precompile/bundle.** `precompile_pkgs.sh` runs `mojo precompile core/src/vault`, which
   compiles EVERY file in the package — so the new `vault/storage/` sub-package is folded
   into `vault.mojoc` automatically (no script change), and the app-server resolves

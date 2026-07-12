@@ -25,12 +25,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"                 # app/
-UMBRELLA="${UMBRELLA:-$(cd "$ROOT/.." && pwd)}"
-PRIVACY_BOX="${PRIVACY_BOX:-$UMBRELLA/vault/privacy-box}"
-FLARE="${FLARE:-$UMBRELLA/flare}"
-JSON="${JSON:-$UMBRELLA/json}"
-JINJA2="${JINJA2:-$UMBRELLA/jinja2.mojo}"
-LOGGING="${LOGGING:-$UMBRELLA/logging.mojo}"
+UMBRELLA="${UMBRELLA:-$(cd "$ROOT/.." && pwd)}"               # the vault repo root (monorepo)
+PRIVACY_BOX="${PRIVACY_BOX:-$UMBRELLA/privacy-box}"
+FLARE="${FLARE:-$UMBRELLA/../flare}"
+JSON="${JSON:-$UMBRELLA/../json}"
+JINJA2="${JINJA2:-$UMBRELLA/../jinja2.mojo}"
+LOGGING="${LOGGING:-$UMBRELLA/../logging.mojo}"
 OUT="${1:-$ROOT/millfolio-app.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac       # zip runs from a temp dir — need absolute
 MOJO="${MOJO:-mojo}"
@@ -47,7 +47,7 @@ PKGS="${PKGS:-}"
 if [[ -z "$PKGS" ]]; then
     echo "==> PKGS unset — precompiling the vault package set" >&2
     PKGS="$STAGE/pkgs"
-    MOJO="$MOJO" bash "$UMBRELLA/vault/core/scripts/precompile_pkgs.sh" "$PKGS"
+    MOJO="$MOJO" bash "$UMBRELLA/core/scripts/precompile_pkgs.sh" "$PKGS"
 fi
 [[ -f "$PKGS/vault.mojoc" ]] || { echo "error: PKGS=$PKGS has no vault.mojoc" >&2; exit 1; }
 

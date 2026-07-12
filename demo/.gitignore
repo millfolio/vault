@@ -1,0 +1,12 @@
+# build / runtime
+*.pyc
+__pycache__/
+.DS_Store
+
+# the pre-built index is large + regenerable; keep the SOURCE fixtures + the cache,
+# stage index/ at deploy. (Commit index/ instead if you want a turnkey checkout.)
+fixtures/index/index.db/
+
+# never commit a real key
+.env
+*-key.txt

@@ -1,0 +1,437 @@
+{
+  "0032ac0b908f93e7c493c8a2312ff4c7be5ea44072ae288adddafddc04bc9f2a": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "0149e2ba78baf73cad4e9d3d1c9fabf20f035ea6caa1cfffda965b82cfed04fa": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "025a91a89e8a3d719d0c48ebb32ffcd63eee8e1bc0c0c36f9c0fe89acced919a": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "0326b82f028623326c1b504778c69507fded64362e93ddad6e3808fab6a84868": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "0362727707983672d727bcbefd54648cf2d36e45a49e4b3dd3617caeb2e6f897": {
+    "question": "result_text(\"Here is your monthly spending per merchant (merchants with more than 2 transactions) over the last 6 months, plus line graphs for the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
+  "038630ce5f96289b12942165fc5c7308be5673a5574cf116bbb3e6210905e7c3": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "050ad55f5ae2b5e61670e87d18dd7a9951e1f10ebeec7b5853e1d7a56edd41e1": {
+    "question": " if ps != \"none\" and ps != \"\":\n                print_answer(\"Your license plate number is \" + ps + \".\")\n                return\n    print_answer(\"I couldn't find a license plate number in your vault.\")"
+  },
+  "06f7c911f4030d1aaa8093426ee76798c2442b43944ed9bb8f209df61db81820": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "0787f14d8e5c67230d07f742d47292bfe1293de1c882c889665ae9386c6875bc": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "07e0146ae2ca2f3c48bac9e59bf5049847898b2218d3803f89c7acc96bdf789d": {
+    "question": "            + \"  Total received (credits): \" + money(received2) + \" across \" + String(nc) + \" transactions\")\n    else:\n        print_answer(\"I couldn't find any clear spending amounts in your vault.\")"
+  },
+  "0ab6ca07e5d391056ea694099b1b7d443f858f5c74c19f7a545621702eb71b7c": {
+    "question": "           if s != \"none\" and s != \"\":\n                print_answer(\"Your car is a \" + s + \".\")\n                return\n    print_answer(\"I couldn't find any car or vehicle information in your vault.\")"
+  },
+  "0e70c6263ad8da3ba3958874fe3c605f3090f8bd478fb583adae35a76be6bff6": {
+    "question": "(\"Your biggest transaction was \" + money(top_amount) + dir_label\n            + \" \u2014 \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "0e9a36275d8d9c484591a7a52ae7448a5ec9d4a49aa240089b18a95a6a323aa0": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "112a338fa3efa044e9c5e7cc1256c1d9dee49522f3544118c2f52ffcc32d32e1": {
+    "question": "  if s != \"none\" and s != \"\":\n                print_answer(\"Your insurance policy number is: \" + s)\n                return\n    print_answer(\"I couldn't find an insurance policy number in your vault.\")"
+  },
+  "1257b89905092e849885a4bde6618ef28abd09bfe7e2ddf25ebd67622139cee4": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "12ac7129d420df29202dd6d2c570c4aa1ed053c5bba0df495739ad9110ef252c": {
+    "question": "d ds != \"\":\n                print_answer(\"Your vehicle registration expires on: \" + ds)\n                return\n    print_answer(\"I couldn't find a vehicle registration expiration date in your vault.\")"
+  },
+  "133615e185dc274c909209373f939a4a560296e05d5c916c4141954b0d467147": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "14f4133d17e554c047cd05f37f7d60dbb34100a077cfedae8dbc1502be6f8142": {
+    "question": "\n            + money(spent) + \" out (debits) and \"\n            + money(received) + \" in (credits/deposits).\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "150adb4112a610067a106f65680296f7c2a5516c52757064b5dd1624560b2aeb": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "1561197e733113adfb73fac4c7f3fe80ceab7e58c7f76d424c80af33ef4325ae": {
+    "question": "d ds != \"\":\n                print_answer(\"Your vehicle registration expires on: \" + ds)\n                return\n    print_answer(\"I couldn't find a vehicle registration expiration date in your vault.\")"
+  },
+  "16d859e35a98f325cf22ad250533fe0ad2b2a5ab08b09ff012bf1f97b8a66db0": {
+    "question": "c.). \"\n        \"Do not repeat yourself. Do not guess or invent anything not in the text.\",\n        combined\n    )\n\n    print_answer(\"Here is what your insurance covers:\\n\\n\" + String(summary.strip()))"
+  },
+  "17dec26907b46fe7252b25a2ed4cca97b2518c0364d7507e03ee2774c3b54278": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "17fedfe9468a990d9c53f44e2e40bb322cd4e9b115aaaab790095e9c7fd18a74": {
+    "question": "      if ps != \"none\" and ps != \"\":\n                print_answer(\"Your license plate number is: \" + ps)\n                return\n    print_answer(\"I couldn't find a license plate number in your vault.\")"
+  },
+  "190cede6e17e674803c50c055b9a28222895d1496a563bc74193bc21f5b9afd6": {
+    "question": "           if s != \"none\" and s != \"\":\n                print_answer(\"Your car is a \" + s + \".\")\n                return\n    print_answer(\"I couldn't find any car or vehicle information in your vault.\")"
+  },
+  "1a1d6885592b61e7e3a1bd030846144d377aa0ed4f6d43aead4a396cc789d8ad": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "1bd6f9b70e0b792dc96f2923b299a30c6a5f80c3504eb5bc1f575a3b6a291abc": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "1f39872340007ade21cd1007673869fbfe57ffb9e48ded5f80fd107629424b6d": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "21593263ce33225af52aa242fdfe3d923f7d7e3863f0241f933eb4cef010b446": {
+    "question": " \"\":\n            msg = msg + \" (\" + top_direction + \")\"\n        msg = msg + \".\"\n        print_answer(msg)\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "21c3d27ef89dc2117f18d2f461b898c5baa3f4ada1d32d8dfe89caa5163cd427": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "28f95745902b4471e72972ca3f3f6865075a1343fc4181e8dd058b474791db85": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "2bd61bdea9b7d89bc84dc293f1ca7ca83e9ec642b72788d0011b933032ca2321": {
+    "question": " \"\":\n                print_answer(\"Your vehicle registration expires on \" + ans2 + \".\")\n                return\n    print_answer(\"I couldn't find a vehicle registration expiration date in your vault.\")"
+  },
+  "2e8c0a562ed1ea0f34e8618cea190b004a9fbf3e4378b3a4a6771abb10ec31d7": {
+    "question": "+ money(total_credit) + \" in (credits). \"\n                + \"Net: \" + money(total_credit - total_debit) + \".\")\n        else:\n            print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "31be5321ed82df1c72c1257bc1abc07b209a6ac59d7a08a13b2296b1011ac1e6": {
+    "question": "            + money(total_debit) + \" out (debits) and \"\n            + money(total_credit) + \" in (credits).\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "31c5d5cbbd27a23011d9c079800a9029c6662bd89e8112406fe633901fa534ca": {
+    "question": " \"\":\n            msg = msg + \" (\" + top_direction + \")\"\n        msg = msg + \".\"\n        print_answer(msg)\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "328c021ea2ab245c2bc48a9f531e1d0427f9c7d35532d8746183785a715b8d07": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "32f681bf8d817ce1621dd2a5c1878cc2a42b860471ed248f3a2b9407cf75cd51": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "35af7d4003c5d969bb4097bfadababa729653ec36343bef61fb6d3cbf398c252": {
+    "question": "d ds != \"\":\n                print_answer(\"Your vehicle registration expires on: \" + ds)\n                return\n    print_answer(\"I couldn't find a vehicle registration expiration date in your vault.\")"
+  },
+  "365b2d7b6baea7c5f81b2c828db347877a303c623c5d14e25246525b6a8a7b5b": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "39e9f3244ee88b08b57f3ea6430965e71e6127cf6dccdfcaa1de591f6719b0bc": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "3a6bb88b0e463f96bdbb8230ef947966484b317467964276a4f6d28108516cb1": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "3a9901b18af6ec74ceacb11377d1d1b7cacee88ee3cfd558374657dabe2254cb": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "3af9d47110837d3faae9349d77b6c14a32b3d3733f87a8cd2db3c6562aad7efe": {
+    "question": "edits (money in):  \" + money(total_credit) + \"\\n\"\n            + \"  Net:                       \" + money(net)\n        )\n    else:\n        print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "3b3836b4fd2037dfdcd7da41e0df21838cf888a15e014e8188fb3215f2ca3e6e": {
+    "question": "\" and result != \"\":\n                print_answer(\"Your car insurance renews on: \" + result + \".\")\n                return\n    print_answer(\"I couldn't find a car insurance renewal date in your vault.\")"
+  },
+  "3bf0a7e70597b8b99ef2ab6b9d9cc27270bcce537e68e41bac84397ff2ddc80e": {
+    "question": "ans != \"none\" and ans != \"\":\n                print_answer(\"Your car insurance renews on: \" + ans)\n                return\n    print_answer(\"I couldn't find a car insurance renewal date in your vault.\")"
+  },
+  "3c072c28d63bf716de1b51da86c0e5928328e7ae5512df2d18e64318b2d6ad2d": {
+    "question": "        + money(received) + \" in (credits/deposits). \"\n            + \"Net: \" + money(received - spent) + \".\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "3ed14c0bb8fbdac12397ceb64c1c9b09bca9d79cf0b695ce66292e45c884c134": {
+    "question": "e\" and result != \"\":\n                print_answer(\"Your car insurance renews on \" + result + \".\")\n                return\n    print_answer(\"I couldn't find a car insurance renewal date in your vault.\")"
+  },
+  "433934ede2456b75c465e96ffa9782fc45990d6b8d122db267068f2d763f951c": {
+    "question": "ls.\")\n        return\n\n    var answer = String(\"Here is what your insurance covers:\\n\\n\")\n    for i in range(len(final_parts)):\n        answer = answer + final_parts[i] + \"\\n\"\n\n    print_answer(answer)"
+  },
+  "43bb9ac8bd2a4aebaaec615b9b3068c94a271ae5cc13f0b77f6b6be88802c36b": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "4423e5ce36cde01db3e983dde551df43dfbe4c0d6425846bb6bb09a0c73de66d": {
+    "question": "/demo-vault/vault\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "466280c4f27b8dd0ee09fec3d6c0ec15d23356e9d6f755eb269d94846c1fa329": {
+    "question": "\n    if total > 0:\n        print_answer(\"You have \" + String(total) + \" transactions across all your files.\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "46db316abc9cc8ef190b601b9e378a620742705784296ac1584b872a39f4e769": {
+    "question": "otal_received) + \" across \" + String(n_credits) + \" credit/deposit transaction(s).\"\n        print_answer(msg)\n    else:\n        print_answer(\"I couldn't find any spending transactions in your vault.\")"
+  },
+  "47fd18540074bca7f5dc532377e8469d28c6247212984c2bd12be55622e248c0": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "49f76dda7f5e98b35c80e2d65092a34f1694314e49dba1a30f9953a9c6109155": {
+    "question": ")\n        if r != \"none\" and r != \"\":\n            print_answer(\"Your insurance policy number is: \" + r)\n            return\n    print_answer(\"I couldn't find an insurance policy number in your vault.\")"
+  },
+  "4b20400d7913d0a1cec707719636c48784ca0674c1e91b5e07d9cfd93d551f4e": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "4bf0d6ce823c87319f2deecc033d6fe2c01274374596f1cb0734897b053f9894": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "4f2b8d7d5a9a238cc4023e1223e021899600c332bdc7d01887ab8f0bd74f7b30": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "51e89cb5a227aa67a5148cfdbfe799d454863b21051899eef12a42ba7837df21": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "52138b3ac049df3a551fcc19784d3c434ff2fef36eda4dbd3867bc1a7b7c2bac": {
+    "question": "edits (money in):  \" + money(total_credit) + \"\\n\"\n            + \"  Net:                       \" + money(net)\n        )\n    else:\n        print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "55bbec97dde3ee10a450b014eb72de5fd87785c4fa396e1e916b2ed7d740241b": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "565faba522c384cff217c813426f7a65b44682805ac759a6eb13095312ba3be4": {
+    "question": " \"\":\n            msg = msg + \" (\" + top_direction + \")\"\n        msg = msg + \".\"\n        print_answer(msg)\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "56e4931efb8cf3183b1cfc0f8144415fb1fb24b2c6f63cd99ca58f3cc2932f8d": {
+    "question": "+ money(total_credit) + \" in (credits). \"\n                + \"Net: \" + money(total_credit - total_debit) + \".\")\n        else:\n            print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "5766fc08a8cd327d8e6c840f9599bac481f38d05ddf23e951e8d3647858d3134": {
+    "question": "\" and result != \"\":\n                print_answer(\"Your car insurance renews on: \" + result + \".\")\n                return\n    print_answer(\"I couldn't find a car insurance renewal date in your vault.\")"
+  },
+  "5aa1319240b56285b9659f2aadf3d0578029e52a5172d41ecb34a93bff7cbdce": {
+    "question": "and s != \"\":\n                print_answer(\"Your vehicle registration expires on: \" + s)\n                return\n    print_answer(\"I couldn't find a vehicle registration expiration date in your vault.\")"
+  },
+  "5d6c239981534aef7b026cd1b19e9420fc25403a436870c523952075636bde20": {
+    "question": "_text(\"Here is your weekly spending per merchant over the last 6 months for merchants with more than 2 transactions. Line graphs are shown for the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
+  "62bf4d980c7a6d34d361aed5ae7324058a2a0857cf598689b21e1fae6d7f202a": {
+    "question": "+ money(total_credit) + \" in (credits). \"\n                + \"Net: \" + money(total_credit - total_debit) + \".\")\n        else:\n            print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "65fa6bf6b69e6401d6c5c238e89633f10b408c1ab95c69ffa6c68433d6c3b3d7": {
+    "question": "/demo-vault/vault\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "6d001a15f8eac5d97591eedce77362304871be271664478702dbbe10a5bbb4a7": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "71fe0179f8dfc106272898019f9b61e56ce9c645cd8c5c5010c0293512f4857d": {
+    "question": "  if s != \"none\" and s != \"\":\n                print_answer(\"Your insurance policy number is: \" + s)\n                return\n    print_answer(\"I couldn't find an insurance policy number in your vault.\")"
+  },
+  "7c3efcd896fec076c74a779e0ad2650d9c36868b36bad2d9d4c5697d90061f95": {
+    "question": "vision, exclusions, limits). \"\n        \"Do not guess or invent anything not in the text.\",\n        combined\n    )\n\n    print_answer(\"Here is what your insurance covers:\\n\\n\" + String(summary.strip()))"
+  },
+  "8226a2a021ae0b87f66deec04d9b236f05637f0ae92051ad8c8041aa8f7bf51d": {
+    "question": "c.). \"\n        \"Do not repeat yourself. Do not guess or invent anything not in the text.\",\n        combined\n    )\n\n    print_answer(\"Here is what your insurance covers:\\n\\n\" + String(summary.strip()))"
+  },
+  "828be9a943386cca12596f994e65368b4919b373e3a623c1886e9a47069fa8f0": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "866ebf9e3b494d46847941d7a0216b327aabc19a772ef48c38badae1984607a8": {
+    "question": "y \" +\n                money(fallback_received) + \" (across ~\" + String(fb_credits) + \" credit items).\")\n        else:\n            print_answer(\"I couldn't find any transaction amounts in your vault.\")"
+  },
+  "86e7a5ad9f547d35d42ab9be37b4326fac67b52452bc5a33b692abb15296ef75": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "871b2602486d777a476785a904c0a2abeb0430700923633e5fbeae59299ed715": {
+    "question": "/demo-vault/vault\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "8a4675f2466f9ed64193a6706ef0c84aae7c1958a65140597dfc6d98f90bed62": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "8cc205f9f583b8cd65d6ca058b31cc932eafe66b383b2a34508e8020a1d6b880": {
+    "question": " if ps != \"none\" and ps != \"\":\n                print_answer(\"Your license plate number is \" + ps + \".\")\n                return\n    print_answer(\"I couldn't find a license plate number in your vault.\")"
+  },
+  "8da7652bf196c74aaa8b9cef8b4a63476ac41982447ecd39f4390cb694c4f230": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "8e1bb562ba8add85f1f9f1c5388d701bfbc3f8d429bfd538ff083229b143a14d": {
+    "question": "y \" +\n                money(fallback_received) + \" (across ~\" + String(fb_credits) + \" credit items).\")\n        else:\n            print_answer(\"I couldn't find any transaction amounts in your vault.\")"
+  },
+  "8eb04b5e7429b6024c0cd8782a6ce2ee267ad5eaf5d886fc409d28a14cce2295": {
+    "question": "\n            + money(spent) + \" out (debits) and \"\n            + money(received) + \" in (credits/deposits).\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "8ed0951b18ff588745eae704bae782965ddd310bc7a25c2b3ca7a2e8e9671c9b": {
+    "question": "_ans == \"none\":\n        print_answer(\"I found insurance documents but couldn't clearly extract coverage details.\")\n    else:\n        print_answer(\"Here is what your insurance covers:\\n\\n\" + final_ans)"
+  },
+  "90da44d60c9c50563c20320412b14ea48719fe89b82ff37f6abc27ca70683582": {
+    "question": "\n            + money(spent) + \" out (debits) and \"\n            + money(received) + \" in (credits/deposits).\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "941f205369ec8361d0f57e5568111d3b97c7fca0775faae93d47a72efa5f6ba6": {
+    "question": "_text(\"Here is your weekly spending per merchant over the last 6 months for merchants with more than 2 transactions. Line graphs are shown for the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
+  "94ab2cf263274e9d82feb68517b2b5e1e5bba953f4bbad0a559623bc0df45d05": {
+    "question": "nswer.strip())\n        if s != \"none\" and s != \"\":\n            print_answer(\"Your car is a \" + s + \".\")\n            return\n    print_answer(\"I couldn't find information about your car in your vault.\")"
+  },
+  "969d5edb2d05f0cf75cced45b4548c5a307ed0d95cc243ea8ce44528bbe2f438": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "977c7e469ed21fcd156a3dbfdfbabf46cfce2fba1dc4a29d6be339c292e64298": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "9886f1a75e4a49a2b391c3c67a6806ba3318b7071dbb1deb7399d7961a1a080f": {
+    "question": "            + \"  Total received (credits): \" + money(received2) + \" across \" + String(nc) + \" transactions\")\n    else:\n        print_answer(\"I couldn't find any clear spending amounts in your vault.\")"
+  },
+  "99b1af9059e2ac02970e847a2fad6d35a43cb438c1b9a916adfa1d1ec15cdc03": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "9a698093084a57c6a3c0cb092739966fc238e96e8caf0fe1e57bffd06695e78f": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "9ae9ba94b12059df38482328be6371032ccd28a8b66c02a78df895a2f398e0ee": {
+    "question": "  if s != \"none\" and s != \"\":\n                print_answer(\"Your insurance policy number is: \" + s)\n                return\n    print_answer(\"I couldn't find an insurance policy number in your vault.\")"
+  },
+  "9c47abf82b98cd4d4013f3187942bf8764f9b60f000e5c4f0f1b5b3f3fc6c97f": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "9cdb5c2ae0bea3d599a03177d8237588a73b4ff38b0660cb357583617bbe1dfd": {
+    "question": "vision, exclusions, limits). \"\n        \"Do not guess or invent anything not in the text.\",\n        combined\n    )\n\n    print_answer(\"Here is what your insurance covers:\\n\\n\" + String(summary.strip()))"
+  },
+  "9e8f02ca0f453523503c3ec6d9163ca96b61a694837400ca21663d513e749c1f": {
+    "question": "  if s != \"none\" and s != \"\":\n                print_answer(\"Your insurance policy number is: \" + s)\n                return\n    print_answer(\"I couldn't find an insurance policy number in your vault.\")"
+  },
+  "a29ac4950692ab44a39f947309ea6f087acfc601ad76bd4d0aa24be5889b89c3": {
+    "question": "_ans == \"none\":\n        print_answer(\"I found insurance documents but couldn't clearly extract coverage details.\")\n    else:\n        print_answer(\"Here is what your insurance covers:\\n\\n\" + final_ans)"
+  },
+  "a660e94488c9d7d757db23559cec2b3d987b6208b995b02761aced437ef7de7c": {
+    "question": " \"\":\n            msg = msg + \" (\" + top_direction + \")\"\n        msg = msg + \".\"\n        print_answer(msg)\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "a7e9a7ba9b3a720d4eff2cf491ed45e281a341c999940f3905ecb4cf56220745": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "a8ce825cd4223fd6faeb7773eecdb714b4be045bdce359757c4f3aaab8df1177": {
+    "question": "c.). \"\n        \"Do not repeat yourself. Do not guess or invent anything not in the text.\",\n        combined\n    )\n\n    print_answer(\"Here is what your insurance covers:\\n\\n\" + String(summary.strip()))"
+  },
+  "a9f1daa9290f9f4437b82dfd679d5bd729ae574ea9015325144669f8122a8056": {
+    "question": "(\"Your biggest transaction was \" + money(top_amount) + dir_label\n            + \" \u2014 \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "aa613b3175ee3b4cd364b075fe07f281e211d43ba6064cf7912c17cce3584125": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "aafc77679d9b2d18e6ca4dddeebb2435d33af8f49b45dced4b5c61bd60c34b8f": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "ae1838a4743296aa3d4a4be6091e8f2456026346f4486fa941fab311bcf89985": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "ae4828aeacddb6bb25c3290a347a0868f9a2750a3afaf5fd10f700acf431065b": {
+    "question": "            + \"  Total received (credits): \" + money(received2) + \" across \" + String(nc) + \" transactions\")\n    else:\n        print_answer(\"I couldn't find any clear spending amounts in your vault.\")"
+  },
+  "ae857d6d3a73bce7a4116d94fa82c99c9ef6e7db41f1b4808c0a276729c5ddd2": {
+    "question": "result_text(\"Here is your monthly spending per merchant (merchants with more than 2 transactions) over the last 6 months, plus line graphs for the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
+  "b3c954626ec766ba64c250afda8115f72ec506ae193f6f042d8eea4793787044": {
+    "question": "           if s != \"none\" and s != \"\":\n                print_answer(\"Your car is a \" + s + \".\")\n                return\n    print_answer(\"I couldn't find any car or vehicle information in your vault.\")"
+  },
+  "b5fe6495ad579b7c36fc8d4cdce0d35d0d6415c3412abfa1afb51ceb027c7201": {
+    "question": " if ps != \"none\" and ps != \"\":\n                print_answer(\"Your license plate number is \" + ps + \".\")\n                return\n    print_answer(\"I couldn't find a license plate number in your vault.\")"
+  },
+  "b67d3a875573bb68684e2eda9fa00271a69613a42a8d31178b41b2cfd0126d4f": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "b80aa18705b8340c53e0b04877ad7a120cc38860da75425352d99e0865bf4d06": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "b98fcd11b28f69a8c11069489dadcd8739e0666be055b509a4fe90efe5e19cf2": {
+    "question": "ely \" + String(count)\n                + \" transactions across your documents (estimated from text scanning).\")\n        else:\n            print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "bcec5aac6e2cc902b8c17cba6ddb59fe43e6e546877ef2b4695c41bd0ef15660": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "bdc4e01ac42992589f4e88e8efa290b39bbe332a338c3b7fc068cc22c90597d2": {
+    "question": "\n            + money(spent) + \" out (debits) and \"\n            + money(received) + \" in (credits/deposits).\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "beb956d39cd6b9019aaa482e0567a6bf3833802b7cd08f30c6ba6ebc58ef9d1e": {
+    "question": "result_text(\"Here is your monthly spending per merchant (merchants with more than 2 transactions) over the last 6 months, plus line graphs for the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
+  "bf80c477b45453242ca0611b5ae4f59f64603b30e21915eb57a7f33f1a121437": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "c7db17885eb3844a8ba5f1292c003a2ba06fb7c454da88315061d2ca98260e04": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "c7eab0ecf9693c3b9908042dca26dd0c2f9b4c331583c5e613c13b15daa106e2": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "cb1626675526ef2e7b76b2d8e700926fa049512215da03b37ee8d6c752bd497d": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "ccd6d0daa1b0e9d03351284124ef0a4e4f8ee8ac8d0dbc13bb0dda885358d6ba": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "ce038c9560a0219f211cce2ef8df62af0b22197c9b39981a332a4227fc3216a0": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "cf7afcb5a41019f5955077a68c1648baf617d7b12f97319134a51b99ed8c9909": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "d32c836e9f48b63dd38c498bf9b5added8b4dc1d623a31b323a5828e709bb4df": {
+    "question": "           if s != \"none\" and s != \"\":\n                print_answer(\"Your car is a \" + s + \".\")\n                return\n    print_answer(\"I couldn't find any car or vehicle information in your vault.\")"
+  },
+  "d48ce3096b137411d002f2cd5afa03c2794afecfa0b0f9ae6cdd888f49e9c6d0": {
+    "question": "ilter transactions() on them for category questions, e.g. `\"phone\" in t.tags`): usage: millfolio <manifest|read|embed|index|search> ...\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "d5ec38691e3b3f105398f86e9eab228cc089d441c5188ed6bd83ca35e6e008fc": {
+    "question": "\n            + money(spent) + \" out (debits) and \"\n            + money(received) + \" in (credits/deposits).\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
+  },
+  "d6990d585f33cc7f0405d0cafe717e45e7ffdd851c6330603d186e0382525f5c": {
+    "question": "_text(\"Here is your weekly spending per merchant over the last 6 months for merchants with more than 2 transactions. Line graphs are shown for the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
+  "d6d036a15f6bb03785448e4716cf90946ec6b557ff225d011ae810c4eadb2ab8": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  },
+  "d7ea59da8e3b29117c868d9d7ad3204cb685215a471bac488827e47e986bf70e": {
+    "question": "             display_row.append(money(matrix[i][j]))\n            else:\n                display_row.append(\"-\")\n        display_row.append(money(merch_total[mi]))\n        _ = final_tbl.row(display_row)"
+  },
+  "d8bc549b866bc98996b9460294bba0ab9fd0cb9173953d831c42271409cee103": {
+    "question": "/demo-vault/vault\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "d92ef2d1d33345354e42204b110590e94b61d45d02d888ebe1351fbf3cdd6d1b": {
+    "question": "\" and result != \"\":\n                print_answer(\"Your car insurance renews on: \" + result + \".\")\n                return\n    print_answer(\"I couldn't find a car insurance renewal date in your vault.\")"
+  },
+  "de5172e54c507eccc4a035b559d86edfe0608211eea031dbbf6c26e3f63ce0df": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "df86fa569f900d5daafa3428fe875718d1e803288a1ffdac4016ac57b0848ed5": {
+    "question": "vision, exclusions, limits). \"\n        \"Do not guess or invent anything not in the text.\",\n        combined\n    )\n\n    print_answer(\"Here is what your insurance covers:\\n\\n\" + String(summary.strip()))"
+  },
+  "e09e1cd7f0f8e659912919e3a84b1bc483186f0dbdf9574d2e2302a411bb2e7c": {
+    "question": " ans != \"none\" and ans != \"\":\n                print_answer(\"Your license plate number is \" + ans + \".\")\n                return\n    print_answer(\"I couldn't find a license plate number in your vault.\")"
+  },
+  "e13834362887a1e3fcf1143f9def2aa6927727168f3b3647b24fa933ca59b4fe": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "e14718ec2e097740d1db6db9b0e62514484fab934deabddfa3c42aac6d0d5f1a": {
+    "question": "/demo-vault/vault\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "e2eae43a9f96bee2fb373977f864442b53501a9e0d71e236947cda54c1dd5acd": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "e328896297738c11caacb8d5e8c88007fcabca04b817e6bc8f22404bfad72c9b": {
+    "question": "+ money(total_credit) + \" in (credits). \"\n                + \"Net: \" + money(total_credit - total_debit) + \".\")\n        else:\n            print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "e3615cb36c1fc64c528724114425eba68022580de53b08e6e7eb13345247511f": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "e37044a4df62de89693886bc4bb883677e27b815f3239ce473cf3eea4ed5b13d": {
+    "question": "otal) +\n                     \" across \" + String(fallback_count) + \" transactions found in your documents.\")\n    else:\n        print_answer(\"I couldn't find any clear spending amounts in your vault.\")"
+  },
+  "e4d63db176695b6d5b857df1088a1fb0b28f9782a6db146bb19ab4443b661ccf": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "ec35e25b9858b630f68a8e21edfaa1cdcde4e6faa4b0ddd1fa66a6aa81ee31ee": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "ef397a8610efcb2b4c44eac0f345d1bfdcec11a1656a64e259f683575f45723c": {
+    "question": "edits (money in):  \" + money(total_credit) + \"\\n\"\n            + \"  Net:                       \" + money(net)\n        )\n    else:\n        print_answer(\"I couldn't find any transactions in your vault.\")"
+  },
+  "f14f6869332a2a284eb310536a9f58ce44b209d777fdaf7f5602162ebc1c99c5": {
+    "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "f2ac2378c7808eb7143d6fe30ff60eb50feff4b9b03744c27bed9d56fd5dc367": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "f38da32a42f3f05677e1830dd31e1ff158270703aeb1d9ed8f61f5970a4b61a9": {
+    "question": "            + \"  Total received (credits): \" + money(received2) + \" across \" + String(nc) + \" transactions\")\n    else:\n        print_answer(\"I couldn't find any clear spending amounts in your vault.\")"
+  },
+  "f4146c6613f6b369ba139221c970521121d031e0e5a4f2439360af1df190dd35": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "f477e9a07460d39b1089e52673b735f1918be2b74517bf798dd1375c0ed91249": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "f962942641dcaee67017d3ce0271802bba4026e9cd58a4d3b0e517cea03ffa71": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "fb094fa2e1a33027fe2016599edd3d19745313b5bb8118ff60f108bc82f6e2ce": {
+    "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "fc75f186cacd6a2dd224ca54bf00cbd7b1b242afb19ab6d59c5dde562c16df1f": {
+    "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
+  }
+}

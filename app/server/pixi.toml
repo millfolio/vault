@@ -25,47 +25,47 @@ libbrotlienc     = ">=1,<2"
 [tasks]
 # Build flare's FFI shims into THIS env's $CONDA_PREFIX/lib so flare's HTTP/TLS
 # client works when linked via -I flare. Repos are laid out as siblings of the
-# `app/` checkout, so flare is two levels up (app/server/../../flare). Mirrors
+# `app/` checkout, so flare is two levels up (app/server/../../../flare). Mirrors
 # privacy_box's `flare-ffi` task.
-flare-ffi = "bash -c 'source ../../flare/flare/tls/ffi/build.sh; source ../../flare/flare/http/ffi/build.sh'"
+flare-ffi = "bash -c 'source ../../../flare/flare/tls/ffi/build.sh; source ../../../flare/flare/http/ffi/build.sh'"
 
 # Compile the server. Serves BOTH the unary HTTP API and the streaming WebSocket
 # chat on one :10000 listener (flare's serve(handler, ws_handler)). `-I src`
 # resolves the sibling events.mojo (WS event serialization); imports the privacy_box
-# orchestrator (wiring/orchestrator/settings/vaultcfg) via -I ../../vault/privacy-box/src,
-# plus flare/json/jinja2. `-I ../../vault/core/src` pulls vault.derive.store (the
+# orchestrator (wiring/orchestrator/settings/vaultcfg) via -I ../../privacy-box/src,
+# plus flare/json/jinja2. `-I ../../core/src` pulls vault.derive.store (the
 # LanceDB-free registry/tags/retag store — same functions the `millfolio` CLI uses,
 # so /api/tags + category edits run IN-PROCESS, no spawning the engine binary). The
 # vault gen program's extra shims (zlib/lancedb) are NOT needed here: it's compiled +
 # run as a separate subprocess at request time.
-build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../vault/privacy-box/src -I ../../vault/core/src -I ../../flare -I ../../json -I ../../jinja2.mojo/src -I ../../logging.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
+build = { cmd = "mkdir -p build && mojo build src/server.mojo -I src -I ../../privacy-box/src -I ../../core/src -I ../../../flare -I ../../../json -I ../../../jinja2.mojo/src -I ../../../logging.mojo/src -o build/millfolio-server", depends-on = ["flare-ffi"] }
 
 # Unit-test the protocol wire helpers (events.mojo) — no flare/privacy_box, only json.
-test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../../json -o build/events-test && ./build/events-test" }
+test = { cmd = "mkdir -p build && mojo build test/events_test.mojo -I src -I ../../../json -o build/events-test && ./build/events-test" }
 # Unit-test the serial run-queue state file (runqueue.mojo) — flock + ticket invariants.
-test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I src -I ../../flare -o build/runqueue-test && rm -f /tmp/millfolio-runq-test /tmp/millfolio-runq-test.lock && MILLFOLIO_RUNQ_PATH=/tmp/millfolio-runq-test ./build/runqueue-test" }
+test-runqueue = { cmd = "mkdir -p build && mojo build test/runqueue_test.mojo -I src -I ../../../flare -o build/runqueue-test && rm -f /tmp/millfolio-runq-test /tmp/millfolio-runq-test.lock && MILLFOLIO_RUNQ_PATH=/tmp/millfolio-runq-test ./build/runqueue-test" }
 # Unit-test the disk-backed work queue (work_queue.mojo) — priority/FIFO/dedup/persistence.
-test-workqueue = { cmd = "mkdir -p build && mojo build test/work_queue_test.mojo -I src -I ../../vault/core/src -I ../../flare -o build/workqueue-test && rm -f /tmp/millfolio-workq-test /tmp/millfolio-workq-test.lock /tmp/millfolio-workq-test.tmp && MILLFOLIO_WORKQ_PATH=/tmp/millfolio-workq-test ./build/workqueue-test" }
+test-workqueue = { cmd = "mkdir -p build && mojo build test/work_queue_test.mojo -I src -I ../../core/src -I ../../../flare -o build/workqueue-test && rm -f /tmp/millfolio-workq-test /tmp/millfolio-workq-test.lock /tmp/millfolio-workq-test.tmp && MILLFOLIO_WORKQ_PATH=/tmp/millfolio-workq-test ./build/workqueue-test" }
 # Unit-test the on-device JSON store builders (record_builders.mojo) — ask history + /api/system.
-test-record-builders = { cmd = "mkdir -p build && mojo build test/record_builders_test.mojo -I src -I ../../json -o build/record-builders-test && ./build/record-builders-test" }
+test-record-builders = { cmd = "mkdir -p build && mojo build test/record_builders_test.mojo -I src -I ../../../json -o build/record-builders-test && ./build/record-builders-test" }
 # Unit-test the append-log storage seam (storage.mojo — LogStore) — append/read_all/rewrite over temp files.
-test-logstore = { cmd = "mkdir -p build && mojo build test/log_store_test.mojo -I src -I ../../vault/core/src -I ../../flare -I ../../json -o build/logstore-test && rm -f /tmp/millfolio-logstore-test.jsonl /tmp/millfolio-logstore-test-ops.jsonl && ./build/logstore-test" }
+test-logstore = { cmd = "mkdir -p build && mojo build test/log_store_test.mojo -I src -I ../../core/src -I ../../../flare -I ../../../json -o build/logstore-test && rm -f /tmp/millfolio-logstore-test.jsonl /tmp/millfolio-logstore-test-ops.jsonl && ./build/logstore-test" }
 # Unit-test the KV / small-marker storage seam (storage.mojo — KvStore) — get/set/delete/exists over a temp MILLFOLIO_DATA_DIR.
-test-kvstore = { cmd = "mkdir -p build && mojo build test/kv_store_test.mojo -I src -I ../../vault/core/src -I ../../flare -I ../../json -o build/kvstore-test && rm -rf /tmp/millfolio-kvstore-test && mkdir -p /tmp/millfolio-kvstore-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-kvstore-test ./build/kvstore-test; rm -rf /tmp/millfolio-kvstore-test" }
+test-kvstore = { cmd = "mkdir -p build && mojo build test/kv_store_test.mojo -I src -I ../../core/src -I ../../../flare -I ../../../json -o build/kvstore-test && rm -rf /tmp/millfolio-kvstore-test && mkdir -p /tmp/millfolio-kvstore-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-kvstore-test ./build/kvstore-test; rm -rf /tmp/millfolio-kvstore-test" }
 # Unit-test the pure orchestrator seams (scheduler.mojo) — enqueue plan, queue-derived
 # status, pause/query gating, reconcile predicate, backfill readiness.
-test-scheduler = { cmd = "mkdir -p build && mojo build test/scheduler_test.mojo -I src -I ../../vault/core/src -I ../../flare -o build/scheduler-test && ./build/scheduler-test" }
+test-scheduler = { cmd = "mkdir -p build && mojo build test/scheduler_test.mojo -I src -I ../../core/src -I ../../../flare -o build/scheduler-test && ./build/scheduler-test" }
 # Unit-test the pure API-key helpers (apikey.mojo) — validation + last-4 masking + status JSON.
-test-apikey = { cmd = "mkdir -p build && mojo build test/apikey_test.mojo -I src -I ../../json -o build/apikey-test && ./build/apikey-test" }
+test-apikey = { cmd = "mkdir -p build && mojo build test/apikey_test.mojo -I src -I ../../../json -o build/apikey-test && ./build/apikey-test" }
 # Unit-test the foundational path/env/string helpers (osutil.mojo) — stdlib only, env knobs via setenv.
 test-osutil = { cmd = "mkdir -p build && mojo build test/osutil_test.mojo -I src -o build/osutil-test && ./build/osutil-test" }
 # Unit-test the system-stat samplers' parse/fetch split (sysmetrics.mojo) — pure parse + printf-driven fetch, no ioreg/vm_stat.
 test-sysmetrics = { cmd = "mkdir -p build && mojo build test/sysmetrics_test.mojo -I src -o build/sysmetrics-test && rm -f /tmp/millfolio-sysmetrics-test.out && ./build/sysmetrics-test" }
 # Unit-test the persisted-path portability helpers (vault.storage contract_home/expand_home) — hermetic via setenv HOME.
-test-homepath = { cmd = "mkdir -p build && mojo build test/home_path_test.mojo -I src -I ../../vault/core/src -I ../../flare -o build/homepath-test && ./build/homepath-test" }
+test-homepath = { cmd = "mkdir -p build && mojo build test/home_path_test.mojo -I src -I ../../core/src -I ../../../flare -o build/homepath-test && ./build/homepath-test" }
 # Unit-test the HTTP response builders + host allow-list (httputil.mojo) — flare only.
-test-httputil = { cmd = "mkdir -p build && mojo build test/httputil_test.mojo -I src -I ../../flare -I ../../json -o build/httputil-test && rm -f /tmp/millfolio-httputil-test.txt && ./build/httputil-test" }
+test-httputil = { cmd = "mkdir -p build && mojo build test/httputil_test.mojo -I src -I ../../../flare -I ../../../json -o build/httputil-test && rm -f /tmp/millfolio-httputil-test.txt && ./build/httputil-test" }
 # Unit-test the secrets/tokens + in-app API-key store (auth.mojo). MILLFOLIO_DATA_DIR → temp dir (hermetic); rm's it after.
-test-auth = { cmd = "mkdir -p build && mojo build test/auth_test.mojo -I src -I ../../vault/privacy-box/src -I ../../flare -I ../../json -I ../../logging.mojo/src -o build/auth-test && rm -rf /tmp/millfolio-auth-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-auth-test ./build/auth-test; rm -rf /tmp/millfolio-auth-test" }
+test-auth = { cmd = "mkdir -p build && mojo build test/auth_test.mojo -I src -I ../../privacy-box/src -I ../../../flare -I ../../../json -I ../../../logging.mojo/src -o build/auth-test && rm -rf /tmp/millfolio-auth-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-auth-test ./build/auth-test; rm -rf /tmp/millfolio-auth-test" }
 # Full unit suite — what `moon run app-server:check` runs (events + run-queue + work-queue + record-builders + log-store + kv-store + scheduler + apikey + osutil + sysmetrics + httputil + auth).
 test-all = { depends-on = ["test", "test-runqueue", "test-workqueue", "test-record-builders", "test-logstore", "test-kvstore", "test-scheduler", "test-apikey", "test-osutil", "test-sysmetrics", "test-homepath", "test-httputil", "test-auth"] }
