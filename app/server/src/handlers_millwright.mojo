@@ -157,12 +157,31 @@ def _is_hex16(s: String) -> Bool:
     return True
 
 
+def _all_widgets(spec: Value) raises -> List[Value]:
+    """Every widget across the root board AND the pages (v2 §2) — the walk the
+    results map, program resolution, and staleness stamping all share."""
+    var out = List[Value]()
+    if _has(spec, "widgets") and spec["widgets"].is_array():
+        var ws = spec["widgets"].array_items()
+        for i in range(len(ws)):
+            out.append(ws[i].copy())
+    if _has(spec, "pages") and spec["pages"].is_array():
+        var pages = spec["pages"].array_items()
+        for i in range(len(pages)):
+            ref pg = pages[i]
+            if _has(pg, "widgets") and pg["widgets"].is_array():
+                var pws = pg["widgets"].array_items()
+                for j in range(len(pws)):
+                    out.append(pws[j].copy())
+    return out^
+
+
 def _widget_program_hash(spec_text: String, id: String) raises -> String:
     """The `program` hash of widget `id` in `spec_text` ("" when unbound —
     a legacy widget still on its per-id doc)."""
     try:
         var spec = loads(spec_text)
-        var widgets = spec["widgets"].array_items()
+        var widgets = _all_widgets(spec)
         for i in range(len(widgets)):
             ref w = widgets[i]
             if (
@@ -199,37 +218,19 @@ def _result_doc(id: String) -> String:
     return id + ".result.json"
 
 
-def validate_spec(text: String) raises -> String:
-    """Shape-lint a dashboard spec. Returns "" when acceptable, else a human
-    reason. This runs BEFORE a spec becomes a version — invariant 4 of the
-    design (a broken spec never bricks the app) starts here."""
-    if text.find("http://") != -1 or text.find("https://") != -1:
-        return "remote URLs are not allowed in a spec"
-    var v: Value
-    try:
-        v = loads(text)
-    except:
-        return "spec is not valid JSON"
-    if not v.is_object():
-        return "spec must be a JSON object"
-    if not _has(v, "v") or not v["v"].is_int() or v["v"].int_value() != 1:
-        return 'spec must declare "v": 1'
-    if (
-        not _has(v, "kind")
-        or not v["kind"].is_string()
-        or v["kind"].string_value() != "dashboard"
-    ):
-        return 'spec must declare "kind": "dashboard"'
-    if not _has(v, "widgets") or not v["widgets"].is_array():
-        return 'spec must have a "widgets" array'
-    var seen = List[String]()
-    var widgets = v["widgets"].array_items()
-    for i in range(len(widgets)):
-        ref w = widgets[i]
+def _validate_widgets(
+    widgets: Value, mut seen: List[String], ctx: String
+) raises -> String:
+    """Validate one container's widget array (the root board or a page),
+    accumulating ids into `seen` — ids are GLOBALLY unique (they name snapshot
+    files). Returns "" when acceptable."""
+    var items = widgets.array_items()
+    for i in range(len(items)):
+        ref w = items[i]
         if not w.is_object():
-            return "each widget must be an object"
+            return ctx + ": each widget must be an object"
         if not _has(w, "id") or not w["id"].is_string():
-            return "each widget needs a string id"
+            return ctx + ": each widget needs a string id"
         var id = w["id"].string_value()
         if not _path_safe_id(id):
             return "widget id must be w- followed by [a-z0-9-]: " + id
@@ -270,32 +271,134 @@ def validate_spec(text: String) raises -> String:
         if not bound and not exists(millwright_dir() + "/" + _program_doc(id)):
             return "widget " + id + " has no pinned program"
         seen.append(id^)
-    if _has(v, "layout"):
-        var lo = v["layout"]
-        if not lo.is_object():
-            return '"layout" must be an object'
-        if _has(lo, "cols") and (
-            not lo["cols"].is_int()
-            or lo["cols"].int_value() < 1
-            or lo["cols"].int_value() > 6
-        ):
-            return "layout.cols must be an int 1..6"
-        if _has(lo, "order"):
-            if not lo["order"].is_array():
-                return "layout.order must be an array of widget ids"
-            var order = lo["order"].array_items()
-            for i in range(len(order)):
-                ref e = order[i]
-                if not e.is_string():
-                    return "layout.order entries must be widget ids"
-                var oid = e.string_value()
-                var found = False
-                for j in range(len(seen)):
-                    if seen[j] == oid:
-                        found = True
-                        break
-                if not found:
-                    return "layout.order references unknown widget: " + oid
+    return String("")
+
+
+def _validate_layout(container: Value, seen: List[String]) raises -> String:
+    """Validate one container's optional layout against ITS widget ids
+    (`seen` holds all ids seen so far; order refs must be among them)."""
+    if not _has(container, "layout"):
+        return String("")
+    var lo = container["layout"]
+    if not lo.is_object():
+        return '"layout" must be an object'
+    if _has(lo, "cols") and (
+        not lo["cols"].is_int()
+        or lo["cols"].int_value() < 1
+        or lo["cols"].int_value() > 6
+    ):
+        return "layout.cols must be an int 1..6"
+    if _has(lo, "order"):
+        if not lo["order"].is_array():
+            return "layout.order must be an array of widget ids"
+        var order = lo["order"].array_items()
+        for i in range(len(order)):
+            ref e = order[i]
+            if not e.is_string():
+                return "layout.order entries must be widget ids"
+            var oid = e.string_value()
+            var found = False
+            for j in range(len(seen)):
+                if seen[j] == oid:
+                    found = True
+                    break
+            if not found:
+                return "layout.order references unknown widget: " + oid
+    return String("")
+
+
+def _page_id_ok(id: String) -> Bool:
+    """Page ids are `p-` + [a-z0-9-] — the nav URL segment."""
+    if not id.startswith("p-") or id.byte_length() < 3:
+        return False
+    var b = id.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        var ok = (
+            (c >= ord("a") and c <= ord("z"))
+            or (c >= ord("0") and c <= ord("9"))
+            or c == ord("-")
+        )
+        if not ok:
+            return False
+    return True
+
+
+def validate_spec(text: String) raises -> String:
+    """Shape-lint a dashboard spec. Returns "" when acceptable, else a human
+    reason. This runs BEFORE a spec becomes a version — invariant 4 of the
+    design (a broken spec never bricks the app) starts here. v2 §2: an optional
+    `pages[]` (named boards → top-level nav buttons AFTER the built-ins,
+    additive-only, capped at 5); widget ids are unique across ALL containers."""
+    if text.find("http://") != -1 or text.find("https://") != -1:
+        return "remote URLs are not allowed in a spec"
+    var v: Value
+    try:
+        v = loads(text)
+    except:
+        return "spec is not valid JSON"
+    if not v.is_object():
+        return "spec must be a JSON object"
+    if not _has(v, "v") or not v["v"].is_int() or v["v"].int_value() != 1:
+        return 'spec must declare "v": 1'
+    if (
+        not _has(v, "kind")
+        or not v["kind"].is_string()
+        or v["kind"].string_value() != "dashboard"
+    ):
+        return 'spec must declare "kind": "dashboard"'
+    if not _has(v, "widgets") or not v["widgets"].is_array():
+        return 'spec must have a "widgets" array'
+    var seen = List[String]()
+    var why = _validate_widgets(v["widgets"], seen, "board")
+    if why.byte_length() > 0:
+        return why^
+    var root_count = len(seen)
+    _ = root_count  # root layout may only reference root widgets — but ids are
+    # globally unique and pages are validated AFTER, so `seen` here is exactly
+    # the root set when the root layout is checked.
+    why = _validate_layout(v, seen)
+    if why.byte_length() > 0:
+        return why^
+    if _has(v, "pages"):
+        if not v["pages"].is_array():
+            return '"pages" must be an array'
+        var pages = v["pages"].array_items()
+        if len(pages) > 5:
+            return "at most 5 pages (the nav is a shared, capped surface)"
+        var page_ids = List[String]()
+        for i in range(len(pages)):
+            ref pg = pages[i]
+            if not pg.is_object():
+                return "each page must be an object"
+            if not _has(pg, "id") or not pg["id"].is_string():
+                return "each page needs a string id"
+            var pid = pg["id"].string_value()
+            if not _page_id_ok(pid):
+                return "page id must be p- followed by [a-z0-9-]: " + pid
+            for j in range(len(page_ids)):
+                if page_ids[j] == pid:
+                    return "duplicate page id: " + pid
+            if (
+                not _has(pg, "title")
+                or not pg["title"].is_string()
+                or pg["title"].string_value().byte_length() == 0
+            ):
+                return "page " + pid + " needs a non-empty title"
+            if not _has(pg, "widgets") or not pg["widgets"].is_array():
+                return "page " + pid + ' needs a "widgets" array'
+            var before = len(seen)
+            why = _validate_widgets(pg["widgets"], seen, "page " + pid)
+            if why.byte_length() > 0:
+                return why^
+            # The page layout may only reference the PAGE's widgets.
+            var page_seen = List[String]()
+            for k in range(before, len(seen)):
+                page_seen.append(seen[k].copy())
+            why = _validate_layout(pg, page_seen)
+            if why.byte_length() > 0:
+                return why^
+            page_ids.append(pid^)
     return String("")
 
 
@@ -466,9 +569,9 @@ def handle_millwright() raises -> Response:
     var first = True
     try:
         var spec = loads(spec_text)
-        var widgets = spec["widgets"].array_items()
-        for i in range(len(widgets)):
-            ref w = widgets[i]
+        var all_widgets = _all_widgets(spec)
+        for i in range(len(all_widgets)):
+            ref w = all_widgets[i]
             if not _has(w, "id") or not w["id"].is_string():
                 continue
             var id = w["id"].string_value()
@@ -853,10 +956,12 @@ def handle_millwright_program_save(req: Request) raises -> Response:
     if code.byte_length() > 65536:
         return _cors(bad_request('{"error":"program too large (64 KB cap)"}'))
     var spec = loads(_active_spec_text())
+    var prog_hash = _fnv1a64(code)
+    # Find the widget in the ROOT board or on a PAGE, rebind its `program`, and
+    # write the mutated container back up the copy-on-write chain.
+    var title = String("")
     var widgets = spec["widgets"]
     var items = widgets.array_items()
-    var found = -1
-    var title = String(id)
     for i in range(len(items)):
         ref w = items[i]
         if (
@@ -864,19 +969,51 @@ def handle_millwright_program_save(req: Request) raises -> Response:
             and w["id"].is_string()
             and w["id"].string_value() == id
         ):
-            found = i
-            if _has(w, "title") and w["title"].is_string():
-                title = w["title"].string_value()
+            title = (
+                w["title"].string_value() if _has(w, "title")
+                and w["title"].is_string() else id
+            )
+            var w2 = items[i].copy()
+            w2.set("program", Value(prog_hash))
+            widgets.set(i, w2)
+            spec.set("widgets", widgets)
             break
-    if found < 0:
+    if (
+        title.byte_length() == 0
+        and _has(spec, "pages")
+        and spec["pages"].is_array()
+    ):
+        var pages = spec["pages"]
+        var pitems = pages.array_items()
+        for k in range(len(pitems)):
+            var pg = pitems[k].copy()
+            if not _has(pg, "widgets") or not pg["widgets"].is_array():
+                continue
+            var pws = pg["widgets"]
+            var pw_items = pws.array_items()
+            for i in range(len(pw_items)):
+                ref w = pw_items[i]
+                if (
+                    _has(w, "id")
+                    and w["id"].is_string()
+                    and w["id"].string_value() == id
+                ):
+                    title = (
+                        w["title"].string_value() if _has(w, "title")
+                        and w["title"].is_string() else id
+                    )
+                    var w2 = pw_items[i].copy()
+                    w2.set("program", Value(prog_hash))
+                    pws.set(i, w2)
+                    pg.set("widgets", pws)
+                    pages.set(k, pg)
+                    spec.set("pages", pages)
+                    break
+            if title.byte_length() > 0:
+                break
+    if title.byte_length() == 0:
         return _cors(bad_request('{"error":"widget not in the active spec"}'))
-    var prog_hash = _fnv1a64(code)
     default_millwright_docs_store().save(_program_hash_doc(prog_hash), code)
-    # Rebind: copy-on-write Values — mutate the child, then set() the chain back.
-    var w2 = items[found].copy()
-    w2.set("program", Value(prog_hash))
-    widgets.set(found, w2)
-    spec.set("widgets", widgets)
     var hash: String
     try:
         hash = _accept_spec(

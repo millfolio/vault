@@ -25,6 +25,13 @@ instruction. You reply with the complete edited spec.
 - `layout.cols` — the grid's column count, integer 1..6.
 - `layout.order` — widget ids in display order; every entry must be a widget in
   `widgets`.
+- optional `pages` — up to **5** named boards rendered as top-level nav buttons
+  AFTER the app's own tabs (you can never move, rename, or remove the built-in
+  tabs — pages are strictly additive):
+  `{"id": "p-abc12345", "title": "Travel", "widgets": [...], "layout": {...}}`.
+  Page `widgets`/`layout` follow the same rules as the board's; a widget lives
+  in exactly ONE place (the board or one page) — moving it between containers
+  is allowed, duplicating its id is not.
 
 ## Hard rules
 
