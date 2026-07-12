@@ -148,14 +148,28 @@ def _month_txns(m):
         (f"{m}/12", "Metro Transit Pass", 60.00, "withdrawal"),
         (f"{m}/14", "Bella Trattoria", 58.40 + v * 2.60, "withdrawal"),
         (f"{m}/27", "Noodle House", 32.15 + v * 1.40, "withdrawal"),
+        # health / phone / insurance / fitness — monthly signal for those tags
+        (f"{m}/07", "Lakeside Pharmacy", 23.85 + v * 0.90, "withdrawal"),
+        (f"{m}/10", "Horizon Wireless", 82.50, "withdrawal"),
+        (f"{m}/13", "Northwind Auto Insurance", 118.75, "withdrawal"),
+        (f"{m}/16", "Iron Works Gym", 39.00, "withdrawal"),
+        (f"{m}/22", "Whisker & Paw Pet Supply", 31.60 + v * 1.15, "withdrawal"),
+        # the credit-card payment — exercises the transfers guard (spending()
+        # must EXCLUDE it, so card purchases aren't double counted)
+        (f"{m}/26", "Payment to Card Services - Thank You", 240.00 + v * 35.00, "withdrawal"),
     ]
     # A few one-off larger purchases scattered across the half-year (so the top-10 by
     # spend has a long tail beyond the recurring bills).
     extras = {
         2: [("2/19", "Blue Bottle Hardware", 214.30, "withdrawal")],
+        3: [("3/22", "Bright Smile Dental", 185.00, "withdrawal"),
+            ("3/28", "State Tax Refund", 431.00, "deposit")],
         4: [("4/26", "Summit Auto Repair", 612.50, "withdrawal")],
+        5: [("5/16", "Harbor View Hotel", 342.80, "withdrawal"),
+            ("5/17", "Grand Stage Theater", 96.00, "withdrawal")],
         6: [("6/10", "North Ridge Outfitters", 289.99, "withdrawal")],
-        7: [("7/08", "Blue Bottle Hardware", 176.45, "withdrawal")],
+        7: [("7/08", "Blue Bottle Hardware", 176.45, "withdrawal"),
+            ("7/15", "Pine & Page Booksellers", 47.25, "withdrawal")],
     }
     t += extras.get(m, [])
     # Order by day so the running balance reads naturally.
@@ -187,6 +201,18 @@ def card_csv(path):
         ("07/01/2026", "TARGET 00042 CHICAGO IL USA", 61.05),
         ("07/04/2026", "WHOLE FOODS MKT 55120 SAN FRANCISCO CA USA", 58.90),
         ("07/07/2026", "SHELL OIL 57721456 AUSTIN TX USA", 51.40),
+        ("05/08/2026", "CVS PHARMACY 08841 DENVER CO USA", 32.15),
+        ("05/21/2026", "HILTON HOTELS PORTLAND OR USA", 289.40),
+        ("05/26/2026", "PANERA BREAD 2210 BOSTON MA USA", 18.65),
+        ("06/04/2026", "UNITED AIRLINES 0016 DENVER CO USA", 386.70),
+        ("06/09/2026", "CVS PHARMACY 08841 DENVER CO USA", 21.40),
+        ("06/16/2026", "RAMEN YOKOCHO TOKYO JPN", 34.90),
+        ("06/24/2026", "TRADER JOES 118 SEATTLE WA USA", 67.25),
+        ("06/29/2026", "AMC THEATRES 0446 CHICAGO IL USA", 42.50),
+        ("07/02/2026", "CVS PHARMACY 08841 DENVER CO USA", 27.80),
+        ("07/06/2026", "BLUE LAGOON SPA REYKJAVIK ISL", 118.00),
+        ("07/09/2026", "TRADER JOES 118 SEATTLE WA USA", 54.60),
+        ("07/11/2026", "STARBUCKS STORE 04821 SEATTLE WA USA", 6.85),
     ]
     with open(path, "w") as f:
         f.write("Transaction Date,Description,Type,Amount\n")

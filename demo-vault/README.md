@@ -27,6 +27,6 @@ Deterministic output keeps the demo's replay cache valid. To grow the demo, add
 more fictional statements/docs here and regenerate. Consumed by the `demo` repo
 (it points `MILLFOLIO_VAULT` at `vault/` and indexes it).
 
-> Reconciliation targets (so you can sanity-check after a code change):
-> 2026-03 → 9 txns, $6,100.00 in / $2,037.65 out, ending $6,512.35;
-> 2026-04 → 9 txns, $5,600.00 in / $3,723.72 out.
+> Reconciliation is DERIVED by `statement()` from the transaction list (the
+> printed Deposits/Withdrawals totals + running balance always close), so
+> adding rows can't break it — regenerate and re-index after any change.
