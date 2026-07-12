@@ -2,6 +2,14 @@
   import { onMount } from "svelte";
   import ResultView from "./ResultView.svelte";
   import type { MillfolioClient, ResultSpec, ServerEvent } from "$lib/protocol";
+  import {
+    acceptSpec as demoAccept,
+    activeSpec as demoActiveSpec,
+    loadDemoBoard,
+    resetDemoBoard,
+    revertTo as demoRevert,
+    type DemoStored,
+  } from "$lib/demoBoard";
 
   // Millwright — the versioned, user-owned dashboard (designs/MILLWRIGHT.md).
   // This component is TRUSTED CHROME: it is hand-written and interprets the
@@ -33,12 +41,27 @@
   let versions = $state<Version[]>([]);
   let refreshing = $state<Record<string, boolean>>({});
 
+  // In the DEMO the server is read-only, so edits live in THIS BROWSER: a
+  // localStorage version chain seeded from the server's board (demoBoard.ts).
+  // The chrome below routes every write through it when `demo` is set.
+  let demoStore = $state<DemoStored | null>(null);
+  function applyDemo(d: DemoStored) {
+    demoStore = d;
+    spec = demoActiveSpec(d) as Spec | null;
+    active = d.active;
+    results = d.results as Record<string, Snapshot>;
+  }
+
   async function load() {
     loadError = "";
     try {
       const r = await fetch("/api/millwright");
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
+      if (demo) {
+        applyDemo(loadDemoBoard({ spec: d?.spec, results: d?.results ?? {} }));
+        return;
+      }
       spec = d?.spec ?? null;
       active = d?.active ?? "";
       results = d?.results ?? {};
@@ -128,6 +151,15 @@
   }
   async function saveSpec() {
     specError = "";
+    if (demo && demoStore) {
+      try {
+        applyDemo(demoAccept(demoStore, specDraft, "hand-edited spec", "you"));
+        showSpec = false;
+      } catch (e) {
+        specError = e instanceof Error ? e.message : String(e);
+      }
+      return;
+    }
     try {
       const r = await fetch("/api/millwright/spec", {
         method: "POST",
@@ -146,6 +178,20 @@
   }
   async function removeWidget(w: Widget) {
     if (!spec) return;
+    if (demo && demoStore) {
+      const nextSpec: Spec = {
+        ...spec,
+        widgets: spec.widgets.filter((x) => x.id !== w.id),
+        layout: {
+          ...(spec.layout ?? {}),
+          order: (spec.layout?.order ?? []).filter((id) => id !== w.id),
+        },
+      };
+      try {
+        applyDemo(demoAccept(demoStore, JSON.stringify(nextSpec), `removed "${w.title}"`, "you"));
+      } catch {}
+      return;
+    }
     const next: Spec = {
       ...spec,
       widgets: spec.widgets.filter((x) => x.id !== w.id),
@@ -163,6 +209,11 @@
   async function openVersions() {
     showVersions = true;
     showSpec = false;
+    if (demo && demoStore) {
+      versions = [...demoStore.versions].reverse() as Version[];
+      active = demoStore.active;
+      return;
+    }
     try {
       const r = await fetch("/api/millwright/versions");
       const d = await r.json();
@@ -176,6 +227,13 @@
       active = d?.active ?? active;
     } catch {}
   }
+  // Demo only: drop every local edit, back to the server's board.
+  async function resetDemo() {
+    resetDemoBoard();
+    demoStore = null;
+    await load();
+  }
+
   // ── model-assisted edit: the instruction goes to the frontier via the
   // server (privacy-box transport); the reply is linted by the same validator
   // as a hand edit before it becomes a version. Errors surface verbatim.
@@ -208,6 +266,11 @@
   }
 
   async function revertTo(hash: string) {
+    if (demo && demoStore) {
+      applyDemo(demoRevert(demoStore, hash));
+      await openVersions();
+      return;
+    }
     await fetch("/api/millwright/revert", {
       method: "POST",
       body: JSON.stringify({ hash }),
@@ -221,10 +284,12 @@
   <div class="board-head">
     <h2>Board</h2>
     <div class="board-actions">
-      {#if !demo}
-        <button type="button" class="chrome-btn" class:on={showSpec} onclick={() => (showSpec ? (showSpec = false) : openSpec())} title="See and edit the spec this board is made of">spec</button>
-        <button type="button" class="chrome-btn" class:on={showVersions} onclick={() => (showVersions ? (showVersions = false) : openVersions())} title="Every version of this board — diff and revert">history</button>
+      {#if demo}
+        <span class="demo-note" title="Demo edits live in THIS browser's localStorage — the shared demo is untouched">edits stay in your browser</span>
+        <button type="button" class="chrome-btn" title="Drop your local edits — back to the shared demo board" onclick={resetDemo}>reset</button>
       {/if}
+      <button type="button" class="chrome-btn" class:on={showSpec} onclick={() => (showSpec ? (showSpec = false) : openSpec())} title="See and edit the spec this board is made of">spec</button>
+      <button type="button" class="chrome-btn" class:on={showVersions} onclick={() => (showVersions ? (showVersions = false) : openVersions())} title="Every version of this board — diff and revert">history</button>
     </div>
   </div>
 
@@ -266,8 +331,8 @@
               <span class="stamp">{asOf(w.id)}</span>
               {#if !demo}
                 <button type="button" class="tool" disabled={refreshing[w.id]} title="Re-run this widget's saved program over your current vault — no model call" onclick={() => refresh(w.id)}>{refreshing[w.id] ? "…" : "↻"}</button>
-                <button type="button" class="tool" title="Remove from the board (the version history keeps it)" onclick={() => removeWidget(w)}>×</button>
               {/if}
+              <button type="button" class="tool" title="Remove from the board (the version history keeps it)" onclick={() => removeWidget(w)}>×</button>
             </div>
           </header>
           <svelte:boundary>
@@ -348,6 +413,11 @@
   .board-actions {
     display: flex;
     gap: 0.4rem;
+  }
+  .demo-note {
+    font-size: 0.72rem;
+    opacity: 0.55;
+    align-self: center;
   }
   .chrome-btn {
     font: inherit;

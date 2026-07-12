@@ -166,6 +166,8 @@
   // Pick a past question → drop it into the box to edit/resend (non-destructive).
   // Copy a code box (the generated program) to the clipboard, with a transient ✓ on
   // the box that was copied (keyed so only that one shows the checkmark).
+  import { loadDemoBoard, pinDemo } from "$lib/demoBoard";
+
   // Pin-from-Ask (Millwright): send an answer's question + rendered result spec
   // to the board. The server snapshots the question's saved program from history
   // (the same record "Run again" uses) — every widget is born from a program the
@@ -184,6 +186,18 @@
       return;
     }
     try {
+      if (demo) {
+        // Demo: the server is read-only — pin into THIS browser's local board
+        // (localStorage; the Board's "reset" clears it). Seed from the shared
+        // board first if this browser has no local chain yet.
+        const r = await fetch("/api/millwright");
+        const d = await r.json();
+        const store = loadDemoBoard({ spec: d?.spec, results: d?.results ?? {} });
+        const title = q.length > 60 ? q.slice(0, 57) + "…" : q;
+        pinDemo(store, q, title, it.result);
+        pinState = { ...pinState, [it.id]: "ok" };
+        return;
+      }
       const r = await fetch("/api/millwright/pin", {
         method: "POST",
         body: JSON.stringify({ q, result: it.result }),
@@ -191,7 +205,7 @@
       const d = await r.json();
       pinState = { ...pinState, [it.id]: r.ok && !d?.error ? "ok" : (d?.error ?? `HTTP ${r.status}`) };
     } catch (e) {
-      pinState = { ...pinState, [it.id]: String(e) };
+      pinState = { ...pinState, [it.id]: e instanceof Error ? e.message : String(e) };
     }
   }
 
@@ -543,18 +557,18 @@
           <p>{it.text}</p>
           {#if it.kind === "assistant" && it.result}
             <ResultView result={it.result} />
-            {#if !demo}
-              {#if pinState[it.id] === "ok"}
-                <p class="pinned-note">📌 Pinned — see the <a href="/board">Board</a>.</p>
-              {:else}
-                <button
-                  type="button"
-                  class="pin-btn"
-                  title="Add this answer to your Board — it re-runs the saved program, no model call"
-                  onclick={() => pinAnswer(idx)}
-                >📌 Pin to Board</button>
-                {#if pinState[it.id]}<span class="pin-err">{pinState[it.id]}</span>{/if}
-              {/if}
+            {#if pinState[it.id] === "ok"}
+              <p class="pinned-note">📌 Pinned — see the <a href="/board">Board</a>.</p>
+            {:else}
+              <button
+                type="button"
+                class="pin-btn"
+                title={demo
+                  ? "Add this answer to your local Board (kept in this browser)"
+                  : "Add this answer to your Board — it re-runs the saved program, no model call"}
+                onclick={() => pinAnswer(idx)}
+              >📌 Pin to Board</button>
+              {#if pinState[it.id]}<span class="pin-err">{pinState[it.id]}</span>{/if}
             {/if}
           {/if}
           {#if it.kind === "assistant" && it.source && it.sourceAlias}
