@@ -35,7 +35,7 @@ if ! xcrun metal --version >/dev/null 2>&1; then
   echo "error: Metal Toolchain missing — run: xcodebuild -downloadComponent MetalToolchain" >&2
   exit 1
 fi
-( cd "$ROOT/engine" && pixi run test-gpu )
+( cd "$ROOT/../engine" && pixi run test-gpu )
 echo "    ✓ GPU gates pass"
 
 # ── codegen prompt examples compile ─────────────────────────────────────────
@@ -72,7 +72,7 @@ echo "==> [3/3] compile-checking the ENGINE from the bundle SOURCE — the on-de
 # `mojo build` the installer (Bootstrapper.installServer) runs, against the extracted
 # engine source, so a missing jinja2/flare vendoring gap fails here before the tag.
 [[ -f "$EX/runner/inference-server/src/server.mojo" ]] || { echo "error: engine bundle missing SOURCE src/server.mojo" >&2; exit 1; }
-( cd "$ROOT/engine" && pixi run bash -c "cd '$EX/runner/inference-server' && mkdir -p build && mojo build src/server.mojo -I ../jinja2.mojo/src -I ../flare -o build/server" )
+( cd "$ROOT/../engine" && pixi run bash -c "cd '$EX/runner/inference-server' && mkdir -p build && mojo build src/server.mojo -I ../jinja2.mojo/src -I ../flare -o build/server" )
 echo "    ✓ engine compiles from bundle source"
 
 echo "✅ GPU gates pass + bundle builds (privacy_box + app + millfolio prebuilt) + engine compiles on-device. Safe to release."
