@@ -18,7 +18,7 @@
 # Slow (builds the engine + app web, then compiles) — that's the point; releases
 # are rare and a broken one is expensive. Needs the dev pixi envs.
 #
-#   moon run release:preflight        (or: bash scripts/release_preflight.sh)
+#   moon run release:preflight        (or: bash release/release_preflight.sh)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"   # the vault repo root (release/ lives in-repo)
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT

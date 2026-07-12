@@ -3,7 +3,7 @@
 # Homebrew tap formula points at that version.
 #
 # Usage (via moon):  moon run release:verify -- vX.Y.Z
-#        directly:   scripts/verify_release.sh vX.Y.Z
+#        directly:   release/verify_release.sh vX.Y.Z
 # With no version, checks whatever the tap currently pins (i.e. "is the latest
 # published release fully consistent?").
 set -euo pipefail

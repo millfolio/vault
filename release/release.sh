@@ -11,7 +11,7 @@
 #   moon run release:promote -- vX.Y.Z
 #
 # Usage (via moon):  moon run release:publish -- vX.Y.Z-rc.N
-#        directly:   scripts/release.sh vX.Y.Z-rc.N
+#        directly:   release/release.sh vX.Y.Z-rc.N
 set -euo pipefail
 VERSION="${1:?usage: release.sh vX.Y.Z-rc.N}"
 if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(rc|beta|dev)\.[0-9]+$ ]]; then
@@ -32,7 +32,7 @@ command -v gh >/dev/null || { echo "gh CLI not found" >&2; exit 1; }
 # with the tag + CLI attached but no millfolio.zip → mill install 404s). Override with
 # RELEASE_SKIP_PREFLIGHT=1 only when you know the bundle already builds.
 if [ "${RELEASE_SKIP_PREFLIGHT:-0}" != 1 ]; then
-  bash "$ROOT/scripts/release_preflight.sh" || {
+  bash "$(dirname "$0")/release_preflight.sh" || {
     echo "error: bundle preflight FAILED — NOT tagging $VERSION. Fix the packaging, then re-run." >&2
     echo "       (override with RELEASE_SKIP_PREFLIGHT=1 if you're certain the bundle builds.)" >&2
     exit 1
@@ -51,7 +51,7 @@ PINS="$VAULT/.github/bundle-pins.env"
 BUNDLE_SIBLINGS=(engine flare json jinja2.mojo lancedb.mojo pdftotext.mojo zlib.mojo csv.mojo docx.mojo logging.mojo)
 echo "==> pinning sibling repos to their current main tips"
 {
-  echo "# Sibling repo pins for a reproducible bundle build — WRITTEN BY scripts/release.sh."
+  echo "# Sibling repo pins for a reproducible bundle build — WRITTEN BY release/release.sh."
   echo "# <repo path>=<commit sha>, consumed by .github/workflows/bundle.yml. Do NOT hand-edit."
   echo "# Cut for $VERSION at $(date -u +%Y-%m-%dT%H:%M:%SZ)."
 } > "$PINS.tmp"
