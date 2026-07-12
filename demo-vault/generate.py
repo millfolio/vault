@@ -155,8 +155,11 @@ def _month_txns(m):
         (f"{m}/16", "Iron Works Gym", 39.00, "withdrawal"),
         (f"{m}/22", "Whisker & Paw Pet Supply", 31.60 + v * 1.15, "withdrawal"),
         # the credit-card payment — exercises the transfers guard (spending()
-        # must EXCLUDE it, so card purchases aren't double counted)
-        (f"{m}/26", "Payment to Card Services - Thank You", 240.00 + v * 35.00, "withdrawal"),
+        # must EXCLUDE it, so card purchases aren't double counted). The
+        # descriptor must match the DEFAULT transfers keywords (ach/transfer/
+        # zelle/venmo/wire) or the guard never fires and the payment pollutes
+        # "top merchants" — which is exactly what the first cut did.
+        (f"{m}/26", "Card Services Payment - ACH Transfer", 240.00 + v * 35.00, "withdrawal"),
     ]
     # A few one-off larger purchases scattered across the half-year (so the top-10 by
     # spend has a long tail beyond the recurring bills).

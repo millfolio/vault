@@ -38,7 +38,7 @@ file_2	2/06	47.6	debit	Fuel Depot		1	2026	Fuel Depot			Fuel Depot
 file_2	2/07	23.85	debit	Lakeside Pharmacy	health	1	2026	Lakeside Pharmacy			Lakeside Pharmacy	
 file_2	2/08	96.3	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery Outlet	
 file_2	2/09	128.2	debit	City Power & Light		1	2026	City Power & Light			Light	
-file_2	2/10	82.5	debit	Horizon Wireless		1	2026	Horizon Wireless			Horizon Wireless	
+file_2	2/10	82.5	debit	Horizon Wireless	transfers	1	2026	Horizon Wireless			Horizon Wireless	
 file_2	2/11	12.1	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
 file_2	2/12	64.15	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_2	2/12	60.0	debit	Metro Transit Pass		1	2026	Metro Transit Pass			Metro Transit Pass	
@@ -53,7 +53,7 @@ file_2	2/21	71.88	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery
 file_2	2/22	31.6	debit	Whisker & Paw Pet Supply		1	2026	Whisker & Paw Pet Supply			Paw Pet Supply	
 file_2	2/24	91.05	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_2	2/25	16.2	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
-file_2	2/26	240.0	debit	Payment to Card Services - Thank You		1	2026	Payment to Card Services - Thank You			Thank You	
+file_2	2/26	240.0	debit	Card Services Payment - ACH Transfer	transfers	1	2026	Card Services Payment - ACH Transfer			ACH Transfer	
 file_2	2/27	32.15	debit	Noodle House		1	2026	Noodle House			Noodle House	
 file_3	3/02	1650.0	debit	Riverbank Mortgage Payment		1	2026	Riverbank Mortgage Payment			Riverbank Mortgage Payment	
 file_3	3/03	2800.0	credit	Acme Payroll Direct Deposit		1	2026	Acme Payroll Direct Deposit			Acme Payroll Direct Deposit	
@@ -65,7 +65,7 @@ file_3	3/06	49.7	debit	Fuel Depot		1	2026	Fuel Depot			Fuel Depot
 file_3	3/07	24.75	debit	Lakeside Pharmacy	health	1	2026	Lakeside Pharmacy			Lakeside Pharmacy	
 file_3	3/08	93.9	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery Outlet	
 file_3	3/09	133.0	debit	City Power & Light		1	2026	City Power & Light			Light	
-file_3	3/10	82.5	debit	Horizon Wireless		1	2026	Horizon Wireless			Horizon Wireless	
+file_3	3/10	82.5	debit	Horizon Wireless	transfers	1	2026	Horizon Wireless			Horizon Wireless	
 file_3	3/11	12.5	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
 file_3	3/12	66.35	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_3	3/12	60.0	debit	Metro Transit Pass		1	2026	Metro Transit Pass			Metro Transit Pass	
@@ -80,7 +80,7 @@ file_3	3/22	32.75	debit	Whisker & Paw Pet Supply		1	2026	Whisker & Paw Pet Suppl
 file_3	3/22	185.0	debit	Bright Smile Dental	health	1	2026	Bright Smile Dental			Bright Smile Dental	
 file_3	3/24	92.8	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_3	3/25	16.55	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
-file_3	3/26	275.0	debit	Payment to Card Services - Thank You		1	2026	Payment to Card Services - Thank You			Thank You	
+file_3	3/26	275.0	debit	Card Services Payment - ACH Transfer	transfers	1	2026	Card Services Payment - ACH Transfer			ACH Transfer	
 file_3	3/27	33.55	debit	Noodle House		1	2026	Noodle House			Noodle House	
 file_3	3/28	431.0	credit	State Tax Refund		1	2026	State Tax Refund			State Tax Refund	
 file_4	4/02	1650.0	debit	Riverbank Mortgage Payment		1	2026	Riverbank Mortgage Payment			Riverbank Mortgage Payment	
@@ -93,7 +93,7 @@ file_4	4/06	51.8	debit	Fuel Depot		1	2026	Fuel Depot			Fuel Depot
 file_4	4/07	25.65	debit	Lakeside Pharmacy	health	1	2026	Lakeside Pharmacy			Lakeside Pharmacy	
 file_4	4/08	91.5	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery Outlet	
 file_4	4/09	137.8	debit	City Power & Light		1	2026	City Power & Light			Light	
-file_4	4/10	82.5	debit	Horizon Wireless		1	2026	Horizon Wireless			Horizon Wireless	
+file_4	4/10	82.5	debit	Horizon Wireless	transfers	1	2026	Horizon Wireless			Horizon Wireless	
 file_4	4/11	12.9	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
 file_4	4/12	68.55	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_4	4/12	60.0	debit	Metro Transit Pass		1	2026	Metro Transit Pass			Metro Transit Pass	
@@ -107,7 +107,7 @@ file_4	4/21	78.48	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery
 file_4	4/22	33.9	debit	Whisker & Paw Pet Supply		1	2026	Whisker & Paw Pet Supply			Paw Pet Supply	
 file_4	4/24	94.55	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_4	4/25	16.9	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
-file_4	4/26	310.0	debit	Payment to Card Services - Thank You		1	2026	Payment to Card Services - Thank You			Thank You	
+file_4	4/26	310.0	debit	Card Services Payment - ACH Transfer	transfers	1	2026	Card Services Payment - ACH Transfer			ACH Transfer	
 file_4	4/26	612.5	debit	Summit Auto Repair		1	2026	Summit Auto Repair			Summit Auto Repair	
 file_4	4/27	34.95	debit	Noodle House		1	2026	Noodle House			Noodle House	
 file_5	5/02	1650.0	debit	Riverbank Mortgage Payment		1	2026	Riverbank Mortgage Payment			Riverbank Mortgage Payment	
@@ -120,7 +120,7 @@ file_5	5/06	53.9	debit	Fuel Depot		1	2026	Fuel Depot			Fuel Depot
 file_5	5/07	26.55	debit	Lakeside Pharmacy	health	1	2026	Lakeside Pharmacy			Lakeside Pharmacy	
 file_5	5/08	89.1	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery Outlet	
 file_5	5/09	142.6	debit	City Power & Light		1	2026	City Power & Light			Light	
-file_5	5/10	82.5	debit	Horizon Wireless		1	2026	Horizon Wireless			Horizon Wireless	
+file_5	5/10	82.5	debit	Horizon Wireless	transfers	1	2026	Horizon Wireless			Horizon Wireless	
 file_5	5/11	13.3	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
 file_5	5/12	70.75	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_5	5/12	60.0	debit	Metro Transit Pass		1	2026	Metro Transit Pass			Metro Transit Pass	
@@ -136,7 +136,7 @@ file_5	5/21	81.78	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery
 file_5	5/22	35.05	debit	Whisker & Paw Pet Supply		1	2026	Whisker & Paw Pet Supply			Paw Pet Supply	
 file_5	5/24	96.3	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_5	5/25	17.25	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
-file_5	5/26	345.0	debit	Payment to Card Services - Thank You		1	2026	Payment to Card Services - Thank You			Thank You	
+file_5	5/26	345.0	debit	Card Services Payment - ACH Transfer	transfers	1	2026	Card Services Payment - ACH Transfer			ACH Transfer	
 file_5	5/27	36.35	debit	Noodle House		1	2026	Noodle House			Noodle House	
 file_6	6/02	1650.0	debit	Riverbank Mortgage Payment		1	2026	Riverbank Mortgage Payment			Riverbank Mortgage Payment	
 file_6	6/03	2800.0	credit	Acme Payroll Direct Deposit		1	2026	Acme Payroll Direct Deposit			Acme Payroll Direct Deposit	
@@ -148,7 +148,7 @@ file_6	6/06	56.0	debit	Fuel Depot		1	2026	Fuel Depot			Fuel Depot
 file_6	6/07	27.45	debit	Lakeside Pharmacy	health	1	2026	Lakeside Pharmacy			Lakeside Pharmacy	
 file_6	6/08	86.7	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery Outlet	
 file_6	6/09	147.4	debit	City Power & Light		1	2026	City Power & Light			Light	
-file_6	6/10	82.5	debit	Horizon Wireless		1	2026	Horizon Wireless			Horizon Wireless	
+file_6	6/10	82.5	debit	Horizon Wireless	transfers	1	2026	Horizon Wireless			Horizon Wireless	
 file_6	6/10	289.99	debit	North Ridge Outfitters		1	2026	North Ridge Outfitters			North Ridge Outfitters	
 file_6	6/11	13.7	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
 file_6	6/12	72.95	debit	Corner Market		1	2026	Corner Market			Corner Market	
@@ -163,7 +163,7 @@ file_6	6/21	85.08	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery
 file_6	6/22	36.2	debit	Whisker & Paw Pet Supply		1	2026	Whisker & Paw Pet Supply			Paw Pet Supply	
 file_6	6/24	98.05	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_6	6/25	17.6	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
-file_6	6/26	380.0	debit	Payment to Card Services - Thank You		1	2026	Payment to Card Services - Thank You			Thank You	
+file_6	6/26	380.0	debit	Card Services Payment - ACH Transfer	transfers	1	2026	Card Services Payment - ACH Transfer			ACH Transfer	
 file_6	6/27	37.75	debit	Noodle House		1	2026	Noodle House			Noodle House	
 file_7	7/02	1650.0	debit	Riverbank Mortgage Payment		1	2026	Riverbank Mortgage Payment			Riverbank Mortgage Payment	
 file_7	7/03	2800.0	credit	Acme Payroll Direct Deposit		1	2026	Acme Payroll Direct Deposit			Acme Payroll Direct Deposit	
@@ -176,7 +176,7 @@ file_7	7/07	28.35	debit	Lakeside Pharmacy	health	1	2026	Lakeside Pharmacy			Lake
 file_7	7/08	84.3	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery Outlet	
 file_7	7/08	176.45	debit	Blue Bottle Hardware		1	2026	Blue Bottle Hardware			Blue Bottle Hardware	
 file_7	7/09	152.2	debit	City Power & Light		1	2026	City Power & Light			Light	
-file_7	7/10	82.5	debit	Horizon Wireless		1	2026	Horizon Wireless			Horizon Wireless	
+file_7	7/10	82.5	debit	Horizon Wireless	transfers	1	2026	Horizon Wireless			Horizon Wireless	
 file_7	7/11	14.1	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
 file_7	7/12	75.15	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_7	7/12	60.0	debit	Metro Transit Pass		1	2026	Metro Transit Pass			Metro Transit Pass	
@@ -191,5 +191,5 @@ file_7	7/21	88.38	debit	Grocery Outlet	groceries	1	2026	Grocery Outlet			Grocery
 file_7	7/22	37.35	debit	Whisker & Paw Pet Supply		1	2026	Whisker & Paw Pet Supply			Paw Pet Supply	
 file_7	7/24	99.8	debit	Corner Market		1	2026	Corner Market			Corner Market	
 file_7	7/25	17.95	debit	Sunrise Cafe	restaurant	1	2026	Sunrise Cafe			Sunrise Cafe	
-file_7	7/26	415.0	debit	Payment to Card Services - Thank You		1	2026	Payment to Card Services - Thank You			Thank You	
+file_7	7/26	415.0	debit	Card Services Payment - ACH Transfer	transfers	1	2026	Card Services Payment - ACH Transfer			ACH Transfer	
 file_7	7/27	39.15	debit	Noodle House		1	2026	Noodle House			Noodle House	

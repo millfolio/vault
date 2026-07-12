@@ -21,6 +21,7 @@ from vault.derive.categorize import (
     tag_is_income,
     tag_allows_direction,
     filter_tags_by_direction,
+    both_side_tag_names,
 )
 
 
@@ -529,14 +530,22 @@ def main() raises:
     # returns transfers/restaurant regardless of side; the gate is the separate
     # `filter_tags_by_direction` the mutating callers (retag / ML / preview) apply.
     expect(
-        _has(income_tag_names(), "transfers")
-        and _has(income_tag_names(), "rewards")
-        and len(income_tag_names()) == 2,
-        "income tags are exactly {transfers, rewards} (the single split point)",
+        _has(income_tag_names(), "rewards") and len(income_tag_names()) == 1,
+        "income tags are exactly {rewards} (the single split point)",
     )
     expect(
-        tag_is_income("transfers") and tag_is_income("rewards"),
-        "transfers/rewards are income-side",
+        _has(both_side_tag_names(), "transfers")
+        and len(both_side_tag_names()) == 1,
+        (
+            "both-side tags are exactly {transfers} — a transfer has TWO legs"
+            " (the checking-side card payment is a DEBIT; income-only meant"
+            " spending() double-counted card payments against the card's own"
+            " purchases)"
+        ),
+    )
+    expect(
+        tag_is_income("rewards") and not tag_is_income("transfers"),
+        "rewards is income-side; transfers is not (it is both-side)",
     )
     expect(
         not tag_is_income("restaurant") and not tag_is_income("groceries"),
@@ -549,16 +558,28 @@ def main() raises:
         "expense tag applies to a debit, never a credit",
     )
     expect(
-        tag_allows_direction("transfers", "credit")
-        and not tag_allows_direction("transfers", "debit"),
+        tag_allows_direction("rewards", "credit")
+        and not tag_allows_direction("rewards", "debit"),
         "income tag applies to a credit, never a debit",
+    )
+    expect(
+        tag_allows_direction("transfers", "credit")
+        and tag_allows_direction("transfers", "debit"),
+        (
+            "transfers applies to BOTH legs (card-side credit AND checking-side"
+            " debit — the credit-card-payment guard)"
+        ),
     )
     # an unknown/empty direction is treated as a debit → expense tags still apply,
     # income tags don't (no regression on data that predates a direction).
     expect(
         tag_allows_direction("restaurant", "")
-        and not tag_allows_direction("transfers", ""),
-        "empty direction behaves like a debit (expense yes, income no)",
+        and tag_allows_direction("transfers", "")
+        and not tag_allows_direction("rewards", ""),
+        (
+            "empty direction behaves like a debit (expense + transfers yes,"
+            " income no)"
+        ),
     )
 
     # the filter drops the mis-directed side from a fully-derived set.
@@ -570,11 +591,17 @@ def main() raises:
         "on a credit: keep income (transfers), drop expense (restaurant)",
     )
     var debit_tags = filter_tags_by_direction(
-        [String("restaurant"), String("transfers")], String("debit")
+        [String("restaurant"), String("transfers"), String("rewards")],
+        String("debit"),
     )
     expect(
-        _has(debit_tags, "restaurant") and not _has(debit_tags, "transfers"),
-        "on a debit: keep expense (restaurant), drop income (transfers)",
+        _has(debit_tags, "restaurant")
+        and _has(debit_tags, "transfers")
+        and not _has(debit_tags, "rewards"),
+        (
+            "on a debit: keep expense AND transfers (the payment leg), drop"
+            " rewards"
+        ),
     )
 
     print("ok: all categorize tests passed")

@@ -687,15 +687,22 @@
   .tile-head h3 {
     margin: 0;
     font-size: 0.92rem;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* Shrink priority (same invariant as the records row): the BUTTONS are the
+     content of this strip and never shrink; the stamp is decoration and
+     ellipsizes first — otherwise a long stamp ("example data — ↻ …") pushes
+     ✎/↻/× past the tile edge on phones and the board looks uneditable. */
   .tile-tools {
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
   }
   .preview-badge {
     font-size: 0.62rem;
@@ -787,6 +794,11 @@
   .stamp {
     font-size: 0.72rem;
     opacity: 0.55;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .tool {
     font: inherit;
@@ -797,6 +809,15 @@
     opacity: 0.6;
     cursor: pointer;
     padding: 0 0.15rem;
+    flex: none;
+  }
+  /* Touch devices: the glyph buttons need real tap targets. */
+  @media (pointer: coarse) {
+    .tool {
+      font-size: 1rem;
+      padding: 0.2rem 0.4rem;
+      opacity: 0.8;
+    }
   }
   .tool:hover {
     opacity: 1;

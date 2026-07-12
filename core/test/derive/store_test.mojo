@@ -185,8 +185,10 @@ def main() raises:
         "the same coffee merchant as a DEBIT still gets restaurant (expense)",
     )
 
-    # A `transfers`/`rewards` keyword on a DEBIT (e.g. a card-payment transfer OUT)
-    # is gated off — income tags are credit-only under the current per-set split.
+    # A `transfers` keyword on a DEBIT (a card-payment transfer OUT) now TAGS:
+    # transfers is BOTH-side — the checking leg of a card payment is a debit, and
+    # gating it off made spending() double-count card payments against the card's
+    # own itemized purchases (the credit-card-payment guard never fired).
     var xrows = List[TxnRow]()
     xrows.append(
         _row_dir(
@@ -197,8 +199,8 @@ def main() raises:
     )
     _ = retag(xrows, dreg)
     expect(
-        not _has(xrows[0].tags, "transfers"),
-        "a `transfers` keyword on a DEBIT is gated off (income = credit-only)",
+        _has(xrows[0].tags, "transfers"),
+        "a `transfers` keyword on a DEBIT tags (both-side: the payment leg)",
     )
 
     # ── (d) ML backfill is direction-gated: an expense ML rule skips credits ─────
