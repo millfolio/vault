@@ -1,0 +1,1514 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import type { StepState, ResultSpec } from "$lib/protocol";
+  import ResultView from "$lib/components/ResultView.svelte";
+
+  // One inline timeline: chat bubbles (user/assistant), plus the workflow events
+  // rendered in place — status/debug small, approval at regular font. Mirrors the
+  // ChatItem union in routes/+page.svelte.
+  interface Item {
+    kind: "user" | "assistant" | "status" | "debug" | "approval" | "tags" | "tag-proposal";
+    id: string;
+    text?: string;
+    tags?: string;         // tags: comma-joined category tags the program filtered on
+    name?: string;         // tag-proposal: suggested tag name
+    keywords?: string;     // tag-proposal: suggested keywords (comma-joined)
+    ml?: boolean;          // tag-proposal: true = AI rule (prompt), false = keyword
+    prompt?: string;       // tag-proposal (AI): the yes/no question to classify with
+    stepId?: string;
+    label?: string;
+    state?: StepState;
+    detail?: string;
+    title?: string;
+    body?: string;
+    language?: string;
+    resolved?: "approved" | "rejected";
+    source?: string;       // assistant: filename of the doc used to answer
+    sourceAlias?: string;  // …its alias → /api/doc?alias=<sourceAlias>
+    result?: ResultSpec;   // assistant: optional rich result → presenter below the bubble
+  }
+
+  let {
+    items,
+    busy,
+    demo = false,
+    onsend,
+    onrun,
+    onapprove,
+    onreject,
+  }: {
+    items: Item[];
+    busy: boolean;
+    demo?: boolean;
+    onsend: (text: string) => void;
+    onrun: (program: string, question: string) => void;
+    onapprove: (id: string, stepId: string) => void;
+    onreject: (id: string, stepId: string) => void;
+  } = $props();
+
+  // The curated demo questions — the ONLY ones the replay cache can answer. The
+  // authoritative list is the primed questions.json (the survivors of prime-cache.sh),
+  // fetched at runtime so the dropdown stays in sync with the cache without duplicating
+  // it here. The inline list is just a fallback when /questions.json can't be fetched.
+  let SUGGESTED = $state<string[]>([
+    "Build me a dashboard with spending by merchant for the last 3 months",
+    "Give me a table with the monthly amounts I spent per merchant in the last 6 months for the merchants that had more than 2 transactions. Display line graphs for the top 10 merchants where I spent the most money.",
+    "how many transactions do I have",
+    "what is the total of my transactions",
+    "what kinds of files are in my vault",
+    "how much did I spend",
+  ]);
+  onMount(() => {
+    loadRecent();
+    loadHistory(); // durable backend history (no-op in demo)
+    if (!demo) return;
+    fetch("/questions.json")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((qs) => {
+        if (Array.isArray(qs) && qs.length) SUGGESTED = qs as string[];
+      })
+      .catch(() => {}); // keep the fallback list
+  });
+
+  let draft = $state("");
+  let picked = $state("");
+  let stream = $state<HTMLDivElement>();
+  // Demo: the suggested-question chips are shown up front, then collapse once the
+  // visitor picks one (they eat vertical space, esp. on a phone) — a small button
+  // brings them back. Start open only when there's no conversation yet.
+  let chipsOpen = $state(true);
+
+  // Question history — shown in a left panel when the question box is focused.
+  // EVERY ask is kept forever. The durable copy lives in the BACKEND store
+  // (`asks.jsonl`, surfaced at /api/history): each record carries the question,
+  // the generated program, and the answer, so the history survives a browser-data
+  // clear and follows the vault, not the device. localStorage is a fast, offline
+  // fallback (question text only) merged in for asks the backend hasn't recorded
+  // yet (the record lands only after the answer completes). Newest-first, deduped.
+  interface AskRecord {
+    q: string;
+    answer?: string;
+    code?: string;
+    source?: string;
+    ts?: number;
+  }
+  const RECENT_KEY = "millfolio:recent-questions";
+  let recent = $state<AskRecord[]>([]);
+  let showHistory = $state(false);
+  let inputEl = $state<HTMLTextAreaElement>();
+
+  // The question box is a textarea that GROWS with its content (a composer), up to a
+  // max then scrolls. Recompute after every content change: shrink to auto first so
+  // it can get smaller again, then size to the content (capped).
+  const MAX_TEXTAREA_PX = 160;
+  function autogrow() {
+    const el = inputEl;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, MAX_TEXTAREA_PX) + "px";
+  }
+  function resetGrow() {
+    if (inputEl) inputEl.style.height = "auto";
+  }
+
+  // Merge two record lists, newest-first, deduped by question — the FIRST occurrence
+  // wins, so callers pass the richer source (backend, with code+answer) first.
+  function mergeRecent(...lists: AskRecord[][]): AskRecord[] {
+    const seen = new Set<string>();
+    const out: AskRecord[] = [];
+    for (const list of lists)
+      for (const r of list) {
+        if (!r?.q || seen.has(r.q)) continue;
+        seen.add(r.q);
+        out.push(r);
+      }
+    return out;
+  }
+  function localQuestions(): AskRecord[] {
+    try {
+      const raw = localStorage.getItem(RECENT_KEY);
+      if (raw) {
+        const a = JSON.parse(raw);
+        if (Array.isArray(a))
+          return a.filter((x) => typeof x === "string").map((q) => ({ q }));
+      }
+    } catch {} // private mode / quota — just start empty
+    return [];
+  }
+  function loadRecent() {
+    recent = localQuestions();
+  }
+  // Pull the durable history from the backend and merge it over the local cache
+  // (backend records win — they carry code+answer). Demo has no backend → skip.
+  async function loadHistory() {
+    if (demo) return;
+    try {
+      const r = await fetch("/api/history");
+      if (!r.ok) return;
+      const data = await r.json();
+      const recs: AskRecord[] = (data?.records ?? []).map((x: any) => ({
+        q: String(x.q ?? ""),
+        answer: x.answer,
+        code: x.code,
+        source: x.source,
+        ts: x.ts,
+      }));
+      recent = mergeRecent(recs, recent);
+    } catch {} // offline / older server without /api/history — keep the local list
+  }
+  function remember(q: string) {
+    // Optimistic: show it immediately (the backend records it once the answer is in).
+    recent = mergeRecent([{ q }], recent);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent.map((r) => r.q)));
+    } catch {}
+  }
+  // Pick a past question → drop it into the box to edit/resend (non-destructive).
+  // Copy a code box (the generated program) to the clipboard, with a transient ✓ on
+  // the box that was copied (keyed so only that one shows the checkmark).
+  import { loadDemoBoard, pinDemo } from "$lib/demoBoard";
+
+  // Pin-from-Ask (Millwright): send an answer's question + rendered result spec
+  // to the board. The server snapshots the question's saved program from history
+  // (the same record "Run again" uses) — every widget is born from a program the
+  // user already saw run. Transient per-item state: "" → pinned ✓ / error text.
+  let pinState = $state<Record<string, string>>({});
+  function questionFor(idx: number): string {
+    for (let i = idx; i >= 0; i--) if (items[i].kind === "user") return items[i].text ?? "";
+    return "";
+  }
+  async function pinAnswer(idx: number) {
+    const it = items[idx];
+    if (!it?.result) return;
+    const q = questionFor(idx);
+    if (!q) {
+      pinState = { ...pinState, [it.id]: "couldn't find the question" };
+      return;
+    }
+    try {
+      if (demo) {
+        // Demo: the server is read-only — pin into THIS browser's local board
+        // (localStorage; the Board's "reset" clears it). Seed from the shared
+        // board first if this browser has no local chain yet.
+        const r = await fetch("/api/millwright");
+        const d = await r.json();
+        const store = loadDemoBoard({ spec: d?.spec, results: d?.results ?? {} });
+        const title = q.length > 60 ? q.slice(0, 57) + "…" : q;
+        pinDemo(store, q, title, it.result);
+        pinState = { ...pinState, [it.id]: "ok" };
+        return;
+      }
+      const r = await fetch("/api/millwright/pin", {
+        method: "POST",
+        body: JSON.stringify({ q, result: it.result }),
+      });
+      const d = await r.json();
+      pinState = { ...pinState, [it.id]: r.ok && !d?.error ? "ok" : (d?.error ?? `HTTP ${r.status}`) };
+    } catch (e) {
+      pinState = { ...pinState, [it.id]: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  let copiedKey = $state("");
+  async function copyCode(text: string, key: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedKey = key;
+      setTimeout(() => (copiedKey = copiedKey === key ? "" : copiedKey), 1500);
+    } catch {} // clipboard blocked — the text is still selectable
+  }
+
+  function pickRecent(q: string) {
+    draft = q;
+    // Focus FIRST — focusing fires the input's onfocus (which would re-open the
+    // panel), so close it AFTER so "Ask again" actually dismisses the list.
+    inputEl?.focus();
+    showHistory = false;
+    // Grow to fit the dropped-in text (after the DOM reflects the new value).
+    requestAnimationFrame(autogrow);
+  }
+  // "Run again" — re-run this record's SAVED program directly (no model call): stream
+  // the answer into the timeline over the CURRENT vault. Only offered when the record
+  // carries a stored program (older question-only records don't). Closes the panel so
+  // the streamed result is visible, mirroring pickRecent.
+  function runAgain(r: AskRecord) {
+    if (!r.code || busy) return;
+    onrun(r.code, r.q);
+    showHistory = false;
+  }
+  // Remove a question from history — from the local list + cache AND (best-effort)
+  // the durable backend store, so it doesn't reappear on the next load.
+  async function deleteRecent(q: string) {
+    recent = recent.filter((r) => r.q !== q);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent.map((r) => r.q)));
+    } catch {}
+    if (recent.length === 0) showHistory = false;
+    if (demo) return;
+    try {
+      await fetch(`${apiBase()}/api/history/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q }),
+      });
+    } catch {} // best-effort — the local list is already updated
+  }
+
+  // Auto-approve countdown: an unresolved approval gets a 15s countdown then
+  // auto-approves, with "+1 min" to extend for a closer look. Used in BOTH the real
+  // product and the public demo (the demo also can't park on the gate — its
+  // single-threaded server would wedge). Immediate Approve and Reject stay available.
+  const AUTO_APPROVE_SECS = 15;
+  let remaining = $state(0); // seconds left on the current auto-approve countdown
+  // The id of the approval currently awaiting a decision (null if none). $derived so it
+  // recomputes reactively for EVERY question, not just the first.
+  const pendingApprovalId = $derived<string | null>(
+    [...items].reverse().find((x) => x.kind === "approval" && !x.resolved)?.id ?? null,
+  );
+  function bumpTimer() {
+    remaining += 60;
+  }
+
+  // Accept a model-proposed reusable tag: append `name = keywords` to the category
+  // rules (read-modify-write /api/categories) so it becomes a permanent fast tag —
+  // the SAME store the Tags tab edits. Disabled in the read-only demo.
+  function apiBase(): string {
+    if (typeof location === "undefined") return "";
+    const explicit = new URLSearchParams(location.search).get("api");
+    if (explicit) return explicit.replace(/\/$/, "");
+    return "";
+  }
+  // ── Missing-key affordance ──────────────────────────────────────────────────
+  // Codegen runs on the frontier model; with no ANTHROPIC_API_KEY it errors with the
+  // orchestrator's _NO_REMOTE_MSG ("…set ANTHROPIC_API_KEY and retry"). Native `.app`
+  // users never set that env var and have nowhere to fix it, so we surface an inline
+  // key field right under that error. Real product only (the demo has its own key).
+  function needsApiKey(text: string | undefined): boolean {
+    return !!text && text.includes("ANTHROPIC_API_KEY");
+  }
+  let keyFixInput = $state("");
+  let keyFixBusy = $state(false);
+  let keyFixDone = $state(false);
+  let keyFixErr = $state("");
+  async function saveKeyFix() {
+    const key = keyFixInput.trim();
+    if (!key) { keyFixErr = "Paste your key first."; return; }
+    keyFixBusy = true;
+    keyFixErr = "";
+    try {
+      const r = await fetch(`${apiBase()}/api/settings/apikey`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { keyFixErr = d.error ?? `couldn't save (HTTP ${r.status})`; return; }
+      keyFixInput = ""; // never keep the raw key in the browser
+      keyFixDone = true;
+    } catch (e) {
+      keyFixErr = e instanceof Error ? e.message : "couldn't save the key";
+    } finally {
+      keyFixBusy = false;
+    }
+  }
+
+  let proposalState = $state<Record<string, "saving" | "added" | "error">>({});
+  // Per-proposal edit state — the model's suggested keywords are just a starting
+  // point (often not your actual merchants). The user can keep them as-is, edit them,
+  // or switch to an AI rule (the model classifies — no exact keyword list needed).
+  type PEdit = { kw: string; isMl: boolean; ml: string };
+  let proposalEdits = $state<Record<string, PEdit>>({});
+  let customizing = $state<Record<string, boolean>>({});
+  function startCustomize(it: Item) {
+    if (!proposalEdits[it.id]) {
+      proposalEdits = {
+        ...proposalEdits,
+        [it.id]: { kw: it.keywords ?? "", isMl: !!it.ml, ml: it.prompt || `is this a ${it.name}?` },
+      };
+    }
+    customizing = { ...customizing, [it.id]: true };
+  }
+  function cleanName(s: string): string {
+    return s.replace(/[,=:()\t\n]/g, "").trim();
+  }
+  async function acceptProposal(it: Item) {
+    if (demo) return;
+    const id = it.id;
+    const name = cleanName(it.name ?? "");
+    const e = proposalEdits[id];
+    let rule = "";
+    const isMl = e ? e.isMl : !!it.ml; // AI-form proposals default to an ML rule
+    if (isMl) {
+      const q = (e?.ml ?? it.prompt ?? "").trim();
+      if (!name || !q) return;
+      rule = `${name} : ${q}`;
+    } else {
+      const kw = (e?.kw ?? it.keywords ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(", ");
+      if (!name || !kw) return;
+      rule = `${name} = ${kw}`;
+    }
+    proposalState = { ...proposalState, [id]: "saving" };
+    try {
+      const base = apiBase();
+      const cur = await (await fetch(`${base}/api/categories`)).json();
+      let text: string = cur.text ?? "";
+      if (text.length && !text.endsWith("\n")) text += "\n";
+      text += `${rule}\n`;
+      const r = await fetch(`${base}/api/categories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error();
+      proposalState = { ...proposalState, [id]: "added" };
+    } catch {
+      proposalState = { ...proposalState, [id]: "error" };
+    }
+  }
+  // One countdown per pending approval; the effect's cleanup clears the interval when
+  // the pending id changes (next question) or the component unmounts.
+  $effect(() => {
+    const id = pendingApprovalId;
+    if (!id) return;
+    remaining = AUTO_APPROVE_SECS;
+    const h = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(h);
+        const step = items.find((x) => x.id === id)?.stepId ?? "";
+        onapprove(id, step);
+      }
+    }, 1000);
+    return () => clearInterval(h);
+  });
+
+  const icon: Record<StepState, string> = {
+    pending: "○",
+    running: "◐",
+    "awaiting-approval": "⏸",
+    done: "●",
+    error: "✕",
+  };
+
+  // Auto-scroll to the newest item.
+  $effect(() => {
+    void items.length;
+    if (stream) stream.scrollTop = stream.scrollHeight;
+  });
+
+  // Live elapsed time on the currently-running step. The codegen step ("Writing the
+  // program") is a 30s+ BLOCKING call to the frontier model with no intermediary data,
+  // so without this it just looks hung. Frontend-only: key the timer on the active
+  // step's id (a string, so the effect only resets when the step actually changes —
+  // not on every items update) and tick until the next event replaces it.
+  const activeStepId = $derived<string | null>(
+    busy
+      ? ([...items].reverse().find((x) => x.kind === "status" && x.state === "running")?.id ?? null)
+      : null,
+  );
+  let stepElapsed = $state(0);
+  $effect(() => {
+    const id = activeStepId;
+    if (!id) { stepElapsed = 0; return; }
+    const t0 = Date.now();
+    stepElapsed = 0;
+    const h = setInterval(() => { stepElapsed = Math.floor((Date.now() - t0) / 1000); }, 1000);
+    return () => clearInterval(h);
+  });
+  function fmtElapsed(s: number): string {
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  // When an ask finishes (busy true→false), the backend has just written its record
+  // (question + generated program + answer) — pull it so the history entry upgrades
+  // from question-only to the full stored detail.
+  let wasBusy = false;
+  $effect(() => {
+    if (wasBusy && !busy) loadHistory();
+    wasBusy = busy;
+  });
+
+  function doSend() {
+    const t = draft.trim();
+    if (!t || busy) return;
+    onsend(t);
+    remember(t);
+    draft = "";
+    showHistory = false;
+    resetGrow(); // collapse the grown composer back to one line
+  }
+  function submit(e: SubmitEvent) {
+    e.preventDefault();
+    doSend();
+  }
+  // Enter submits (a growing composer's convention); Shift+Enter inserts a newline.
+  function onQuestionKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      doSend();
+    } else if (e.key === "Escape") {
+      showHistory = false;
+    }
+  }
+
+  // Demo: ask the selected curated question (only these are in the replay cache).
+  function submitPicked(e: SubmitEvent) {
+    e.preventDefault();
+    if (!picked || busy) return;
+    onsend(picked);
+    picked = "";
+  }
+  // Demo: tap a suggested-question chip to ask it (chips wrap their full text, so a
+  // long question stays readable on a phone — a native <select> would overflow).
+  function askDemo(q: string) {
+    if (busy) return;
+    onsend(q);
+    chipsOpen = false; // collapse the list after a choice; the toggle brings it back
+  }
+</script>
+
+<!-- A generated-program box with a copy icon (top-right); clicking it copies the code. -->
+{#snippet codeBox(code: string, key: string)}
+  <div class="codebox">
+    <button
+      type="button"
+      class="codecopy"
+      class:copied={copiedKey === key}
+      onclick={() => copyCode(code, key)}
+      title={copiedKey === key ? "Copied" : "Copy program"}
+      aria-label={copiedKey === key ? "Copied" : "Copy program"}
+    >
+      {#if copiedKey === key}
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+      {:else}
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+      {/if}
+    </button>
+    <pre><code>{code}</code></pre>
+  </div>
+{/snippet}
+
+<section class="chat">
+  {#if !demo && showHistory}
+    <!-- click anywhere outside the panel to dismiss -->
+    <div class="hist-backdrop" role="presentation" onclick={() => (showHistory = false)}></div>
+    <aside class="history" aria-label="Questions you've asked">
+      <div class="hist-head">
+        <span>Recent questions</span>
+        <button class="hist-close" type="button" aria-label="Close" onclick={() => (showHistory = false)}>×</button>
+      </div>
+      <ul>
+        {#each recent as r (r.q)}
+          <li class="hist-li">
+            {#if r.answer || r.code}
+              <!-- backend record: expandable to its stored answer + generated program -->
+              <details class="hist-rec">
+                <summary title={r.q}>{r.q}</summary>
+                <!-- Ask again: drop the question back into the box → the model writes a
+                     NEW program (right after the question, as the primary action). -->
+                <button type="button" class="hist-use" onclick={() => pickRecent(r.q)}>Ask again</button>
+                {#if r.answer}<p class="hist-answer">{r.answer}</p>{/if}
+                {#if r.source}<p class="hist-src">📄 {r.source}</p>{/if}
+                {#if r.code}
+                  <details class="hist-code">
+                    <summary>generated program</summary>
+                    {@render codeBox(r.code, "hist-" + r.q)}
+                  </details>
+                  <!-- Run again: re-run this SAVED program directly (no model call) —
+                       faster + deterministic. After the program, as the spec asks. -->
+                  <button
+                    type="button"
+                    class="hist-run"
+                    disabled={busy}
+                    title="Re-run the saved program over your current vault — no model call"
+                    onclick={() => runAgain(r)}
+                  >Run again</button>
+                {/if}
+              </details>
+            {:else}
+              <button type="button" class="hist-item" title={r.q} onclick={() => pickRecent(r.q)}>{r.q}</button>
+            {/if}
+            <button
+              type="button"
+              class="hist-del"
+              title="Remove from history"
+              aria-label="Remove this question from history"
+              onclick={(e) => { e.stopPropagation(); deleteRecent(r.q); }}
+            >×</button>
+          </li>
+        {/each}
+      </ul>
+    </aside>
+  {/if}
+  <div class="stream" bind:this={stream}>
+    <div class="thread">
+    {#if items.length === 0}
+      <p class="empty">Ask a question about the files in your vault</p>
+    {/if}
+    {#each items as it, idx (it.id)}
+      {#if it.kind === "user" || it.kind === "assistant"}
+        <div class="msg {it.kind}">
+          <span class="who">{it.kind === "user" ? "you" : "millfolio"}</span>
+          <p>{it.text}</p>
+          {#if it.kind === "assistant" && it.result}
+            <ResultView result={it.result} />
+            {#if pinState[it.id] === "ok"}
+              <p class="pinned-note">📌 Pinned — see the <a href="/board">Board</a>.</p>
+            {:else}
+              <button
+                type="button"
+                class="pin-btn"
+                title={demo
+                  ? "Add this answer to your local Board (kept in this browser)"
+                  : "Add this answer to your Board — it re-runs the saved program, no model call"}
+                onclick={() => pinAnswer(idx)}
+              >📌 Pin to Board</button>
+              {#if pinState[it.id]}<span class="pin-err">{pinState[it.id]}</span>{/if}
+            {/if}
+          {/if}
+          {#if it.kind === "assistant" && it.source && it.sourceAlias}
+            <p class="source" title="the top document behind this answer — your vault may hold more">
+              📄 1st source:
+              <a href="/api/doc?alias={it.sourceAlias}" target="_blank" rel="noopener">{it.source}</a>
+            </p>
+          {/if}
+          {#if it.kind === "assistant" && !demo && needsApiKey(it.text)}
+            {#if keyFixDone}
+              <p class="keyfix-done">Key saved — ask your question again.</p>
+            {:else}
+              <div class="keyfix">
+                <p class="keyfix-lead">Add your Anthropic API key to run vault questions:</p>
+                <div class="keyfix-row">
+                  <input
+                    class="keyfix-input"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="sk-ant-…"
+                    bind:value={keyFixInput}
+                    disabled={keyFixBusy}
+                    onkeydown={(e) => { if (e.key === "Enter") saveKeyFix(); }}
+                  />
+                  <button class="keyfix-btn" onclick={saveKeyFix} disabled={keyFixBusy || !keyFixInput.trim()}>
+                    Save key
+                  </button>
+                </div>
+                {#if keyFixErr}<p class="keyfix-err">{keyFixErr}</p>{/if}
+                <p class="keyfix-hint">Stored on this device only. You can also manage it under Operations → Frontier model.</p>
+              </div>
+            {/if}
+          {/if}
+        </div>
+      {:else if it.kind === "status"}
+        <div class="status {it.state}">
+          <span class="icon" aria-hidden="true">{icon[it.state ?? "pending"]}</span>
+          <span class="label">{it.label}</span>
+          {#if it.detail}<span class="detail">— {it.detail}</span>{/if}
+          {#if it.id === activeStepId && stepElapsed >= 2}<span class="elapsed">· {fmtElapsed(stepElapsed)}</span>{/if}
+        </div>
+      {:else if it.kind === "tags"}
+        <div class="tagsused" title="The answer was computed by filtering your transactions on these category tags">
+          <span class="tlabel">filtered by tag</span>
+          {#each (it.tags ?? "").split(",") as t}<a class="chip" href="/tags" title="See this tag's rule in the Tags tab">{t}</a>{/each}
+        </div>
+      {:else if it.kind === "tag-proposal"}
+        <div class="proposal" title="Save this as a category tag so the next such question is a fast, exact filter — no model call">
+          <div class="ptext">
+            <span class="plabel">💡 Make <strong>{it.name}</strong> a reusable {it.ml ? "AI " : ""}tag?</span>
+            {#if !customizing[it.id]}<span class="pkw">{it.ml ? `“${it.prompt}”` : it.keywords}</span>{/if}
+          </div>
+          {#if !demo}
+            {#if proposalState[it.id] === "added"}
+              <span class="padded">{it.ml ? "✓ Created — backfilling in the background" : "✓ Saved to your tags"}</span>
+            {:else if customizing[it.id]}
+              <div class="pcustom">
+                <label class="pmltoggle" title="The model decides per transaction — no keyword list needed (slower, evaluated at index time)">
+                  <input type="checkbox" bind:checked={proposalEdits[it.id].isMl} /> AI rule (model decides — no keyword list)
+                </label>
+                {#if proposalEdits[it.id].isMl}
+                  <input class="pinput" placeholder="yes/no question — e.g. is this a gym or fitness studio?" bind:value={proposalEdits[it.id].ml} spellcheck="false" />
+                {:else}
+                  <input class="pinput" placeholder="keywords, comma, separated — your actual merchants" bind:value={proposalEdits[it.id].kw} spellcheck="false" />
+                {/if}
+                <div class="pactions">
+                  <button class="padd" disabled={proposalState[it.id] === "saving"} onclick={() => acceptProposal(it)}>
+                    {proposalState[it.id] === "saving" ? "Adding…" : "Add tag"}
+                  </button>
+                  <button class="pbtn" onclick={() => (customizing = { ...customizing, [it.id]: false })}>Cancel</button>
+                  {#if proposalState[it.id] === "error"}<span class="perr">Couldn't save</span>{/if}
+                </div>
+              </div>
+            {:else}
+              <div class="pactions">
+                <button class="padd" disabled={proposalState[it.id] === "saving"} onclick={() => acceptProposal(it)}>
+                  {proposalState[it.id] === "saving" ? "Adding…" : it.ml ? "Create & backfill" : "Add as suggested"}
+                </button>
+                <button class="pbtn" onclick={() => startCustomize(it)}>Customize…</button>
+                {#if proposalState[it.id] === "error"}<span class="perr">Couldn't save</span>{/if}
+              </div>
+            {/if}
+          {/if}
+        </div>
+      {:else if it.kind === "debug"}
+        <details class="debug">
+          <summary>{it.title}</summary>
+          {@render codeBox(it.body ?? "", "dbg-" + it.id)}
+        </details>
+      {:else if it.kind === "approval"}
+        <div class="approval">
+          <p class="atitle">{it.title}</p>
+          {#if it.body}{@render codeBox(it.body, "appr-" + it.id)}{/if}
+          {#if it.resolved}
+            <p class="decision {it.resolved}">
+              {it.resolved === "approved" ? "✓ Approved" : "✕ Rejected"}
+            </p>
+          {:else}
+            <div class="actions">
+              <button class="approve" onclick={() => onapprove(it.id, it.stepId ?? "")}>
+                {#if it.id === pendingApprovalId}Approve ({remaining}s){:else}Approve{/if}
+              </button>
+              {#if it.id === pendingApprovalId}
+                <button class="bump" onclick={bumpTimer} title="Give yourself another minute to review">+1 min</button>
+              {/if}
+              <button class="reject" onclick={() => onreject(it.id, it.stepId ?? "")}>Reject</button>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    {/each}
+    {#if busy}
+      <div class="working" aria-live="polite">
+        <span class="spin" aria-hidden="true"></span>working…
+      </div>
+    {/if}
+    </div>
+  </div>
+
+  {#if demo}
+    <div class="demo-picker">
+      <button
+        type="button"
+        class="demo-toggle"
+        aria-expanded={chipsOpen}
+        onclick={() => (chipsOpen = !chipsOpen)}
+      >
+        <span class="caret" class:open={chipsOpen}>▸</span>
+        {chipsOpen ? "Suggested questions" : "Try a suggested question"}
+      </button>
+      {#if chipsOpen}
+        <div class="demo-chips">
+          {#each SUGGESTED as q}
+            <button type="button" class="demo-chip" disabled={busy} onclick={() => askDemo(q)}>{q}</button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {:else}
+    <form onsubmit={submit}>
+      <div class="row">
+        <textarea
+          class="question"
+          rows="1"
+          placeholder="My question is…"
+          bind:value={draft}
+          bind:this={inputEl}
+          disabled={busy}
+          onfocus={() => (showHistory = recent.length > 0)}
+          oninput={() => { showHistory = false; autogrow(); }}
+          onkeydown={onQuestionKeydown}
+        ></textarea>
+        <button type="submit" disabled={busy || !draft.trim()}>Send</button>
+      </div>
+    </form>
+  {/if}
+</section>
+
+<style>
+  .chat {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--surface);
+    position: relative; /* positioning context for the recent-questions panel */
+  }
+
+  /* ── recent-questions panel (opens on focusing the question box) ─────────── */
+  .hist-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 5; /* below the panel, above the conversation — catches outside clicks */
+  }
+  .history {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 6;
+    width: min(280px, 80%);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-2);
+    border-right: 1px solid var(--border);
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.18);
+    overflow-y: auto;
+    animation: hist-in 0.14s ease-out;
+  }
+  @keyframes hist-in {
+    from { transform: translateX(-8px); opacity: 0; }
+  }
+  .hist-head {
+    position: sticky;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+  }
+  .hist-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  .hist-close:hover { color: var(--text); }
+  .history ul {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .hist-item {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    /* one-line, ellipsised — the full question is in the title tooltip */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hist-item:hover { background: var(--surface); }
+  .hist-li {
+    position: relative;
+  }
+  /* delete affordance — revealed on row hover, top-right */
+  .hist-del {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 0.1s ease, color 0.1s ease;
+  }
+  .hist-li:hover .hist-del,
+  .hist-del:focus-visible {
+    opacity: 1;
+  }
+  /* Touch devices can't hover — always show the delete button so it's tappable. */
+  @media (hover: none) {
+    .hist-del {
+      opacity: 1;
+    }
+  }
+  .hist-del:hover {
+    color: var(--err, #f85149);
+  }
+  /* backend record — expandable to its stored answer + generated program */
+  .hist-rec {
+    border-radius: var(--radius);
+  }
+  .hist-rec > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hist-rec > summary::-webkit-details-marker { display: none; }
+  .hist-rec > summary:hover { background: var(--surface); }
+  .hist-rec[open] > summary {
+    white-space: normal;
+    font-weight: 600;
+  }
+  .hist-answer {
+    margin: 4px 10px 6px;
+    padding: 6px 8px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    font-size: 12.5px;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .hist-src {
+    margin: 0 10px 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .hist-code {
+    margin: 0 10px 6px;
+    font-size: 11px;
+  }
+  .hist-code > summary {
+    cursor: pointer;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10px;
+  }
+  .hist-code pre {
+    margin: 4px 0 0;
+    padding: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 40vh;
+    overflow: auto;
+    font-size: 11px;
+  }
+  /* Copyable code box (generated program) — copy icon top-right; the <pre> keeps its
+     context-specific styling (.hist-code pre / .debug pre / .approval pre). */
+  .codebox {
+    position: relative;
+  }
+  .codecopy {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0.65;
+    transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .codecopy:hover {
+    opacity: 1;
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  .codecopy.copied {
+    opacity: 1;
+    color: var(--ok, #3fb950);
+    border-color: var(--ok, #3fb950);
+  }
+  .hist-use {
+    margin: 2px 10px 8px;
+    padding: 5px 12px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+  }
+  .hist-use:hover { background: var(--accent-dim); }
+  /* Run again — a filled accent button (the deterministic, no-model re-run), set
+     apart from the outline "Ask again"; sits after the generated program. */
+  .hist-run {
+    margin: 0 10px 8px;
+    padding: 5px 12px;
+    background: var(--accent);
+    color: #06101f;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .hist-run:hover:not(:disabled) { filter: brightness(1.08); }
+  .hist-run:disabled { opacity: 0.45; cursor: not-allowed; }
+  .stream {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  /* Keep the conversation in a centered, readable column — on a wide screen the
+     full-width stream flung right-aligned (user) and left-aligned (assistant)
+     bubbles to opposite edges, so the question was easy to miss. */
+  .thread {
+    max-width: 760px;
+    margin: 0 auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 100%;
+  }
+  .empty {
+    color: var(--text-dim);
+    margin: auto;
+  }
+
+  /* live "working" indicator — visible activity during long compiles/runs and
+     until the server replies (or the connection drops -> an error item appears). */
+  .working {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 2px 2px 4px;
+  }
+  .spin {
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* chat bubbles */
+  .msg {
+    max-width: 80%;
+  }
+  .msg.user {
+    align-self: flex-end;
+    text-align: right;
+  }
+  .who {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+  }
+  .msg p {
+    margin: 2px 0 0;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .msg p.source {
+    margin-top: 4px;
+    padding: 4px 12px;
+    background: transparent;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .msg p.source a {
+    color: var(--accent, #3b82f6);
+  }
+  .msg.user p {
+    background: var(--accent-dim);
+  }
+
+  /* missing-key affordance — inline under the no-key error */
+  .keyfix {
+    margin: 8px 12px 4px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+  }
+  .keyfix-lead {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .keyfix-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .keyfix-input {
+    flex: 1 1 200px;
+    min-width: 160px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel, var(--bg));
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .keyfix-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .keyfix-btn {
+    padding: 8px 14px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .keyfix-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .keyfix-hint {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .keyfix-err {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--err, #e5484d);
+  }
+  .keyfix-done {
+    margin: 8px 12px 4px;
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  /* status — small, inline, dim */
+  .status {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    padding-left: 2px;
+  }
+  .status .icon {
+    width: 1em;
+    text-align: center;
+  }
+  .status.running .icon {
+    color: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% { opacity: 0.35; }
+  }
+  .status.done .icon { color: var(--ok); }
+  .status.error .icon { color: var(--err); }
+  .status.awaiting-approval .icon { color: var(--warn); }
+  .status .detail {
+    opacity: 0.8;
+  }
+  .status .elapsed {
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* tags used — chips showing which category tag(s) answered the question */
+  .tagsused {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 2px 0;
+    font-size: 11.5px;
+  }
+  .tagsused .tlabel {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10px;
+  }
+  .tagsused .chip {
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--accent-dim, rgba(255, 122, 28, 0.12));
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .tagsused a.chip:hover {
+    background: var(--accent);
+    color: #06101f;
+  }
+
+  /* tag-proposal — a dashed callout offering to save a model-suggested tag */
+  .proposal {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0;
+    padding: 8px 12px;
+    border: 1px dashed var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-dim, rgba(255, 122, 28, 0.08));
+  }
+  .proposal .ptext {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .proposal .plabel {
+    font-size: 12.5px;
+  }
+  .proposal .plabel strong {
+    color: var(--accent);
+  }
+  .proposal .pkw {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+  }
+  .proposal .pactions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+  }
+  .proposal .padd {
+    padding: 5px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #06101f;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .proposal .padd:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .proposal .padded {
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .proposal .perr {
+    font-size: 11.5px;
+    color: var(--err, #f85149);
+  }
+  .proposal .pbtn {
+    padding: 5px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .proposal .pbtn:hover {
+    border-color: var(--accent);
+  }
+  .proposal .pcustom {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 4px;
+  }
+  .proposal .pmltoggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .proposal .pinput {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 9px;
+  }
+  .proposal .pinput:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  /* debug — small, collapsible */
+  .debug {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+  }
+  .debug summary {
+    cursor: pointer;
+  }
+  .debug pre {
+    margin: 6px 0 0;
+    padding: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-x: auto;
+    font-size: 11px;
+  }
+
+  /* approval — regular font, inline block */
+  .approval {
+    border: 1px solid var(--warn);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  .atitle {
+    margin: 0 0 8px;
+    color: var(--warn);
+  }
+  .approval pre {
+    margin: 0 0 8px;
+    padding: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    /* Cap tall programs at half the viewport and scroll (both axes) so a long
+       generated program can't push the approve/reject buttons off-screen. */
+    max-height: 50vh;
+    overflow: auto;
+    font-size: 12.5px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+  }
+  .actions button {
+    padding: 6px 14px;
+    border-radius: var(--radius);
+    border: none;
+    font-weight: 600;
+  }
+  .approve {
+    background: var(--ok);
+    color: var(--on-ok, #06120a);
+  }
+  .reject {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border) !important;
+  }
+  .bump {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent) !important;
+  }
+  .bump:hover {
+    background: var(--accent-dim);
+  }
+  .decision {
+    margin: 0;
+    font-size: 13px;
+  }
+  .decision.approved { color: var(--ok); }
+  .decision.rejected { color: var(--err); }
+
+  /* input */
+  form {
+    padding: 12px;
+    /* keep the input clear of the iOS home-indicator / URL bar inset */
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+  }
+  /* Demo: tappable suggested-question chips that WRAP (replaces a native <select>,
+     whose long options overflowed horizontally + were unusable on a phone). */
+  .demo-picker {
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .demo-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px;
+    background: none;
+    border: none;
+    color: var(--muted, #8a8f98);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .demo-toggle:hover {
+    color: var(--text);
+  }
+  .demo-toggle .caret {
+    display: inline-block;
+    transition: transform 0.12s ease;
+    font-size: 0.7rem;
+  }
+  .demo-toggle .caret.open {
+    transform: rotate(90deg);
+  }
+  .demo-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .demo-chip {
+    /* full question text wraps inside the chip; never overflow the viewport */
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+    line-height: 1.35;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-2, #1b1d22);
+    color: inherit;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .demo-chip:hover:not(:disabled) {
+    border-color: var(--accent, #3987e5);
+    background: var(--surface-3, #23262c);
+  }
+  .demo-chip:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+    max-width: 760px;
+    margin: 0 auto; /* match the centered conversation column */
+    align-items: flex-end; /* keep Send button-sized as the composer grows */
+  }
+  input {
+    flex: 1;
+    min-width: 0; /* let the field shrink within the flex row (no overflow on mobile) */
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  /* the "My question" composer — a textarea that grows with content, wraps long
+     text (no horizontal scroll), and scrolls once it hits max-height. */
+  .question {
+    flex: 1;
+    min-width: 0; /* shrink within the flex row → wrap, never horizontal-scroll on mobile */
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    line-height: 1.4;
+    resize: none;
+    display: block;
+    max-height: 160px; /* keep in sync with MAX_TEXTAREA_PX */
+    overflow-y: auto;
+    overflow-x: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .question:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .question:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  form button {
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    border: none;
+    background: var(--accent);
+    color: #06101f;
+    font-weight: 600;
+  }
+  form button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .pin-btn {
+    font: inherit;
+    font-size: 0.75rem;
+    margin-top: 0.3rem;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: inherit;
+    opacity: 0.75;
+    cursor: pointer;
+  }
+  .pin-btn:hover {
+    opacity: 1;
+  }
+  .pinned-note {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    margin: 0.3rem 0 0;
+  }
+  .pin-err {
+    font-size: 0.72rem;
+    color: #c0392b;
+    margin-left: 0.4rem;
+  }
+</style>

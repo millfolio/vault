@@ -1,0 +1,58 @@
+name: server
+
+# Compiles the Mojo server against the vault orchestrator + flare/json/jinja2,
+# checked out as siblings (the layout the -I paths assume). Modeled on vault's
+# vault-zip.yml build recipe. Path-filtered to server changes.
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/server.yml"]
+  pull_request:
+    paths: ["server/**", ".github/workflows/server.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14 # Apple Silicon — matches the osx-arm64 toolchain pin
+    steps:
+      # Sibling layout: app/ alongside vault/ flare/ json/ jinja2.mojo/, so
+      # from app/server the includes resolve to ../../<repo>.
+      - uses: actions/checkout@v4
+        with:
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/vault
+          path: vault
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/flare
+          path: flare
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/json
+          path: json
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/jinja2.mojo
+          path: jinja2.mojo
+      - uses: actions/checkout@v4
+        with:
+          repository: millfolio/logging.mojo
+          path: logging.mojo
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          manifest-path: app/server/pixi.toml
+
+      - name: Test protocol wire helpers
+        working-directory: app/server
+        run: pixi run test
+
+      - name: Test run-queue state file
+        working-directory: app/server
+        run: pixi run test-runqueue
+
+      - name: Build millfolio-server
+        working-directory: app/server
+        run: pixi run build

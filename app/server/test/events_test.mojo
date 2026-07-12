@@ -1,0 +1,116 @@
+"""Events_test — unit tests for the protocol wire helpers (events.mojo).
+
+Builds + runs as a plain Mojo program (no flare/headgate): `pixi run test`.
+Asserts the exact ServerEvent JSON encodings and the field parser, so a change
+to the wire format that drifts from ../../protocol/events.ts fails CI.
+"""
+
+from events import (
+    json_escape,
+    field,
+    status,
+    tags_event,
+    tag_proposal_event,
+    debug_event,
+    approval,
+    message,
+    error_event,
+)
+
+
+def expect(cond: Bool, what: String) raises:
+    if not cond:
+        raise Error("FAIL: " + what)
+
+
+def expect_eq(got: String, want: String, what: String) raises:
+    if got != want:
+        raise Error("FAIL: " + what + "\n  got:  " + got + "\n  want: " + want)
+
+
+def main() raises:
+    # status / message / error: exact encodings (no tricky escaping)
+    expect_eq(
+        status("run", "Go", "running"),
+        '{"type":"status","stepId":"run","label":"Go","state":"running"}',
+        "status encoding",
+    )
+    expect_eq(
+        message("hi"),
+        '{"type":"message","id":"msg","role":"assistant","text":"hi"}',
+        "message encoding",
+    )
+    # message with a declarative RESULT SPEC (COMPUTE_VS_RENDER Phase 1): the already-
+    # serialized v:1 JSON is embedded RAW under "result" (it is itself JSON), while the
+    # text stays escaped. Empty result_json (the default) omits the field — the case above.
+    expect_eq(
+        message("hi", String(""), String(""), '{"v":1,"text":"hi","data":[]}'),
+        '{"type":"message","id":"msg","role":"assistant","text":"hi","result":{"v":1,"text":"hi","data":[]}}',
+        "message with result spec (raw-embedded)",
+    )
+    expect_eq(
+        error_event("boom"),
+        '{"type":"error","message":"boom"}',
+        "error encoding",
+    )
+
+    # debug / approval: check structure + payload shape
+    expect_eq(
+        tags_event("phone,travel"),
+        '{"type":"tags","tags":"phone,travel"}',
+        "tags_event encoding",
+    )
+    expect_eq(
+        tag_proposal_event("gym", "planet fitness, equinox", "kw"),
+        (
+            '{"type":"tag-proposal","name":"gym","ml":false,"keywords":"planet'
+            ' fitness, equinox"}'
+        ),
+        "tag_proposal_event encoding",
+    )
+
+    var d = debug_event("codegen", "Generated program", "x", "mojo")
+    expect(d.find('"type":"debug"') != -1, "debug type")
+    expect(d.find('"language":"mojo"') != -1, "debug language")
+    var a = approval("run", "Run it?", "code")
+    expect(a.find('"type":"approval-request"') != -1, "approval type")
+    expect(a.find('"payload":{') != -1, "approval payload object")
+    expect(a.find('"body":"code"') != -1, "approval payload body")
+
+    # json_escape: quotes, backslashes, control chars
+    expect(json_escape('a"b').find('\\"') != -1, "escape double-quote")
+    expect(json_escape("a\nb").find("\\n") != -1, "escape newline")
+    expect(json_escape("a\tb").find("\\t") != -1, "escape tab")
+
+    # field: parses a top-level string field; empty on bad/missing input
+    expect_eq(field('{"type":"ask","text":"q"}', "text"), "q", "field text")
+    expect_eq(field('{"type":"approve"}', "type"), "approve", "field type")
+    expect_eq(field("not json", "text"), "", "field on bad json")
+    expect_eq(field('{"text":"q"}', "missing"), "", "field on missing key")
+
+    # "run" frame (the Run again path): on_connect reads `type`/`program`/`text` off
+    # the opening frame. The program is a JSON-escaped multi-line string — `field`
+    # (loads → string_value) must decode the escapes back to real newlines.
+    expect_eq(
+        field('{"type":"run","program":"p","text":"q"}', "type"),
+        "run",
+        "field run type",
+    )
+    expect_eq(
+        field(
+            (
+                '{"type":"run","program":"from vault import *\\ndef main():\\n '
+                '   pass","text":"q"}'
+            ),
+            "program",
+        ),
+        "from vault import *\ndef main():\n    pass",
+        "field run program (unescaped)",
+    )
+    expect_eq(
+        field('{"type":"run","program":"p"}', "text"),
+        "",
+        "field run missing text",
+    )
+
+    print("ok: all event tests passed")

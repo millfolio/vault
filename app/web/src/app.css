@@ -1,0 +1,63 @@
+/* Millfolio design tokens (draft) — a calm, private, "veil + lens" palette.
+   These will move to ../../shared once the native apps need them too. */
+:root {
+  --bg: #0e1116;
+  --surface: #161b22;
+  --surface-2: #1c232d;
+  --border: #2a323d;
+  --text: #e6edf3;
+  --text-dim: #9aa7b4;
+  --accent: #6ea8fe; /* lens blue */
+  --accent-dim: #345;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f85149;
+  /* Chart series hues (COMPUTE_VS_RENDER Phase 2). A validated categorical pair for
+     the dark chart surface — blue + aqua, worst-adjacent CVD ΔE 69.8, both ≥3:1 on
+     the surface and inside the dark lightness band (dataviz validate_palette.js).
+     Single-series line/bar use --chart-1 only (one measure = one hue, no legend);
+     grouped bar uses both with a legend. */
+  --chart-1: #3987e5;
+  --chart-2: #199e70;
+  /* Extended categorical hues for a share-of-whole PIE (a small number of parts,
+     ≤ ~8). Distinct on the dark chart surface; the pie always pairs color with a
+     legend + % so identity is never color-alone. Cycled if there are more parts. */
+  --chart-3: #e0913a; /* amber */
+  --chart-4: #b477e0; /* violet */
+  --chart-5: #e0607a; /* rose */
+  --chart-6: #45c4c4; /* teal */
+  --chart-7: #9bbf3f; /* lime */
+  --chart-8: #d98cc0; /* pink */
+  --radius: 10px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
