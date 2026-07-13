@@ -570,6 +570,16 @@
           <svelte:boundary>
             {#if results[w.id]?.result}
               <ResultView result={results[w.id].result} />
+              {#if results[w.id]?.preview}
+                <p class="example-note">
+                  These numbers are synthetic examples, not from your files.
+                  Once your documents are in the Vault this widget computes
+                  from your own records —
+                  <a href="https://millfolio.app/docs" target="_blank" rel="noopener"
+                    >learn how to add your data →</a
+                  >
+                </p>
+              {/if}
             {:else}
               <p class="pending">No result yet — hit ↻ to run it.</p>
             {/if}
@@ -734,6 +744,18 @@
     flex: 0 1 auto;
     min-width: 0;
   }
+  .example-note {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--text-dim);
+    border-top: 1px dashed var(--border);
+    padding-top: 6px;
+  }
+  .example-note a {
+    color: inherit;
+    text-decoration: underline dotted;
+  }
+
   .preview-badge {
     font-size: 0.62rem;
     text-transform: uppercase;
