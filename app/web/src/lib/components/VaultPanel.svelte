@@ -369,6 +369,16 @@
     return { out, inc, net: inc - out };
   });
   const money = fmtDollars;
+  // The Category-tags strip shows counts over the CURRENTLY-SHOWN records when
+  // any filter is active (entity deep-link or text), else the server's totals.
+  const displayTags = $derived.by(() => {
+    if (!entityFilters.length && !recFilter.trim()) return tags;
+    if (!txns) return tags;
+    const counts = new Map<string, number>();
+    for (const t of filteredTxns)
+      for (const x of t.tags) counts.set(x, (counts.get(x) ?? 0) + 1);
+    return tags.map((g) => ({ name: g.name, count: counts.get(g.name) ?? 0 }));
+  });
   // Re-pull records + tags after a tag is created (retag changes the .tags column).
   async function reloadAfterTag() {
     txLoaded = false;
@@ -933,7 +943,7 @@
             <a class="tslink" href="/tags">edit →</a>
           </div>
           <div class="tschips">
-            {#each tags as t}
+            {#each displayTags as t}
               <a
                 class="tagchip tclick"
                 href="/tags"
