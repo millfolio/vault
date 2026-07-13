@@ -3,9 +3,9 @@ class MillDev < Formula
   homepage "https://github.com/millfolio/vault"
   # version / url / sha256 are bumped per release by dist/homebrew/update-formula.sh
   # (downloads the mill-macos.tar.gz release asset and fills in its checksum).
-  version "0.4.50-rc.6"
-  url "https://github.com/millfolio/vault/releases/download/v0.4.50-rc.6/mill-macos.tar.gz"
-  sha256 "4927575ebf7bc030500d34010dac1eade87eaccff0d2ae4ed15c0eafc618489e"
+  version "0.4.50-rc.7"
+  url "https://github.com/millfolio/vault/releases/download/v0.4.50-rc.7/mill-macos.tar.gz"
+  sha256 "2247e4ddb1797806fbbb53bf8963ab49874394158e956c820f6ec46084422240"
 
   depends_on :macos
 
