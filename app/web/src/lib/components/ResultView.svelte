@@ -57,7 +57,16 @@
       if (b.kind === "kpi") {
         out.push({ t: "kpi", label: b.label, value: b.value });
       } else if (b.kind === "table") {
-        out.push({ t: "table", headers: b.headers, rows: b.rows, entities: colEntities(b.headers, b.entities) });
+        out.push({
+          t: "table",
+          headers: b.headers,
+          rows: b.rows,
+          // Example/preview data must not deep-link: its values are synthetic
+          // ("WHOLE FOODS" from the seed) and won't exist in the user's vault.
+          entities: result.preview
+            ? b.headers.map(() => null)
+            : colEntities(b.headers, b.entities),
+        });
       } else if (b.kind === "map") {
         if ((b.points?.length ?? 0) > 0) out.push({ t: "map", level: b.level, title: b.title, points: b.points });
       } else if (b.kind === "pie") {
