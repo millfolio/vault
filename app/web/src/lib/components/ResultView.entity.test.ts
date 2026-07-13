@@ -48,6 +48,11 @@ describe("VaultPanel entity filters", () => {
   it("the empty state names the active entity filters", () => {
     expect(vp).toMatch(/No records match \{entityFilters\.length/);
   });
+  it("tag-strip chips apply the tag filter in place (URL updated)", () => {
+    expect(vp).toMatch(/function filterByTag/);
+    expect(vp).toMatch(/searchParams\.set\("tag", name\)/);
+    expect(vp).toMatch(/onclick=\{\(\) => filterByTag\(t\.name\)\}/);
+  });
   it("the Category-tags strip recounts over the filtered rows", () => {
     expect(vp).toMatch(/displayTags/);
     expect(vp).toMatch(/\{#each displayTags as t\}/);

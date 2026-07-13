@@ -324,6 +324,20 @@
     if (out.length) showRecords(); // land directly on the filtered records
   }
   readEntityFilters();
+  // Tag-strip click → filter the records in place (same mechanism as the
+  // Board deep links; replaces any previous tag filter and updates the URL so
+  // the view stays shareable).
+  function filterByTag(name: string) {
+    entityFilters = [
+      ...entityFilters.filter((f) => f.kind !== "tag"),
+      { kind: "tag", value: name },
+    ];
+    const u = new URL(window.location.href);
+    u.searchParams.set("tag", name);
+    history.replaceState({}, "", u);
+    showRecords();
+  }
+
   function clearEntityFilter(kind: string) {
     entityFilters = entityFilters.filter((f) => f.kind !== kind);
     const u = new URL(window.location.href);
@@ -959,13 +973,14 @@
           </div>
           <div class="tschips">
             {#each displayTags as t}
-              <a
+              <button
+                type="button"
                 class="tagchip tclick"
-                href="/tags"
-                title={`${t.count} transaction${t.count === 1 ? "" : "s"} — edit in Tags`}
+                title={`${t.count} transaction${t.count === 1 ? "" : "s"} — click to show them`}
+                onclick={() => filterByTag(t.name)}
               >
                 {t.name}<span class="tcount">{t.count}</span>
-              </a>
+              </button>
             {/each}
           </div>
           <p class="tshint">
@@ -2090,6 +2105,10 @@
   }
   a.tagchip {
     text-decoration: none;
+  }
+  button.tagchip {
+    font: inherit;
+    cursor: pointer;
   }
   a.tagchip.tclick {
     cursor: pointer;
