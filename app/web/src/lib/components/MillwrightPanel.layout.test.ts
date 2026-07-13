@@ -33,3 +33,16 @@ describe("Board tile-tools layout contract", () => {
     expect(src).toMatch(/@media \(pointer: coarse\)/);
   });
 });
+
+describe("seed examples auto-compute on real installs", () => {
+  it("example widgets carry the synthetic-data note + docs link", () => {
+    expect(src).toMatch(/synthetic examples, not from your files/);
+    expect(src).toMatch(/millfolio\.app\/docs/);
+  });
+  it("auto-runs preview widgets when the vault has records (not in demo)", () => {
+    expect(src).toMatch(/function autoComputeExamples/);
+    expect(src).toMatch(/results\[id\]\?\.preview/);
+    expect(src).toMatch(/if \(demo \|\| autoComputed/);
+    expect(src).toMatch(/if \(!rows\.length\) return/);
+  });
+});

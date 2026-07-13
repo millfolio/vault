@@ -22,6 +22,10 @@ describe("ResultView entity links", () => {
     expect(rv).toMatch(/\/vault\?\$\{kind\}=/);
     expect(rv).toMatch(/encodeURIComponent/);
   });
+  it("preview/example results never deep-link", () => {
+    expect(rv).toMatch(/result\.preview/);
+    expect(rv).toMatch(/headers\.map\(\(\) => null\)/);
+  });
   it("only text cells become links (money/count cells stay plain)", () => {
     expect(rv).toMatch(/cell\.type === "text"/);
   });

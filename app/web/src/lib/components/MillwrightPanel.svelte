@@ -73,7 +73,35 @@
       loadError = String(e);
     }
   }
-  onMount(load);
+  onMount(async () => {
+    await load();
+    autoComputeExamples();
+  });
+
+  // First-install UX: widgets still showing the seeded EXAMPLE results compute
+  // their real result automatically (same path as ↻) as soon as the vault has
+  // any records — synthetic data on a real install is confusing. Empty vault →
+  // keep the examples (all-zero widgets are worse onboarding). Once per page
+  // load; the orchestrator serializes the runs server-side. Skipped in the
+  // demo (its board is the hermetic localStorage chain).
+  let autoComputed = false;
+  async function autoComputeExamples() {
+    if (demo || autoComputed || !spec) return;
+    const previewIds = Object.keys(results).filter((id) => results[id]?.preview);
+    if (!previewIds.length) return;
+    try {
+      const r = await fetch("/api/transactions", {
+        headers: { accept: "application/json" },
+      });
+      if (!r.ok) return;
+      const rows = ((await r.json()).transactions ?? []) as unknown[];
+      if (!rows.length) return; // nothing indexed yet — keep the examples
+    } catch {
+      return;
+    }
+    autoComputed = true;
+    for (const id of previewIds) refresh(id);
+  }
 
   // The CONTAINER this panel renders: the root board, or one spec page (v2 §2).
   const container = $derived.by(() => {
@@ -542,6 +570,16 @@
           <svelte:boundary>
             {#if results[w.id]?.result}
               <ResultView result={results[w.id].result} />
+              {#if results[w.id]?.preview}
+                <p class="example-note">
+                  These numbers are synthetic examples, not from your files.
+                  Once your documents are in the Vault this widget computes
+                  from your own records —
+                  <a href="https://millfolio.app/docs" target="_blank" rel="noopener"
+                    >learn how to add your data →</a
+                  >
+                </p>
+              {/if}
             {:else}
               <p class="pending">No result yet — hit ↻ to run it.</p>
             {/if}
@@ -706,6 +744,18 @@
     flex: 0 1 auto;
     min-width: 0;
   }
+  .example-note {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--text-dim);
+    border-top: 1px dashed var(--border);
+    padding-top: 6px;
+  }
+  .example-note a {
+    color: inherit;
+    text-decoration: underline dotted;
+  }
+
   .preview-badge {
     font-size: 0.62rem;
     text-transform: uppercase;

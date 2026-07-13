@@ -102,6 +102,10 @@ export interface ResultSpec {
   v: number;
   text: string;
   data?: ResultBlock[];
+  /** Seed-board example results are marked preview: true — the chrome renders
+   *  them with the EXAMPLE badge and suppresses entity deep-links (their
+   *  values are synthetic and don't exist in the user's vault). */
+  preview?: boolean;
 }
 
 export interface MessageEvent {
