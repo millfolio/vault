@@ -335,23 +335,38 @@
     const m = t.date.match(/^(\d{1,2})[\/-]/);
     return m ? `${t.year}-${m[1].padStart(2, "0")}` : "";
   }
-  function matchesEntities(t: Txn): boolean {
+  // Merchant matching is TIERED: exact first (the honest case — clicked
+  // aggregate == shown rows), then prefix, then contains — because the Board
+  // program's aggregation cleaning ("WHOLE FOODS") and the index-time record
+  // cleaning ("Whole Foods Mkt") can disagree, and zero results on a click is
+  // strictly worse than a slightly wider set. Tags/months stay exact.
+  function applyEntityFilters(rows: Txn[]): Txn[] {
+    let out = rows;
     for (const f of entityFilters) {
       const v = f.value.trim().toLowerCase();
       if (f.kind === "merchant") {
-        if ((t.merchant || t.desc).trim().toLowerCase() !== v) return false;
+        const name = (t: Txn) => (t.merchant || t.desc).trim().toLowerCase();
+        const exact = out.filter((t) => name(t) === v);
+        if (exact.length) {
+          out = exact;
+        } else {
+          const prefix = out.filter((t) => name(t).startsWith(v));
+          out = prefix.length ? prefix : out.filter((t) => name(t).includes(v));
+        }
       } else if (f.kind === "tag") {
-        if (!t.tags.some((x) => x.toLowerCase() === v)) return false;
-      } else if (txnMonth(t) !== v) return false;
+        out = out.filter((t) => t.tags.some((x) => x.toLowerCase() === v));
+      } else {
+        out = out.filter((t) => txnMonth(t) === v);
+      }
     }
-    return true;
+    return out;
   }
 
   // Plain text-filter over the loaded records (by description).
   let recFilter = $state("");
   const filteredTxns = $derived.by(() => {
     let all = txns ?? [];
-    if (entityFilters.length) all = all.filter(matchesEntities);
+    if (entityFilters.length) all = applyEntityFilters(all);
     const q = recFilter.trim().toLowerCase();
     if (!q) return all;
     return all.filter((t) => t.desc.toLowerCase().includes(q));
@@ -1145,7 +1160,10 @@
             </tbody>
           </table>
           {#if filteredTxns.length === 0}
-            <p class="muted hint">No records match “{recFilter}”.</p>
+            <p class="muted hint">No records match {entityFilters.length
+                ? entityFilters.map((f) => `${f.kind} “${f.value}”`).join(", ") +
+                  (recFilter.trim() ? ` + “${recFilter}”` : "")
+                : `“${recFilter}”`}.</p>
           {/if}
         {:else}
           <p class="muted empty">No transactions extracted yet — index statement files.</p>
