@@ -12,7 +12,7 @@
   // Charts are hand-rolled inline SVG (no lib, no CDN); money AXES scale by `raw`,
   // labels use the exact money() `text`. Every string is rendered via {expr} so
   // Svelte auto-escapes it — NEVER {@html} (the spec is untrusted sandbox data).
-  import type { ResultSpec, ResultValue, ResultBlock } from "$lib/protocol";
+  import type { ResultSpec, ResultValue, ResultBlock, EntityKind } from "$lib/protocol";
   import LineChart from "$lib/components/charts/LineChart.svelte";
   import BarChart from "$lib/components/charts/BarChart.svelte";
   import GroupedBarChart from "$lib/components/charts/GroupedBarChart.svelte";
@@ -24,7 +24,7 @@
   type SeriesBlock = Extract<ResultBlock, { kind: "series" }>;
   type Unit =
     | { t: "kpi"; label: string; value: ResultValue }
-    | { t: "table"; headers: string[]; rows: ResultValue[][] }
+    | { t: "table"; headers: string[]; rows: ResultValue[][]; entities: (EntityKind | null)[] }
     | { t: "chart"; mark: "line" | "bar"; title: string; x: string[]; raw: number[]; text: string[] }
     | { t: "group"; title: string; xcats: string[]; series: { title: string; raw: number[]; text: string[] }[] }
     | { t: "map"; level: "country" | "state" | "city"; title: string; points: { code: string; value: ResultValue; label?: string }[] }
@@ -57,7 +57,7 @@
       if (b.kind === "kpi") {
         out.push({ t: "kpi", label: b.label, value: b.value });
       } else if (b.kind === "table") {
-        out.push({ t: "table", headers: b.headers, rows: b.rows });
+        out.push({ t: "table", headers: b.headers, rows: b.rows, entities: colEntities(b.headers, b.entities) });
       } else if (b.kind === "map") {
         if ((b.points?.length ?? 0) > 0) out.push({ t: "map", level: b.level, title: b.title, points: b.points });
       } else if (b.kind === "pie") {
@@ -89,6 +89,30 @@
   // already carries the answer). Same for a data-less (text-only) spec.
   const units = $derived(result?.v === 1 ? toUnits(result.data ?? []) : []);
 
+  /** Per-column entity: the spec's explicit `entities` wins; else fall back
+   *  to the header NAME so widgets saved before the field existed become
+   *  clickable without regeneration. */
+  function colEntities(
+    headers: string[],
+    entities?: (EntityKind | null)[],
+  ): (EntityKind | null)[] {
+    return headers.map((h, i) => {
+      const e = entities?.[i];
+      if (e === "merchant" || e === "tag" || e === "month") return e;
+      const n = h.trim().toLowerCase();
+      if (n === "merchant") return "merchant";
+      if (n === "tag" || n === "tags") return "tag";
+      if (n === "month") return "month";
+      return null;
+    });
+  }
+
+  /** Board table cell → the filtered Vault view (client-side nav; the value is
+   *  the NORMALIZED entity string the aggregation used, matched exactly server-side). */
+  function entityHref(kind: EntityKind, cell: ResultValue): string {
+    return `/vault?${kind}=${encodeURIComponent(cellText(cell))}`;
+  }
+
   function cellText(v: ResultValue): string {
     if (v == null) return "";
     if (v.type === "money" || v.type === "count") return v.text;
@@ -116,7 +140,14 @@
             <tbody>
               {#each u.rows as row}
                 <tr>
-                  {#each row as cell}<td class:num={isNumeric(cell)}>{cellText(cell)}</td>{/each}
+                  {#each row as cell, ci}<td class:num={isNumeric(cell)}
+                    >{#if u.entities[ci] && cell.type === "text"}<a
+                        class="entity-link"
+                        href={entityHref(u.entities[ci], cell)}
+                        title="Show these records in the Vault"
+                        >{cellText(cell)}</a
+                      >{:else}{cellText(cell)}{/if}</td
+                  >{/each}
                 </tr>
               {/each}
             </tbody>
@@ -195,6 +226,14 @@
   }
   .tbl tbody tr:last-child td {
     border-bottom: none;
+  }
+  .entity-link {
+    color: inherit;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+  }
+  .entity-link:hover {
+    color: var(--accent, #7aa2f7);
   }
   .tbl td.num {
     text-align: right;

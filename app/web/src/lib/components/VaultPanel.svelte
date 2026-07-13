@@ -306,10 +306,52 @@
     loadTxns();
   }
 
+  // Entity filters deep-linked from Board tables (/vault?merchant=…|tag=…|month=…).
+  // Values are the NORMALIZED strings the aggregations used (Txn.merchant is the
+  // same index-time cleaned brand programs group by), matched exactly (case-
+  // insensitive) — substring matching would show a different set of rows than
+  // the number the user clicked.
+  let entityFilters = $state<{ kind: "merchant" | "tag" | "month"; value: string }[]>([]);
+  function readEntityFilters() {
+    if (typeof window === "undefined") return;
+    const p = new URLSearchParams(window.location.search);
+    const out: { kind: "merchant" | "tag" | "month"; value: string }[] = [];
+    for (const kind of ["merchant", "tag", "month"] as const) {
+      const v = p.get(kind);
+      if (v) out.push({ kind, value: v });
+    }
+    entityFilters = out;
+    if (out.length) showRecords(); // land directly on the filtered records
+  }
+  readEntityFilters();
+  function clearEntityFilter(kind: string) {
+    entityFilters = entityFilters.filter((f) => f.kind !== kind);
+    const u = new URL(window.location.href);
+    u.searchParams.delete(kind);
+    history.replaceState({}, "", u);
+  }
+  function txnMonth(t: Txn): string {
+    if (!t.year) return ""; // unknown statement year → can't belong to a month filter
+    const m = t.date.match(/^(\d{1,2})[\/-]/);
+    return m ? `${t.year}-${m[1].padStart(2, "0")}` : "";
+  }
+  function matchesEntities(t: Txn): boolean {
+    for (const f of entityFilters) {
+      const v = f.value.trim().toLowerCase();
+      if (f.kind === "merchant") {
+        if ((t.merchant || t.desc).trim().toLowerCase() !== v) return false;
+      } else if (f.kind === "tag") {
+        if (!t.tags.some((x) => x.toLowerCase() === v)) return false;
+      } else if (txnMonth(t) !== v) return false;
+    }
+    return true;
+  }
+
   // Plain text-filter over the loaded records (by description).
   let recFilter = $state("");
   const filteredTxns = $derived.by(() => {
-    const all = txns ?? [];
+    let all = txns ?? [];
+    if (entityFilters.length) all = all.filter(matchesEntities);
     const q = recFilter.trim().toLowerCase();
     if (!q) return all;
     return all.filter((t) => t.desc.toLowerCase().includes(q));
@@ -1007,7 +1049,11 @@
               <span class="tl"><span class="k">Spent</span><span class="v out">{money(totals.out)}</span></span>
               <span class="tl"><span class="k">Received</span><span class="v inc">{money(totals.inc)}</span></span>
               <span class="tl"><span class="k">Net</span><span class="v" class:out={totals.net < 0}>{totals.net < 0 ? "-" : ""}{money(totals.net)}</span></span>
-              <span class="tnote">{filteredTxns.length} record{filteredTxns.length === 1 ? "" : "s"}{recFilter.trim() ? " (filtered)" : ""}</span>
+              {#each entityFilters as f (f.kind)}
+                <span class="chip" title="Filter from the Board — records are matched on the same normalized value the aggregation used"
+                  >{f.kind}: {f.value}<button type="button" class="chip-x" title="Clear this filter" onclick={() => clearEntityFilter(f.kind)}>×</button></span>
+              {/each}
+              <span class="tnote">{filteredTxns.length} record{filteredTxns.length === 1 ? "" : "s"}{recFilter.trim() || entityFilters.length ? " (filtered)" : ""}</span>
             </div>
           {/if}
           <table class="records">
@@ -1475,6 +1521,29 @@
   }
   .totals .v.out {
     color: var(--err);
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--surface);
+  }
+  .chip-x {
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .chip-x:hover {
+    color: var(--danger, #f66);
   }
   .totals .tnote {
     margin-left: auto;
