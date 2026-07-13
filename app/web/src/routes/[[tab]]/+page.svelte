@@ -1038,6 +1038,7 @@
 
 <style>
   main {
+    padding-bottom: 44px; /* clears the fixed statusbar */
     height: 100vh; /* fallback for browsers without dvh */
     height: 100dvh; /* dynamic viewport — excludes the iOS Safari URL bar */
     display: flex;
@@ -1325,10 +1326,15 @@
     .queue-badge { right: 8px; bottom: 34px; font-size: 12px; }
   }
   .statusbar {
-    /* Stick to the viewport bottom when a long tab (e.g. a full Board)
-       scrolls — the bar carries the model picker + live metrics. */
-    position: sticky;
+    /* Pinned to the viewport bottom — the bar carries the model picker + live
+       metrics. FIXED, not sticky: sticky is bounded by its parent, and on a
+       long Board the parent's edge passes mid-viewport, leaving the bar
+       floating over content (seen in rc.7). main's padding-bottom keeps the
+       last content scrollable above the bar. */
+    position: fixed;
     bottom: 0;
+    left: 0;
+    right: 0;
     z-index: 30;
     display: flex;
     align-items: center;
