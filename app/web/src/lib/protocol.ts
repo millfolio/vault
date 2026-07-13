@@ -55,6 +55,13 @@ export type ResultValue =
   | { type: "date"; value: string }
   | { type: "text"; value: string };
 
+/** A column's semantic entity — the trusted chrome renders cells in such a
+ *  column as links into the filtered Vault view (/vault?merchant=… etc.).
+ *  Optional + additive: specs without it stay valid, and the renderer also
+ *  falls back to the column HEADER name ("merchant"/"tag"/"month") so widgets
+ *  saved before this field existed become clickable without regeneration. */
+export type EntityKind = "merchant" | "tag" | "month";
+
 /** One data block. Phase 1 renders kpi + table; series is rendered as a table
  *  (charts are Phase 2). `map` is an offline bubble map (proportional-symbol) over
  *  a bundled outline — points are ISO-3166 alpha-3 country codes (level "country"),
@@ -63,7 +70,7 @@ export type ResultValue =
  *  city name) that DISPLAYS it — each sized by its money value. */
 export type ResultBlock =
   | { kind: "kpi"; label: string; value: ResultValue }
-  | { kind: "table"; headers: string[]; rows: ResultValue[][] }
+  | { kind: "table"; headers: string[]; rows: ResultValue[][]; entities?: (EntityKind | null)[] }
   | {
       kind: "series";
       seriesKind: "time" | "category";
