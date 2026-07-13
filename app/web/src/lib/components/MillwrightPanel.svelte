@@ -195,6 +195,8 @@
     }
   }
   async function removeWidget(w: Widget) {
+    // × sits next to edit/refresh — deleting must not be a slip of the finger.
+    if (!confirm(`Remove "${w.title}" from the board? The version history keeps it, but there is no undo button yet.`)) return;
     const next = mapContainer((c) => ({
       widgets: c.widgets.filter((x) => x.id !== w.id),
       layout: {

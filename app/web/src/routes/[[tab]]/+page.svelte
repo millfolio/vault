@@ -1325,6 +1325,11 @@
     .queue-badge { right: 8px; bottom: 34px; font-size: 12px; }
   }
   .statusbar {
+    /* Stick to the viewport bottom when a long tab (e.g. a full Board)
+       scrolls — the bar carries the model picker + live metrics. */
+    position: sticky;
+    bottom: 0;
+    z-index: 30;
     display: flex;
     align-items: center;
     gap: 12px;
