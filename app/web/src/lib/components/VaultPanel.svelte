@@ -324,6 +324,20 @@
     if (out.length) showRecords(); // land directly on the filtered records
   }
   readEntityFilters();
+  // Tag-strip click → filter the records in place (same mechanism as the
+  // Board deep links; replaces any previous tag filter and updates the URL so
+  // the view stays shareable).
+  function filterByTag(name: string) {
+    entityFilters = [
+      ...entityFilters.filter((f) => f.kind !== "tag"),
+      { kind: "tag", value: name },
+    ];
+    const u = new URL(window.location.href);
+    u.searchParams.set("tag", name);
+    history.replaceState({}, "", u);
+    showRecords();
+  }
+
   function clearEntityFilter(kind: string) {
     entityFilters = entityFilters.filter((f) => f.kind !== kind);
     const u = new URL(window.location.href);
@@ -335,23 +349,38 @@
     const m = t.date.match(/^(\d{1,2})[\/-]/);
     return m ? `${t.year}-${m[1].padStart(2, "0")}` : "";
   }
-  function matchesEntities(t: Txn): boolean {
+  // Merchant matching is TIERED: exact first (the honest case — clicked
+  // aggregate == shown rows), then prefix, then contains — because the Board
+  // program's aggregation cleaning ("WHOLE FOODS") and the index-time record
+  // cleaning ("Whole Foods Mkt") can disagree, and zero results on a click is
+  // strictly worse than a slightly wider set. Tags/months stay exact.
+  function applyEntityFilters(rows: Txn[]): Txn[] {
+    let out = rows;
     for (const f of entityFilters) {
       const v = f.value.trim().toLowerCase();
       if (f.kind === "merchant") {
-        if ((t.merchant || t.desc).trim().toLowerCase() !== v) return false;
+        const name = (t: Txn) => (t.merchant || t.desc).trim().toLowerCase();
+        const exact = out.filter((t) => name(t) === v);
+        if (exact.length) {
+          out = exact;
+        } else {
+          const prefix = out.filter((t) => name(t).startsWith(v));
+          out = prefix.length ? prefix : out.filter((t) => name(t).includes(v));
+        }
       } else if (f.kind === "tag") {
-        if (!t.tags.some((x) => x.toLowerCase() === v)) return false;
-      } else if (txnMonth(t) !== v) return false;
+        out = out.filter((t) => t.tags.some((x) => x.toLowerCase() === v));
+      } else {
+        out = out.filter((t) => txnMonth(t) === v);
+      }
     }
-    return true;
+    return out;
   }
 
   // Plain text-filter over the loaded records (by description).
   let recFilter = $state("");
   const filteredTxns = $derived.by(() => {
     let all = txns ?? [];
-    if (entityFilters.length) all = all.filter(matchesEntities);
+    if (entityFilters.length) all = applyEntityFilters(all);
     const q = recFilter.trim().toLowerCase();
     if (!q) return all;
     return all.filter((t) => t.desc.toLowerCase().includes(q));
@@ -944,13 +973,14 @@
           </div>
           <div class="tschips">
             {#each displayTags as t}
-              <a
+              <button
+                type="button"
                 class="tagchip tclick"
-                href="/tags"
-                title={`${t.count} transaction${t.count === 1 ? "" : "s"} — edit in Tags`}
+                title={`${t.count} transaction${t.count === 1 ? "" : "s"} — click to show them`}
+                onclick={() => filterByTag(t.name)}
               >
                 {t.name}<span class="tcount">{t.count}</span>
-              </a>
+              </button>
             {/each}
           </div>
           <p class="tshint">
@@ -1145,7 +1175,10 @@
             </tbody>
           </table>
           {#if filteredTxns.length === 0}
-            <p class="muted hint">No records match “{recFilter}”.</p>
+            <p class="muted hint">No records match {entityFilters.length
+                ? entityFilters.map((f) => `${f.kind} “${f.value}”`).join(", ") +
+                  (recFilter.trim() ? ` + “${recFilter}”` : "")
+                : `“${recFilter}”`}.</p>
           {/if}
         {:else}
           <p class="muted empty">No transactions extracted yet — index statement files.</p>
@@ -2072,6 +2105,10 @@
   }
   a.tagchip {
     text-decoration: none;
+  }
+  button.tagchip {
+    font: inherit;
+    cursor: pointer;
   }
   a.tagchip.tclick {
     cursor: pointer;

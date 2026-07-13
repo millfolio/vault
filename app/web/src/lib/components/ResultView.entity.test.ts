@@ -32,15 +32,26 @@ describe("VaultPanel entity filters", () => {
     expect(vp).toMatch(/\["merchant", "tag", "month"\] as const/);
     expect(vp).toMatch(/if \(out\.length\) showRecords\(\)/);
   });
-  it("matches EXACTLY on the normalized value, never substring", () => {
-    // The clicked aggregate and the shown rows must agree: exact compare on
-    // Txn.merchant (the index-time cleaned brand programs group by).
-    expect(vp).toMatch(/\.trim\(\)\.toLowerCase\(\) !== v/);
-    expect(vp).not.toMatch(/merchant.*includes\(v\)/);
+  it("merchant matching is tiered: exact first, then prefix, then contains", () => {
+    // Exact keeps the clicked-aggregate == shown-rows honesty when the two
+    // normalizations agree; the fallbacks prevent zero-result clicks when the
+    // Board program's cleaning and the record cleaning disagree (rc.7 bug:
+    // "WHOLE FOODS" vs "Whole Foods Mkt").
+    expect(vp).toMatch(/name\(t\) === v/);
+    expect(vp).toMatch(/startsWith\(v\)/);
+    expect(vp).toMatch(/includes\(v\)/);
   });
   it("chips clear one filter and update the URL in place", () => {
     expect(vp).toMatch(/searchParams\.delete\(kind\)/);
     expect(vp).toMatch(/history\.replaceState/);
+  });
+  it("the empty state names the active entity filters", () => {
+    expect(vp).toMatch(/No records match \{entityFilters\.length/);
+  });
+  it("tag-strip chips apply the tag filter in place (URL updated)", () => {
+    expect(vp).toMatch(/function filterByTag/);
+    expect(vp).toMatch(/searchParams\.set\("tag", name\)/);
+    expect(vp).toMatch(/onclick=\{\(\) => filterByTag\(t\.name\)\}/);
   });
   it("the Category-tags strip recounts over the filtered rows", () => {
     expect(vp).toMatch(/displayTags/);
