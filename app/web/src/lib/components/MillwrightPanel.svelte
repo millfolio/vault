@@ -73,7 +73,35 @@
       loadError = String(e);
     }
   }
-  onMount(load);
+  onMount(async () => {
+    await load();
+    autoComputeExamples();
+  });
+
+  // First-install UX: widgets still showing the seeded EXAMPLE results compute
+  // their real result automatically (same path as ↻) as soon as the vault has
+  // any records — synthetic data on a real install is confusing. Empty vault →
+  // keep the examples (all-zero widgets are worse onboarding). Once per page
+  // load; the orchestrator serializes the runs server-side. Skipped in the
+  // demo (its board is the hermetic localStorage chain).
+  let autoComputed = false;
+  async function autoComputeExamples() {
+    if (demo || autoComputed || !spec) return;
+    const previewIds = Object.keys(results).filter((id) => results[id]?.preview);
+    if (!previewIds.length) return;
+    try {
+      const r = await fetch("/api/transactions", {
+        headers: { accept: "application/json" },
+      });
+      if (!r.ok) return;
+      const rows = ((await r.json()).transactions ?? []) as unknown[];
+      if (!rows.length) return; // nothing indexed yet — keep the examples
+    } catch {
+      return;
+    }
+    autoComputed = true;
+    for (const id of previewIds) refresh(id);
+  }
 
   // The CONTAINER this panel renders: the root board, or one spec page (v2 §2).
   const container = $derived.by(() => {
