@@ -1074,6 +1074,9 @@
               </button>
               <button type="button" class="lockbtn" onclick={cancelUnlock}>Cancel</button>
               <span class="pwhint">Forgot it? <code>mill get amount-password</code></span>
+              {#if !native}
+                <span class="pwhint">Prefer Touch&nbsp;ID? It's available in the macOS app — the browser uses this passphrase.</span>
+              {/if}
             </form>
           {/if}
           <p class="reccount">
