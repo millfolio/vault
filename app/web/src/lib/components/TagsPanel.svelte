@@ -276,7 +276,12 @@
             {:else}
               <tr>
                 <td class="tname">
-                  <span class="name">{t.name}</span>
+                  <a
+                    class="name namelink"
+                    href={`/vault?tag=${encodeURIComponent(t.name)}`}
+                    title={`Show the ${t.count} record${t.count === 1 ? "" : "s"} with this tag in the Vault`}
+                    >{t.name}</a
+                  >
                   {#if t.ml}<span class="mltag">AI</span>{/if}
                 </td>
                 <td class="trule">
@@ -422,6 +427,15 @@
     text-align: right;
     white-space: nowrap;
   }
+  .namelink {
+    color: inherit;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+  }
+  .namelink:hover {
+    color: var(--accent, #7aa2f7);
+  }
+
   .tname {
     white-space: nowrap;
   }
