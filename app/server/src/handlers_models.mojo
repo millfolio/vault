@@ -39,6 +39,7 @@ from osutil import (
     _is_demo,
     _model_label,
     _app_version,
+    _installed_version,
     _engine_url,
 )
 from sysmetrics import _memory_gb
@@ -58,19 +59,18 @@ comptime EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 def handle_model_info() raises -> Response:
     """GET /api/model → the on-device model name + running version (the UI's bottom
     bar), plus the Turnstile sitekey (non-empty only when the demo gate is active —
-    the client renders the widget iff it's present)."""
+    the client renders the widget iff it's present). `installed` (the on-disk
+    bundle version, read per request) is included only when a bundle exists AND
+    it differs from the running version — its presence IS the "restart to apply"
+    signal, so the client needs no version comparison of its own."""
     var sitekey = _turnstile_sitekey() if _turnstile_enabled() else String("")
-    return _cors(
-        ok_json(
-            '{"model":'
-            + json_escape(_model_label())
-            + ',"version":'
-            + json_escape(_app_version())
-            + ',"turnstile_sitekey":'
-            + json_escape(sitekey)
-            + "}"
-        )
-    )
+    var body = String('{"model":') + json_escape(_model_label())
+    body += ',"version":' + json_escape(_app_version())
+    var installed = _installed_version()
+    if installed.byte_length() > 0 and installed != _app_version():
+        body += ',"installed":' + json_escape(installed)
+    body += ',"turnstile_sitekey":' + json_escape(sitekey) + "}"
+    return _cors(ok_json(body))
 
 
 def handle_models_list() raises -> Response:

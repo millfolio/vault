@@ -178,12 +178,33 @@
   // real release version (a `mill` install — not the demo's "<sha> · <date>" deploy
   // stamp, nor "dev"), append it: "<sha> · v0.4.39-rc.2".
   let serverVersion = $state("");
+  // The on-disk bundle version when it differs from the running one (the server
+  // sends `installed` only then — its presence IS the "restart to apply" signal).
+  // Set on load and re-checked on window focus, so finishing `mill install` in a
+  // terminal and switching back updates the stamp without polling.
+  let installedVersion = $state("");
   const buildSha = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev").split(" · ")[0];
   const buildLabel = $derived(
     serverVersion && serverVersion !== "dev" && !serverVersion.includes(buildSha)
       ? `${buildSha} · ${serverVersion}`
       : buildSha,
   );
+  const updatePending = $derived(
+    !isDemo && installedVersion !== "" && serverVersion !== "" && serverVersion !== "dev",
+  );
+
+  function refreshVersions() {
+    // Light re-read of /api/model for the version stamp only (the full handler
+    // below also drives Turnstile/model state — don't re-run that on focus).
+    fetch("/api/model")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        if (typeof d.version === "string") serverVersion = d.version;
+        installedVersion = typeof d.installed === "string" ? d.installed : "";
+      })
+      .catch(() => {});
+  }
 
   // Bottom-bar telemetry (real install only): AI-tag backfill progress + a rolling
   // 30-second GPU-utilization average. Both poll lightweight endpoints every 2s; the
@@ -407,6 +428,7 @@
       .then((d) => {
         if (d && typeof d.model === "string") modelName = d.model;
         if (d && typeof d.version === "string") serverVersion = d.version;
+        if (d) installedVersion = typeof d.installed === "string" ? d.installed : "";
         // Demo bot gate: load Turnstile's script once we know the sitekey (the
         // $effect below renders the widget into the intro modal). Explicit render so
         // we control placement + callbacks.
@@ -742,7 +764,7 @@
 </script>
 
 <!-- Escape closes the intro only when the human-check gate isn't active (don't let it be bypassed). -->
-<svelte:window onkeydown={(e) => {
+<svelte:window onfocus={refreshVersions} onkeydown={(e) => {
   if (showIntro && !turnstileSitekey && e.key === "Escape") dismissIntro();
   else if (catalogOpen && e.key === "Escape") catalogOpen = false;
 }} />
@@ -1033,6 +1055,12 @@
     {/if}
     <span class="spacer"></span>
     <span class="ver" title="build (app SHA · release version)">{buildLabel}</span>
+    {#if updatePending}
+      <span
+        class="ver ver-pending"
+        title="a newer version is installed on disk — restart Millfolio (or `mill stop && mill start`) to run it"
+        >→ {installedVersion} · restart to apply</span>
+    {/if}
   </footer>
 </main>
 
@@ -1557,5 +1585,10 @@
     opacity: 0.6;
     font-variant-numeric: tabular-nums;
     user-select: none;
+  }
+  .statusbar .ver-pending {
+    opacity: 1;
+    color: var(--accent);
+    font-weight: 600;
   }
 </style>

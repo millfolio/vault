@@ -220,5 +220,25 @@ def _app_version() -> String:
     """The deployed build label (matches the UI's bottom-bar stamp: '<sha> · <date>').
     Stamped on each stats record so the Stats page can average per deployed version.
     MILLFOLIO_VERSION is set by run-demo.sh from the deploy stamp; 'dev' otherwise.
+    NOTE: env is frozen at spawn — this is the RUNNING version. `_installed_version`
+    is the on-disk one; they diverge after an install until the server restarts.
     """
     return String(getenv("MILLFOLIO_VERSION", "dev"))
+
+
+def _installed_version() -> String:
+    """The release version stamped on DISK by the most recent install — the same
+    `bundle/VERSION` file the launcher reads into MILLFOLIO_VERSION at spawn
+    (Bootstrapper.swift), but read PER REQUEST, so it reflects a `mill install`
+    that finished after this server started. The UI compares it against
+    `_app_version()` to show "restart to apply". "" when absent (demo / source
+    builds) — the handler omits the field."""
+    var home = String(getenv("HOME", ""))
+    if home == "":
+        return String("")
+    var path = home + "/Library/Application Support/Millfolio/bundle/VERSION"
+    try:
+        with open(path, "r") as f:
+            return String(f.read().strip())
+    except:
+        return String("")  # no bundle (demo / dev source run)
