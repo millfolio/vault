@@ -27,15 +27,37 @@ struct Install: AsyncParsableCommand {
         Idempotent — reuses anything already installed. Provisions the combined \
         inference server (chat + embeddings, including both models' weights), the \
         privacy_box vault orchestrator + sandbox, the millfolio vault tools, and the \
-        millfolio web app (UI on :10000).
+        millfolio web app (UI on :10000). If millfolio was already running, it is \
+        restarted so the freshly installed version actually serves (--no-restart \
+        to leave the old one running).
         """)
+    @Flag(name: .long, help: "Leave an already-running millfolio serving the old version (skip the automatic restart).")
+    var noRestart = false
+
     @MainActor func run() async throws {
         let boot = streaming()
         print("Logging to \(boot.logFileURL.path)")
         print("  (if a step fails, the full timestamped output is there)")
         try await boot.installVault()
         print("✓ millfolio installed (inference server + privacy_box + millfolio web app)")
+        try await restartToApply(boot, skip: noRestart)
     }
+}
+
+/// Install/update refresh the components on DISK, but a previously-running
+/// server keeps serving the OLD build (the UI shows "restart to apply") until
+/// it restarts. When something was serving, do that restart here — full stop
+/// (engine + app) then start — so the new version goes live without a manual
+/// `mill stop && mill start`. openBrowser:false — a restart is not a
+/// user-initiated start: the menu-bar app / existing browser tab reconnects.
+@MainActor private func restartToApply(_ boot: Bootstrapper, skip: Bool) async throws {
+    if skip || !boot.appServerActive { return }
+    print("Restarting millfolio to apply the new version…")
+    try boot.stopServer()
+    _ = boot.stopAppServer()
+    for port in [8000, 10000, 10001] { boot.killStaleOnPort(port) }
+    try await boot.startVaultChat(vaultDir: boot.ensureVaultDir(), openBrowser: false)
+    print("✓ millfolio restarted — http://localhost:10000")
 }
 
 // ── mill update ─────────────────────────────────────────────────────────────
@@ -52,15 +74,19 @@ struct Update: AsyncParsableCommand {
     @Flag(name: .long, help: "Refresh the components only; don't upgrade the CLI via Homebrew.")
     var skipCli = false
 
+    @Flag(name: .long, help: "Leave an already-running millfolio serving the old version (skip the automatic restart).")
+    var noRestart = false
+
     @MainActor func run() async throws {
         let boot = streaming()
         print("Versions before update:")
         printVersions(boot.componentVersions())
         print("")
-        try await boot.selfUpdate(updateCLI: !skipCli)
+        try await boot.selfUpdate(updateCLI: !skipCli, noRestart: noRestart)
         print("\nVersions after update:")
         printVersions(boot.componentVersions())
         print("✓ millfolio up to date")
+        try await restartToApply(boot, skip: noRestart)
     }
 }
 
@@ -90,9 +116,12 @@ struct Start: AsyncParsableCommand {
         no Terminal — and opens http://localhost:10000. Server logs:
         ~/Library/Logs/Millfolio/server.log.
         """)
+    @Flag(name: .long, help: "Don't open the browser (it is auto-skipped anyway while the menu-bar app is running — the app IS the browser).")
+    var noOpen = false
+
     @MainActor func run() async throws {
         let boot = streaming()   // engine-load phases print as they happen
-        try await boot.startVaultChat(vaultDir: boot.ensureVaultDir())
+        try await boot.startVaultChat(vaultDir: boot.ensureVaultDir(), openBrowser: !noOpen)
         print("✓ millfolio running in the background — http://localhost:10000")
         print("  logs: \(boot.millfolioLogDir.appendingPathComponent("server.log").path)")
     }

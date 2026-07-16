@@ -1669,9 +1669,29 @@ public final class Bootstrapper: ObservableObject {
         }
     }
 
+    /// True when the Millfolio menu-bar app is running. The app renders :10000 in
+    /// its own WKWebView, so a CLI-triggered `open` of the same UI in the default
+    /// browser is redundant — the start paths below skip it. (The app's mirrored
+    /// copy of this file solves the same problem from the other side with
+    /// `openBrowser: false`.)
+    public var millfolioAppRunning: Bool {
+        NSWorkspace.shared.runningApplications
+            .contains { $0.bundleIdentifier == "me.millfolio.app" }
+    }
+
+    /// Something is serving (or launchd-loaded to serve) the app on :10000.
+    /// Install/update use this to decide whether to restart automatically —
+    /// a refresh under a RUNNING server otherwise leaves the old build serving
+    /// (the UI's "restart to apply" state) until a manual stop/start.
+    public var appServerActive: Bool {
+        if (try? runStatus("/bin/launchctl", ["print", "\(guiDomain)/\(Self.appServerLabel)"])) == 0 { return true }
+        return (try? runStatus("/bin/bash", ["-c", "lsof -ti tcp:10000 -sTCP:LISTEN >/dev/null 2>&1"])) == 0
+    }
+
     /// Start the app server under launchd, wait until :10000 answers, then expose it
-    /// on the tailnet + open the browser (one-shot — not part of the daemon).
-    public func startAppServer(vaultDir dir: String) throws {
+    /// on the tailnet + open the browser (one-shot — not part of the daemon;
+    /// skipped when `openBrowser` is false or the menu-bar app is the browser).
+    public func startAppServer(vaultDir dir: String, openBrowser: Bool = true) throws {
         ensureVaultShims()   // guard search()'s dlopen before the server runs programs
         let url = try writeAppServerLaunchAgent(vaultDir: dir)
         _ = try? runStatus("/bin/launchctl", ["bootout", "\(guiDomain)/\(Self.appServerLabel)"])
@@ -1686,7 +1706,9 @@ public final class Bootstrapper: ObservableObject {
         _ = waitForHttp(10000, path: "/favicon.svg", timeout: 25)
         _ = try? runStatus("/bin/bash", ["-c",
             "command -v tailscale >/dev/null 2>&1 && tailscale serve --bg 10000 >/dev/null 2>&1 || true"])
-        _ = try? runStatus("/bin/bash", ["-c", "open 'http://localhost:10000' >/dev/null 2>&1 &"])
+        if openBrowser && !millfolioAppRunning {
+            _ = try? runStatus("/bin/bash", ["-c", "open 'http://localhost:10000' >/dev/null 2>&1 &"])
+        }
     }
 
     /// Poll until something is LISTENING on `port`, or `timeout` s elapse.
@@ -1743,7 +1765,7 @@ public final class Bootstrapper: ObservableObject {
     /// `mill start`: ensure the combined inference server is running (launchd),
     /// then start the vault app servers in the BACKGROUND (no Terminal) and open
     /// http://localhost:10000. Server output goes to the millfolio server log.
-    public func startVaultChat(vaultDir dir: String) async throws {
+    public func startVaultChat(vaultDir dir: String, openBrowser: Bool = true) async throws {
         // 0. The vault dir must exist before privacy_box/millfolio's `manifest` runs
         //    over it (a clean machine has no vault dir yet).
         try? FileManager.default.createDirectory(
@@ -1757,7 +1779,7 @@ public final class Bootstrapper: ObservableObject {
         //    predates it (self-heal on upgrade), then (re)start it under launchd.
         _ = stopAppServer()
         if !isAppServerInstalled { try await installAppServer() }
-        try startAppServer(vaultDir: dir)
+        try startAppServer(vaultDir: dir, openBrowser: openBrowser)
         // 3. Now report the engine's load progress (phases via /v1/status) instead
         //    of hanging silently; this throws only when the engine is dead or
         //    reports an error (e.g. model not downloaded), not when it's just slow.
@@ -2140,7 +2162,7 @@ public final class Bootstrapper: ObservableObject {
     /// millfolio engine — to their latest releases. The pinned Mojo toolchains and the
     /// (multi-GB) model weights are preserved; only the source bundles are re-fetched
     /// and rebuilt. Progress streams through `onProgress`.
-    public func selfUpdate(updateCLI: Bool = true) async throws {
+    public func selfUpdate(updateCLI: Bool = true, noRestart: Bool = false) async throws {
         vlog("\n===== mill update — \(Self.stamp()) =====")
         if updateCLI {
             // Upgrade the CLI, then — if the binary actually changed — re-exec the
@@ -2154,7 +2176,7 @@ public final class Bootstrapper: ObservableObject {
             let after = brewCliVersion()
             if !after.isEmpty, after != before {
                 set("Re-launching the updated CLI (\(after)) to finish…")
-                reexecToFinishUpdate()  // execv; returns only if it couldn't re-exec
+                reexecToFinishUpdate(noRestart: noRestart)  // execv; returns only if it couldn't re-exec
             }
         }
 
@@ -2218,15 +2240,17 @@ public final class Bootstrapper: ObservableObject {
     /// logic (paired with the NEW bundle). On success this never returns. Best-effort:
     /// if the brew-managed binary can't be found or `execv` fails, it returns and the
     /// caller finishes the refresh inline with the current binary.
-    private func reexecToFinishUpdate() {
+    private func reexecToFinishUpdate(noRestart: Bool = false) {
         let mill = ["/opt/homebrew/bin/mill", "/usr/local/bin/mill"]
             .first { FileManager.default.isExecutableFile(atPath: $0) }
         guard let mill else {
             vlog("re-exec: brew-managed mill not found; finishing with the current binary")
             return
         }
-        vlog("re-exec: \(mill) update --skip-cli")
-        let args: [String] = [mill, "update", "--skip-cli"]
+        // Forward the restart decision — execv replaces this process, so the flag
+        // would otherwise be silently dropped on the re-exec'd `update` run.
+        let args: [String] = [mill, "update", "--skip-cli"] + (noRestart ? ["--no-restart"] : [])
+        vlog("re-exec: \(args.joined(separator: " "))")
         var cargs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
         cargs.append(nil)
         execv(mill, &cargs)
