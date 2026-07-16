@@ -203,6 +203,7 @@
     if (kind === "index-prepare") return "Prepare";
     if (kind === "finalize") return "Finalize";
     if (kind === "backfill") return "Backfill";
+    if (kind === "retag") return "Re-tag";
     if (kind === "demo-download") return "Sample data";
     return kind;
   }

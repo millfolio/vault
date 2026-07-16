@@ -40,9 +40,22 @@ from vault.derive.store import (
     add_default_tags,
 )
 
-from osutil import _is_demo, _engine_url
+from osutil import _is_demo, _engine_url, _epoch_s
 from httputil import _cors, _forbidden
 from events import json_escape
+from work_orchestrator import _append_operation
+
+
+def _record_retag_op(detail: String, changed: Int):
+    """Append a completed `retag` record to operations.jsonl so a rules change is
+    VISIBLE in the Operations tab (and the status-bar ops chip). The deterministic
+    re-tag runs synchronously inside the request — no queued work item ever
+    appears — which used to read as "I saved the tag and the refresh never ran".
+    """
+    var now = _epoch_s()
+    _append_operation(
+        String("retag"), now, now, String("done"), detail, -1, -1, changed
+    )
 
 
 def handle_tags() raises -> Response:
@@ -69,6 +82,7 @@ def handle_categories_save(req: Request) raises -> Response:
     except:
         return _cors(bad_request('{"error":"expected {text}"}'))
     var changed = save_categories(text)
+    _record_retag_op(String("category rules saved"), changed)
     return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
 
 
@@ -202,6 +216,7 @@ def handle_tags_add(req: Request) raises -> Response:
     if String(name.strip()) == "":
         return _cors(bad_request('{"error":"empty name"}'))
     var changed = add_category(name, keywords, prompt)
+    _record_retag_op(String("tag '") + name + "' added", changed)
     return _cors(ok_json('{"ok":true,"retagged":' + String(changed) + "}"))
 
 
@@ -230,4 +245,8 @@ def handle_tags_add_defaults(req: Request) raises -> Response:
     except:
         return _cors(bad_request('{"error":"expected {names:[…]}"}'))
     var added = add_default_tags(names)
+    if added > 0:
+        _record_retag_op(
+            String("default tags added (") + String(added) + ")", -1
+        )
     return _cors(ok_json('{"ok":true,"added":' + String(added) + "}"))

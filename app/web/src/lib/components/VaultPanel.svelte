@@ -450,6 +450,10 @@
   let addFilter = $state("");
   let addMsg = $state("");
   let addingTo = $state(false);
+  // The keyword to add — pre-filled from the record's merchant but EDITABLE, so
+  // the user can trim to the generalizable subset ("WHOLE FOODS MKT #123" →
+  // "WHOLE FOODS") before it becomes part of the tag's rule.
+  let addKw = $state("");
   let fullTags = $state<FullTag[]>([]);
   const keywordTags = $derived(fullTags.filter((t) => !t.ml || !t.ml.trim()));
   const filteredPickTags = $derived.by(() => {
@@ -503,6 +507,7 @@
     addRow = row;
     addFilter = "";
     addMsg = "";
+    addKw = kwFromRow(row);
     addOpen = true;
     const base = apiBase();
     if (base === null) return;
@@ -526,8 +531,8 @@
     if (addingTo || !addRow) return;
     const base = apiBase();
     if (base === null) return;
-    const kw = kwFromRow(addRow);
-    if (!kw) { addMsg = "This record has no usable description."; return; }
+    const kw = cleanKw(addKw);
+    if (!kw) { addMsg = "Enter a keyword to add."; return; }
     addingTo = true;
     addMsg = "";
     try {
@@ -544,8 +549,21 @@
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error ?? "save failed");
-      closeAddExisting();
       await reloadAfterTag();
+      const n = d.retagged ?? 0;
+      if (n > 0) {
+        closeAddExisting();
+      } else {
+        // Saved but nothing changed — say WHY instead of silently closing (the
+        // "I added it and nothing refreshed" trap). The likeliest culprits: the
+        // direction gate (expense tags never apply to credits), or the records
+        // that match already carry the tag.
+        addMsg =
+          `Saved “${kw}” to ${tag.name}, but 0 records changed — ` +
+          (addRow?.direction === "credit"
+            ? "this record is money IN (a credit), and expense tags only apply to money out."
+            : "matching records may already have the tag, or no description contains the keyword.");
+      }
     } catch (e) {
       addMsg = e instanceof Error ? e.message : "Failed to add to tag.";
     } finally {
@@ -1216,10 +1234,17 @@
     <div class="pmodal" role="dialog" aria-modal="true" aria-label="Add to an existing tag">
       <h3>Add to an existing tag</h3>
       <p class="psub">
-        Tag records matching <span class="merch">“{addRow.desc}”</span>. This adds it as a
-        keyword to the chosen tag's rule — so any record whose description contains it
-        gets that tag too.
+        From <span class="merch">“{addRow.desc}”</span>. The keyword below is added to the
+        chosen tag's rule — any record whose description contains it gets the tag too.
+        Edit it to widen or narrow the match (e.g. drop a store number).
       </p>
+      <input
+        class="pfilter pkwedit"
+        type="text"
+        placeholder="Keyword to add…"
+        bind:value={addKw}
+        aria-label="Keyword to add to the tag's rule"
+      />
       <input class="pfilter" type="text" placeholder="Filter tags…" bind:value={addFilter} />
       {#if keywordTags.length === 0}
         <p class="muted phint">No keyword tags yet — use “Create a new tag” instead.</p>
@@ -1756,6 +1781,10 @@
   .pfilter:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  .pkwedit {
+    font-weight: 600;
+    border-color: var(--accent-dim, var(--border));
   }
   .plist {
     display: flex;

@@ -221,6 +221,19 @@
   let idxRunning = $state(false);
   let idxCurrent = $state<number | null>(null);
   let idxTotal = $state<number | null>(null);
+  // Orchestrator work-queue summary for the status bar: what's RUNNING (kind) and
+  // how many items wait behind it — the compact form of the Operations tab, so
+  // background refresh work (backfill/index/re-tag) is visible without opening it.
+  let opsRunning = $state("");
+  let opsQueued = $state(0);
+  const OP_LABELS: Record<string, string> = {
+    index: "indexing",
+    "index-prepare": "indexing",
+    finalize: "indexing",
+    backfill: "backfill",
+    retag: "re-tag",
+    "demo-download": "sample data",
+  };
   const gpuRing: { t: number; v: number }[] = [];
   let bkLast: { pending: number; t: number } | null = null;
 
@@ -278,6 +291,17 @@
           idxCurrent = null;
           idxTotal = null;
         }
+      }
+    } catch {}
+    // Work queue: running kind + queued-behind count for the status-bar ops chip.
+    try {
+      const r = await fetch("/api/orchestrator/queue");
+      if (r.ok) {
+        const d = await r.json();
+        const items = (d.items ?? []) as { kind: string; state: string }[];
+        const running = items.find((x) => x.state === "running");
+        opsRunning = running ? (OP_LABELS[running.kind] ?? running.kind) : "";
+        opsQueued = items.filter((x) => x.state !== "running").length;
       }
     } catch {}
   }
@@ -1053,6 +1077,11 @@
         DISK: {diskUsed}%
       </span>
     {/if}
+    {#if !isDemo && (opsRunning || opsQueued > 0)}
+      <span class="metric ops" title="background operations running/queued — details in the Operations tab">
+        ⟳ {opsRunning || "queued"}{opsQueued > 0 ? ` · ${opsQueued} queued` : ""}
+      </span>
+    {/if}
     <span class="spacer"></span>
     <span class="ver" title="build (app SHA · release version)">{buildLabel}</span>
     {#if updatePending}
@@ -1571,6 +1600,9 @@
   }
   .statusbar .metric.link {
     cursor: pointer;
+  }
+  .statusbar .metric.ops {
+    color: var(--accent);
   }
   .statusbar .metric.link:hover {
     color: var(--accent);

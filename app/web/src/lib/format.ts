@@ -99,6 +99,7 @@ export function opLabel(t: string): string {
   if (t === "index") return "Index";
   if (t === "reindex") return "Re-index";
   if (t === "backfill") return "Backfill";
+  if (t === "retag") return "Re-tag";
   if (t === "demo") return "Sample data";
   return t;
 }
