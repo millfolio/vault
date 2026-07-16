@@ -174,8 +174,13 @@ test-transactions = { cmd = "mkdir -p build && mojo build core/test/extract/tran
 # ISO3 / <city3><ISO3> country, US state, digit-run + residual store-number strip,
 # and the location-less fallback (transfers / online). Pure, stdlib-only.
 test-location = { cmd = "mkdir -p build && mojo build core/test/extract/location_test.mojo -I core/src -o build/location-test && ./build/location-test" }
-# Gate: the EgressGuard blocks real-value fingerprints + canary tokens.
+# Gate: the EgressGuard blocks real-value fingerprints + canary tokens (even
+# reformatted — matching is normalized) and redacts PII shapes from survivors.
 test-egress = { cmd = "mkdir -p build && mojo build privacy-box/test/egress_test.mojo -I privacy-box/src -o build/egress-test && ./build/egress-test" }
+# Gate: guard SEEDING — canary dotfile minted-once/persisted in the vault dir +
+# fingerprints sampled from real CSV cells (identifiers in, merchant names out),
+# proven end-to-end against the guard. Runs over a throwaway build/seed-data dir.
+test-seed = { cmd = "mkdir -p build && rm -rf build/seed-data && mojo build privacy-box/test/seed_test.mojo -I privacy-box/src -o build/seed-test && SEED_TEST_DIR=\"$PWD/build/seed-data\" ./build/seed-test" }
 # Gate: budget directive parsing/accounting.
 test-budget = { cmd = "mkdir -p build && mojo build privacy-box/test/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
 # Gate: the local persistent CODEGEN DISK CACHE (codegen_cache.mojo) — the FNV-1a
@@ -203,4 +208,4 @@ test-mojo-version = { cmd = "bash scripts/check_mojo_version.sh" }
 # (swift) and drives hdiutil — macOS-only (self-skips elsewhere).
 test-transfer = { cmd = "bash cli/test_transfer.sh" }
 # The whole suite — what CI runs (pure Mojo + the macOS-only transfer gate; no FFI shims / network needed).
-test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-docstore", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-budget", "test-codegen-cache", "test-result", "test-strip", "test-transfer", "test-mojo-version"] }
+test = { depends-on = ["test-sha256", "test-relevance", "test-categorize", "test-ledger", "test-classify", "test-store", "test-docstore", "test-persist", "test-missing-defaults", "test-procversion", "test-golden", "test-index-steps", "test-spending", "test-dates", "test-wallclock", "test-julian", "test-amounts", "test-transactions", "test-location", "test-sandbox", "test-emdash", "test-egress", "test-seed", "test-budget", "test-codegen-cache", "test-result", "test-strip", "test-transfer", "test-mojo-version"] }

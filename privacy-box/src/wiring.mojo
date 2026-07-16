@@ -9,7 +9,7 @@ from std.os import getenv, makedirs
 
 from security import Budget
 from settings import Config
-from security import EgressGuard
+from security import EgressGuard, ensure_canary, vault_fingerprints
 from transport import LocalClient, RemoteClient
 from security import Sandbox, SandboxPolicy
 from security import CapabilityBroker
@@ -38,16 +38,26 @@ def build_vault_orchestrator(
     - the sandbox policy is in "loopback" network mode with the vault dir as the
       (read-only) data dir + the LanceDB index dir read-allowed, so the run
       profile renders privacy_box-vault.sb.template (loopback-only egress);
-    - the EgressGuard is fingerprinted from NO real content — the vault path
-      never reads real values into the guard; it sends only the ALIASED
-      manifest. The guard still blocks canary tokens and any configured secret,
-      and the manifest is aliases-only by construction (millfolio/manifest.mojo),
-      so confidentiality holds without per-file fingerprints. (search/ask_local
-      results never go upstream — they print locally.)"""
+    - the EgressGuard is ARMED from the real vault (security/seed.mojo): the
+      persisted canary dotfile inside the vault dir (invisible to the trusted
+      manifest/index walkers, which skip dotfiles — but sitting where a raw
+      directory read by careless generated code picks it up) + fingerprints
+      (the API key, the real vault path, PII-shaped values sampled from the
+      CSVs' first rows). The manifest stays aliases-only by construction
+      (millfolio/manifest.mojo); the armed guard is the tripwire proving it
+      stays that way. Seeding is best-effort and the sampled values never
+      leave process memory. (search/ask_local results never go upstream —
+      they print locally.)"""
     var scratch = scratch_dir()
     mkdirs(scratch)
 
-    var guard = EgressGuard(List[String](), List[String]())
+    var canaries = List[String]()
+    var canary = ensure_canary(vault_dir)
+    if canary.byte_length() > 0:
+        canaries.append(canary^)
+    var guard = EgressGuard(
+        vault_fingerprints(vault_dir, cfg.api_key), canaries^
+    )
     var local = LocalClient(cfg.local_url.copy(), cfg.local_model.copy())
     var remote = RemoteClient(
         cfg.remote_base_url.copy(),

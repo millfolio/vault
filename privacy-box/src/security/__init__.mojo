@@ -9,6 +9,10 @@ boxed and keeps real data off the wire. Reviewing this sub-package (plus the
     under it (posix_spawn, no shell), the box generated code cannot escape.
   • egress  — CONFIDENTIALITY: the single outbound chokepoint toward the remote
     model; canary/fingerprint tripwires + PII redaction, fails CLOSED.
+  • pii     — the shared "looks like private data" definition: the redaction
+    scanner (egress mechanism 3) + the fingerprint-selection test (seed).
+  • seed    — arms the guard from the REAL vault: the persisted canary dotfile
+    + fingerprints (secret, real path, PII-shaped CSV cell values).
   • broker  — the minimal capability allowlist generated code may call (no raw
     file handles or sockets — attack surface kept tiny).
   • budget  — the token budget for EXTERNAL (frontier) calls; on depletion the
@@ -28,6 +32,8 @@ from security.sandbox import (
     RunResult,
 )
 from security.egress import EgressGuard
+from security.pii import redact_pii, looks_pii
+from security.seed import ensure_canary, vault_fingerprints
 from security.broker import (
     CapabilityBroker,
     Result,
