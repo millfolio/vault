@@ -86,6 +86,9 @@
   "21c3d27ef89dc2117f18d2f461b898c5baa3f4ada1d32d8dfe89caa5163cd427": {
     "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
   },
+  "22b8b66b1ba7ec32cad3214dcf092ec2ac4e6ac383a143e6baa2e98a54d46e2a": {
+    "question": "_amt))\n\n    result_text(\"Here is your monthly spending per merchant (last 6 months, merchants with more than 2 transactions). Line graphs show the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
   "28f95745902b4471e72972ca3f3f6865075a1343fc4181e8dd058b474791db85": {
     "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
@@ -134,6 +137,9 @@
   "3c072c28d63bf716de1b51da86c0e5928328e7ae5512df2d18e64318b2d6ad2d": {
     "question": "        + money(received) + \" in (credits/deposits). \"\n            + \"Net: \" + money(received - spent) + \".\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
   },
+  "3ca038bdee34ae33ac86de0e665fc9d71ada00ae6a2e41cc45e7635afe3a8952": {
+    "question": "_amt))\n\n    result_text(\"Here is your monthly spending per merchant (last 6 months, merchants with more than 2 transactions). Line graphs show the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
   "3ed14c0bb8fbdac12397ceb64c1c9b09bca9d79cf0b695ce66292e45c884c134": {
     "question": "e\" and result != \"\":\n                print_answer(\"Your car insurance renews on \" + result + \".\")\n                return\n    print_answer(\"I couldn't find a car insurance renewal date in your vault.\")"
   },
@@ -153,6 +159,9 @@
     "question": "otal_received) + \" across \" + String(n_credits) + \" credit/deposit transaction(s).\"\n        print_answer(msg)\n    else:\n        print_answer(\"I couldn't find any spending transactions in your vault.\")"
   },
   "47fd18540074bca7f5dc532377e8469d28c6247212984c2bd12be55622e248c0": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "481beaf2d71fe95bb7b6e501a56a0dcf687b3ea9f46de18e681aacae1fd18ea3": {
     "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
   "49f76dda7f5e98b35c80e2d65092a34f1694314e49dba1a30f9953a9c6109155": {
@@ -188,8 +197,14 @@
   "5aa1319240b56285b9659f2aadf3d0578029e52a5172d41ecb34a93bff7cbdce": {
     "question": "and s != \"\":\n                print_answer(\"Your vehicle registration expires on: \" + s)\n                return\n    print_answer(\"I couldn't find a vehicle registration expiration date in your vault.\")"
   },
+  "5ce1f2af28ccb94b5c3eeaf70306443855beb15e7f7d2d5852ba74afae494480": {
+    "question": "_amt))\n\n    result_text(\"Here is your monthly spending per merchant (last 6 months, merchants with more than 2 transactions). Line graphs show the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
   "5d6c239981534aef7b026cd1b19e9420fc25403a436870c523952075636bde20": {
     "question": "_text(\"Here is your weekly spending per merchant over the last 6 months for merchants with more than 2 transactions. Line graphs are shown for the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
+  "5fa0b182b00ca8b307732846ca1728217450bed53b1bdcfe37147929783557cf": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
   "62bf4d980c7a6d34d361aed5ae7324058a2a0857cf598689b21e1fae6d7f202a": {
     "question": "+ money(total_credit) + \" in (credits). \"\n                + \"Net: \" + money(total_credit - total_debit) + \".\")\n        else:\n            print_answer(\"I couldn't find any transactions in your vault.\")"
@@ -296,6 +311,12 @@
   "aafc77679d9b2d18e6ca4dddeebb2435d33af8f49b45dced4b5c61bd60c34b8f": {
     "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
+  "abb5d5f5ae6c5ba1796f4a785f54e274500c1eaf43ce21d574873d4867b2c83a": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "acaa6c9dd5cf92daa294304638a45024b286bc5addf86d6e90db99e8e71699b9": {
+    "question": " couldn't clearly identify the coverage details. Here is what I found:\\n\\n\" + summary)\n    else:\n        print_answer(\"Based on your insurance documents, here is what your insurance covers:\\n\\n\" + fs)"
+  },
   "ae1838a4743296aa3d4a4be6091e8f2456026346f4486fa941fab311bcf89985": {
     "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
   },
@@ -344,11 +365,17 @@
   "ccd6d0daa1b0e9d03351284124ef0a4e4f8ee8ac8d0dbc13bb0dda885358d6ba": {
     "question": " was \" + money(top_amount) + direction_label\n            + \" at/from: \" + top_merchant + date_part + \".\")\n    else:\n        print_answer(\"I couldn't find any transactions with amounts in your vault.\")"
   },
+  "ccea1dd39c95dafb29fa006b309b70437c0d49cd140921b202d18ea1beb3d693": {
+    "question": "_amt))\n\n    result_text(\"Here is your monthly spending per merchant (last 6 months, merchants with more than 2 transactions). Line graphs show the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
   "ce038c9560a0219f211cce2ef8df62af0b22197c9b39981a332a4227fc3216a0": {
     "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
   "cf7afcb5a41019f5955077a68c1648baf617d7b12f97319134a51b99ed8c9909": {
     "question": " model sees only this:\n  file_0  [pdf]  1320 bytes\n  file_1  [pdf]  1975 bytes\n  file_2  [pdf]  1993 bytes\n  file_3  [pdf]  1268 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "cfb1ede8223d8111e97f394368ac664323e4168099d5e778c9b4631f5f9cfb5d": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
   "d32c836e9f48b63dd38c498bf9b5added8b4dc1d623a31b323a5828e709bb4df": {
     "question": "           if s != \"none\" and s != \"\":\n                print_answer(\"Your car is a \" + s + \".\")\n                return\n    print_answer(\"I couldn't find any car or vehicle information in your vault.\")"
@@ -359,6 +386,9 @@
   "d5ec38691e3b3f105398f86e9eab228cc089d441c5188ed6bd83ca35e6e008fc": {
     "question": "\n            + money(spent) + \" out (debits) and \"\n            + money(received) + \" in (credits/deposits).\")\n    else:\n        print_answer(\"I couldn't find any verified transactions in your vault.\")"
   },
+  "d5f7ae25340072eb376424520e2c4e72ca178746f403464e5c7f93d4917bb8b5": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
   "d6990d585f33cc7f0405d0cafe717e45e7ffdd851c6330603d186e0382525f5c": {
     "question": "_text(\"Here is your weekly spending per merchant over the last 6 months for merchants with more than 2 transactions. Line graphs are shown for the top \" + String(top_n) + \" merchants by total spend.\")"
   },
@@ -367,6 +397,9 @@
   },
   "d7ea59da8e3b29117c868d9d7ad3204cb685215a471bac488827e47e986bf70e": {
     "question": "             display_row.append(money(matrix[i][j]))\n            else:\n                display_row.append(\"-\")\n        display_row.append(money(merch_total[mi]))\n        _ = final_tbl.row(display_row)"
+  },
+  "d8664920c5c39ad1929bee5d7f8039c4f8933e475da8d954fbeec47c7d6a4d4d": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
   "d8bc549b866bc98996b9460294bba0ab9fd0cb9173953d831c42271409cee103": {
     "question": "/demo-vault/vault\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
@@ -413,6 +446,9 @@
   "f14f6869332a2a284eb310536a9f58ce44b209d777fdaf7f5602162ebc1c99c5": {
     "question": "ee real content):\n2 indexable file(s) \u2014 the frontier model sees only this:\n  file_0  [pdf]  124096 bytes\n  file_1  [pdf]  694827 bytes\n\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
+  "f1d8fb925537c9fb6be56b9c8eb8d7e56fd8515ae4d1a98bdd6c299e41ae4624": {
+    "question": "_amt))\n\n    result_text(\"Here is your monthly spending per merchant (last 6 months, merchants with more than 2 transactions). Line graphs show the top \" + String(top_n) + \" merchants by total spend.\")"
+  },
   "f2ac2378c7808eb7143d6fe30ff60eb50feff4b9b03744c27bed9d56fd5dc367": {
     "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
@@ -423,6 +459,9 @@
     "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
   "f477e9a07460d39b1089e52673b735f1918be2b74517bf798dd1375c0ed91249": {
+    "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
+  },
+  "f7b55ac9f0badfb99763ec14da936869466c6bb6a2100d7e420ae882fe9b4b7e": {
     "question": "ccounts or people, NOT a purchase\n- rewards \u2014 credit-card cash back & rewards - Daily Cash, cash-back and rewards credits, not spending\n\nWrite the Mojo program (`from vault import *`) that answers it."
   },
   "f962942641dcaee67017d3ce0271802bba4026e9cd58a4d3b0e517cea03ffa71": {
