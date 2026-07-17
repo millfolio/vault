@@ -132,6 +132,9 @@ struct Api(Copyable, Handler, Movable):
 
     def _route(self, req: Request) raises -> Response:
         var path = req.url
+        # Demo access log (IP / user-agent / timestamp) — demo-only, best-effort,
+        # skips the high-frequency telemetry polls. No-op on the real product.
+        handlers_system.log_demo_access(req, path)
         # CORS preflight (compare the raw method string — no Method.OPTIONS dep).
         if req.method == "OPTIONS":
             return _cors(Response(status=204, reason="No Content"))

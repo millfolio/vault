@@ -32,10 +32,18 @@ from vault.storage import (
     default_asks_store,
     stats_log_path,
     asks_log_path,
+    FileLogStore,
 )
 from vault.derive.store import backfill_dedup_json
 
-from osutil import _config_dir, _model_label, _app_version, _engine_url
+from osutil import (
+    _config_dir,
+    _model_label,
+    _app_version,
+    _engine_url,
+    _is_demo,
+    _epoch_s,
+)
 from sysmetrics import _gpu_util_pct, _memory_used_pct, _disk_used_pct
 from httputil import _cors
 from events import json_escape
@@ -49,6 +57,55 @@ from record_builders import (
 def handle_health() raises -> Response:
     """GET /health → a plain-text liveness probe."""
     return _cors(ok("millfolio ok"))
+
+
+# High-frequency polls the UI fires every ~2s — logging them would drown the
+# access log in noise, so they're skipped (a page load / chat / model query is the
+# meaningful "access").
+comptime _ACCESS_SKIP = String(
+    " /api/gpu /api/backfill/status /api/orchestrator/queue"
+    " /api/index/status /health /api/model /favicon.svg /favicon.png "
+)
+
+
+def log_demo_access(req: Request, path: String):
+    """Append one demo access record — timestamp, Cloudflare client IP, user
+    agent, method, path — to `demo-access.jsonl`. DEMO ONLY (the real product is
+    a local single-user install with no remote visitors, so logging IPs there
+    would be a privacy regression). Best-effort: a write failure never affects the
+    response. The remote IP comes from Cloudflare's `cf-connecting-ip` header
+    (cloudflared forwards it); `x-forwarded-for` is the fallback. Skips the
+    high-frequency telemetry polls so the log stays a readable record of real
+    visits. Enable/disable with MILLFOLIO_ACCESS_LOG (default: on in demo)."""
+    try:
+        if not _is_demo():
+            return
+        if getenv("MILLFOLIO_ACCESS_LOG", "1") == "0":
+            return
+        if _ACCESS_SKIP.find(" " + path + " ") != -1:
+            return
+        var ip = String(req.headers.get("cf-connecting-ip"))
+        if ip == "":
+            ip = String(req.headers.get("x-forwarded-for"))
+        if ip == "":
+            ip = String("-")
+        var ua = String(req.headers.get("user-agent"))
+        if ua == "":
+            ua = String("-")
+        var line = (
+            '{"ts":'
+            + String(_epoch_s())
+            + ',"ip":'
+            + json_escape(ip)
+            + ',"ua":'
+            + json_escape(ua)
+            + ',"path":'
+            + json_escape(path)
+            + "}"
+        )
+        FileLogStore(_config_dir() + "/demo-access.jsonl").append(line)
+    except:
+        pass  # access logging is best-effort; never break a request over it
 
 
 def _engine_decode_health() -> String:
