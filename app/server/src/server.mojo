@@ -67,6 +67,8 @@ import handlers_models
 import handlers_demo
 import handlers_operations
 import handlers_millwright
+import handlers_vaults
+import vaults
 
 # The extracted free-helper modules (Phase-1 slice A). `osutil` is the BASE
 # (stdlib-only) layer the others build on — no import cycle. See each module's
@@ -142,6 +144,18 @@ struct Api(Copyable, Handler, Movable):
             return handlers_chat.handle_chat(self.st, req)
         if path == "/api/vault":
             return handlers_vault.handle_vault(self.st)
+        # Multi-vault registry: list/select/add/remove vaults + one-click demo vault.
+        # Switching is restart-scoped (the response carries pendingRestart).
+        if path == "/api/vaults":
+            return handlers_vaults.handle_vaults_list()
+        if req.method == Method.POST and path == "/api/vaults/select":
+            return handlers_vaults.handle_vaults_select(req)
+        if req.method == Method.POST and path == "/api/vaults/add":
+            return handlers_vaults.handle_vaults_add(req)
+        if req.method == Method.POST and path == "/api/vaults/remove":
+            return handlers_vaults.handle_vaults_remove(req)
+        if req.method == Method.POST and path == "/api/vaults/add-demo":
+            return handlers_vaults.handle_vaults_add_demo()
         # Document viewer: /api/doc?alias=file_N streams the raw indexed file
         # (alias-gated via the manifest — no caller-supplied path, so no traversal).
         if path == "/api/doc" or (path.find("/api/doc?") == 0):
@@ -308,6 +322,15 @@ def main() raises:
         var dest = String(cli[3]) if len(cli) >= 4 else String("")
         _ = handlers_demo._fetch_demo_run(url, dest)
         return
+
+    # MULTI-VAULT: resolve the ACTIVE vault from the registry and point
+    # MILLFOLIO_VAULT + MILLFOLIO_DATA_DIR at it BEFORE anything reads them. This is
+    # the one place switching takes effect — it's restart-scoped by design (setenv is
+    # process-global and we're still single-threaded here). No-op in the demo.
+    try:
+        vaults.activate_selected_vault()
+    except:
+        pass
 
     var cfg = load_config()
     # The `/chat` orchestrator is built once here from this cfg, so seed it from

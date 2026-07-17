@@ -193,6 +193,115 @@
     !isDemo && installedVersion !== "" && serverVersion !== "" && serverVersion !== "dev",
   );
 
+  // ── Multi-vault switcher (bottom status bar) ────────────────────────────────
+  // The registry of vaults + which is active (selected) vs running (booted). A
+  // vault is a separate SOURCE + isolated derived data (index/tags/transactions/
+  // docs). Switching is restart-scoped: selecting a vault persists the choice and
+  // the running server keeps serving its booted vault until relaunched, so
+  // `vaultPending` drives a "restart to apply" chip just like a version change.
+  type VaultInfo = { id: string; name: string; source: string; active: boolean };
+  let vaultsList = $state<VaultInfo[]>([]);
+  let activeVaultId = $state("main");
+  let vaultPending = $state(false);
+  let vaultMenuOpen = $state(false);
+  let vaultBusy = $state(false);
+  const activeVaultName = $derived(
+    vaultsList.find((v) => v.id === activeVaultId)?.name || activeVaultId,
+  );
+  // Show the switcher only once there's a real choice (>1 vault) or the demo vault
+  // hasn't been added yet — a brand-new single-vault install stays uncluttered but
+  // can still reach "Load demo vault" via the chevron.
+  const showVaultSwitcher = $derived(!isDemo && vaultsList.length >= 1);
+
+  async function loadVaults() {
+    try {
+      const d = await fetch("/api/vaults").then((r) => (r.ok ? r.json() : null));
+      if (!d) return;
+      vaultsList = Array.isArray(d.vaults) ? d.vaults : [];
+      activeVaultId = typeof d.active === "string" ? d.active : "main";
+      vaultPending = !!d.pendingRestart;
+    } catch {}
+  }
+
+  async function selectVault(id: string) {
+    if (vaultBusy || id === activeVaultId) {
+      vaultMenuOpen = false;
+      return;
+    }
+    vaultBusy = true;
+    try {
+      const r = await fetch("/api/vaults/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        activeVaultId = typeof d.active === "string" ? d.active : id;
+        vaultPending = !!d.pendingRestart;
+      }
+    } catch {} finally {
+      vaultBusy = false;
+      vaultMenuOpen = false;
+    }
+  }
+
+  async function loadDemoVault() {
+    if (vaultBusy) return;
+    vaultBusy = true;
+    try {
+      const r = await fetch("/api/vaults/add-demo", { method: "POST" });
+      if (r.ok) {
+        const d = await r.json();
+        await loadVaults();
+        activeVaultId = typeof d.id === "string" ? d.id : "demo";
+        vaultPending = true;
+      }
+    } catch {} finally {
+      vaultBusy = false;
+      vaultMenuOpen = false;
+    }
+  }
+
+  async function addFolderVault() {
+    const source = window.prompt("Full path to the folder for the new vault:");
+    if (!source) return;
+    const guess = source.split("/").filter(Boolean).pop() || "Vault";
+    const name = window.prompt("A name for this vault:", guess);
+    if (!name) return;
+    vaultBusy = true;
+    try {
+      const r = await fetch("/api/vaults/add", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, source }),
+      });
+      if (r.ok) await loadVaults();
+      else {
+        const e = await r.json().catch(() => null);
+        alert(e?.error || "Could not add that folder as a vault.");
+      }
+    } catch {} finally {
+      vaultBusy = false;
+      vaultMenuOpen = false;
+    }
+  }
+
+  async function removeVault(id: string) {
+    if (!confirm("Remove this vault from the list? Its indexed data stays on disk.")) return;
+    vaultBusy = true;
+    try {
+      const r = await fetch("/api/vaults/remove", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (r.ok) await loadVaults();
+    } catch {} finally {
+      vaultBusy = false;
+    }
+  }
+
   function refreshVersions() {
     // Light re-read of /api/model for the version stamp only (the full handler
     // below also drives Turnstile/model state — don't re-run that on focus).
@@ -483,6 +592,7 @@
     // The model catalog + the current selection. Real install only — the demo/mock
     // can't restart the shared engine or download weights.
     if (!isDemo) {
+      loadVaults();
       refreshModels();
       // Reflect any in-flight download (a user's, or the startup provisioner's) so
       // the catalog opens onto live progress rather than a stale "Download".
@@ -984,6 +1094,46 @@
         ⚠ engine decode stalled{decodeTps != null ? ` · ${decodeTps.toFixed(1)} tok/s` : ""} — restart
       </span>
     {/if}
+    {#if showVaultSwitcher}
+      <span class="model catalog vaultsw">
+        <span class="vdot" aria-hidden="true">🗄</span>
+        <button
+          class="modelbtn"
+          onclick={() => (vaultMenuOpen = !vaultMenuOpen)}
+          disabled={vaultBusy}
+          aria-haspopup="menu"
+          aria-expanded={vaultMenuOpen}
+          title="active vault — switch between your vaults or load the demo vault"
+        >
+          {activeVaultName}{#if vaultBusy}<span class="switching"> · …</span>{/if} ▾
+        </button>
+        {#if vaultMenuOpen}
+          <div class="catalog-pop" role="menu">
+            <div class="catalog-head">Vaults</div>
+            {#each vaultsList as v (v.id)}
+              <div class="catalog-row" role="menuitem">
+                <span class="cm-label">{v.name}</span>
+                {#if v.id === activeVaultId}
+                  <span class="cm-badge">Active</span>
+                {:else}
+                  <button class="cm-use" disabled={vaultBusy} onclick={() => selectVault(v.id)}>Switch</button>
+                {/if}
+                {#if v.id !== "main" && v.id !== activeVaultId}
+                  <button class="cm-x" title="Remove from list (data stays on disk)" onclick={() => removeVault(v.id)}>✕</button>
+                {/if}
+              </div>
+            {/each}
+            <div class="catalog-foot vfoot">
+              {#if !vaultsList.some((v) => v.id === "demo")}
+                <button class="vaction" disabled={vaultBusy} onclick={() => loadDemoVault()}>+ Load demo vault</button>
+              {/if}
+              <button class="vaction" disabled={vaultBusy} onclick={() => addFolderVault()}>+ Add a folder…</button>
+              <div class="vhint">Switching takes effect after a restart.</div>
+            </div>
+          </div>
+        {/if}
+      </span>
+    {/if}
     {#if !isDemo && models.length > 0}
       <span class="model catalog">
         <span class="dot" aria-hidden="true"></span>
@@ -1105,6 +1255,12 @@
       </span>
     {/if}
     <span class="spacer"></span>
+    {#if vaultPending}
+      <span
+        class="ver ver-pending"
+        title="you've switched vaults — restart Millfolio to load this vault"
+        >⇄ {activeVaultName} · restart to apply</span>
+    {/if}
     <span class="ver" title="build (app SHA · release version)">{buildLabel}</span>
     {#if updatePending}
       <span
@@ -1446,6 +1602,55 @@
   /* Inline model catalog trigger — looks like the label text, not a boxed control. */
   .statusbar .model.catalog {
     position: relative;
+  }
+  /* Vault switcher: reuses the catalog popover; a small archive glyph instead of a dot. */
+  .statusbar .vdot {
+    font-size: 11px;
+    opacity: 0.75;
+    line-height: 1;
+  }
+  .catalog-foot.vfoot {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 6px;
+  }
+  .vaction {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--accent);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    padding: 3px 2px;
+    border-radius: 4px;
+  }
+  .vaction:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .vaction:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .vhint {
+    opacity: 0.6;
+    font-size: 11px;
+    padding: 2px 2px 0;
+  }
+  .cm-x {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: inherit;
+    opacity: 0.45;
+    cursor: pointer;
+    padding: 0 2px;
+    margin-left: 4px;
+  }
+  .cm-x:hover {
+    opacity: 0.9;
+    color: var(--danger, #e5484d);
   }
   .statusbar .modelbtn {
     appearance: none;
