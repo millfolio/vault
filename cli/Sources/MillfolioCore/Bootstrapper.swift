@@ -1937,6 +1937,27 @@ public final class Bootstrapper: ObservableObject {
 
     public func inferenceListening() -> Bool { inferenceVersion() != nil }
 
+    /// The engine's decode-health signal from GET /v1/status (engine ≥ the
+    /// decode-wedge tripwire build). A wedged Metal command queue collapses
+    /// DECODE to ~0.3 tok/s while prefill + /v1/version stay fast, so a plain
+    /// "is it responding" check reads healthy — this is the one that catches it.
+    /// Returns nil when the field is absent (older engine) or the engine isn't
+    /// answering; otherwise (healthy, lastTokPerSec) where lastTokPerSec is nil
+    /// until the first real generation.
+    public func decodeHealth() -> (healthy: Bool, tokPerSec: Double?)? {
+        guard let r = Self.httpGet("http://127.0.0.1:8000/v1/status"),
+              r.code == 200, r.body.contains("\"decode_healthy\"") else { return nil }
+        let healthy = r.body.contains("\"decode_healthy\":true")
+        var tps: Double? = nil
+        if let k = r.body.range(of: "\"decode_tok_per_s\":") {
+            let tail = r.body[k.upperBound...]
+            // value is a number or `null`; read up to the next `,` or `}`.
+            let end = tail.firstIndex(where: { $0 == "," || $0 == "}" }) ?? tail.endIndex
+            tps = Double(tail[tail.startIndex..<end].trimmingCharacters(in: .whitespaces))
+        }
+        return (healthy, tps)
+    }
+
     /// Poll until the inference server answers on :8000, or `timeout` s elapse.
     @discardableResult
     public func waitForInference(timeout: Double = 60) -> Bool {

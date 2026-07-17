@@ -23,6 +23,7 @@ here. Behaviour is identical.
 from std.os import getenv
 
 from flare.prelude import *
+from flare.http import HttpClient
 
 from json import loads
 
@@ -34,7 +35,7 @@ from vault.storage import (
 )
 from vault.derive.store import backfill_dedup_json
 
-from osutil import _config_dir, _model_label, _app_version
+from osutil import _config_dir, _model_label, _app_version, _engine_url
 from sysmetrics import _gpu_util_pct, _memory_used_pct, _disk_used_pct
 from httputil import _cors
 from events import json_escape
@@ -50,9 +51,42 @@ def handle_health() raises -> Response:
     return _cors(ok("millfolio ok"))
 
 
+def _engine_decode_health() -> String:
+    """The engine's decode-health fragment for /api/gpu, from its GET /v1/status
+    (engine ≥ the decode-wedge tripwire build). A wedged Metal command queue keeps
+    the engine "responding" while DECODE collapses to ~0.3 tok/s — GPU util / mem
+    all look fine, so this is the field the bottom-bar indicator keys on. Emits
+    `,"decodeHealthy":<bool>,"decodeTps":<n>` ONLY when the engine reports it (older
+    engine, engine down, or no generation yet → nothing, so the UI shows no chip).
+    Best-effort + short timeout: the 2s telemetry poll must never block on it.
+    """
+    var base = _engine_url()  # e.g. http://127.0.0.1:8000/v1
+    var url = base + "/status"
+    try:
+        var client = HttpClient()
+        client.set_recv_timeout(1500)  # never stall the telemetry poll
+        var resp = client.send(Request(method="GET", url=url))
+        var v = resp.json()
+        # decode_tok_per_s is null until the first real generation → skip then.
+        if not v["decode_tok_per_s"].is_number():
+            return String("")
+        var healthy = v["decode_healthy"].bool_value()
+        var tps = v["decode_tok_per_s"].float_value()
+        return (
+            ',"decodeHealthy":'
+            + ("true" if healthy else "false")
+            + ',"decodeTps":'
+            + String(tps)
+        )
+    except:
+        return String("")  # older engine / down / no field — silent
+
+
 def handle_gpu() raises -> Response:
     """GET /api/gpu → instantaneous GPU utilization (%) plus memory-used and
-    disk-used percentages; the bottom bar keeps a 30s average."""
+    disk-used percentages; the bottom bar keeps a 30s average. Also relays the
+    engine's decode-health signal (when available) so the app can flag a wedged
+    Metal decode queue that GPU/mem metrics don't reveal."""
     return _cors(
         ok_json(
             '{"util":'
@@ -61,6 +95,7 @@ def handle_gpu() raises -> Response:
             + String(_memory_used_pct())
             + ',"disk":'
             + String(_disk_used_pct())
+            + _engine_decode_health()
             + "}"
         )
     )

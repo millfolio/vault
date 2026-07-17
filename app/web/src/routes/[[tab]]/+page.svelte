@@ -236,6 +236,11 @@
   };
   const gpuRing: { t: number; v: number }[] = [];
   let bkLast: { pending: number; t: number } | null = null;
+  // Engine decode-wedge indicator (bottom-left). True when the engine reports
+  // decode_healthy=false — a wedged Metal command queue (~0.3 tok/s) that GPU/mem
+  // metrics don't reveal. Cleared for older engines that don't report it.
+  let decodeWedged = $state(false);
+  let decodeTps = $state<number | null>(null);
 
   async function pollTelemetry() {
     // GPU: one instantaneous sample → averaged over the last 30s (client-side ring).
@@ -254,6 +259,15 @@
         if (typeof d.mem === "number" && d.mem >= 0) memUsed = d.mem;
         // Disk-used % of the volume holding the vault + weights (same instantaneous sample).
         if (typeof d.disk === "number" && d.disk >= 0) diskUsed = d.disk;
+        // Engine decode health (relayed from the engine's /v1/status): present only
+        // when the engine reports it and has decoded at least once. A wedged Metal
+        // decode queue reads healthy on every other metric — this is the one signal.
+        if (typeof d.decodeHealthy === "boolean") {
+          decodeWedged = !d.decodeHealthy;
+          decodeTps = typeof d.decodeTps === "number" ? d.decodeTps : null;
+        } else {
+          decodeWedged = false; // unknown / older engine → no warning
+        }
       }
     } catch {}
     // Backfill: pending count + priority + a live ETA measured from the drain rate
@@ -962,6 +976,14 @@
     {/if}
   </div>
   <footer class="statusbar">
+    {#if !isDemo && decodeWedged}
+      <span
+        class="metric wedge"
+        title="The on-device engine's GPU decode is stalled (normal is 10-60 tok/s). Restart the engine: run 'mill stop' then 'mill start', or relaunch Millfolio."
+      >
+        ⚠ engine decode stalled{decodeTps != null ? ` · ${decodeTps.toFixed(1)} tok/s` : ""} — restart
+      </span>
+    {/if}
     {#if !isDemo && models.length > 0}
       <span class="model catalog">
         <span class="dot" aria-hidden="true"></span>
@@ -1603,6 +1625,24 @@
   }
   .statusbar .metric.ops {
     color: var(--accent);
+  }
+  /* Decode-wedge warning: a real, actionable fault — make it stand out (and pulse
+     so it's not mistaken for a passive metric). */
+  .statusbar .metric.wedge {
+    color: #fff;
+    background: var(--warn, #e5484d);
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+    cursor: default;
+    animation: wedgePulse 2s ease-in-out infinite;
+  }
+  @keyframes wedgePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .statusbar .metric.wedge { animation: none; }
   }
   .statusbar .metric.link:hover {
     color: var(--accent);

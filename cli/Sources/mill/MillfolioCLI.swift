@@ -160,6 +160,17 @@ struct Status: AsyncParsableCommand {
         // server actually answering on :8000, and at what build version?
         if let v = boot.inferenceVersion() {
             print("inference:  ✓ running on :8000" + (v.isEmpty ? "" : " (engine v\(v))"))
+            // Decode health: a wedged Metal queue keeps the engine "responding"
+            // while decode crawls at ~0.3 tok/s. Only shown for engines new enough
+            // to report it, and only once a real generation has set a rate.
+            if let dh = boot.decodeHealth() {
+                let rate = dh.tokPerSec.map { String(format: "%.1f tok/s", $0) }
+                if !dh.healthy {
+                    print("decode:     ✗ WEDGED (\(rate ?? "0 tok/s")) — restart: `mill stop && mill start`")
+                } else if let rate {
+                    print("decode:     ✓ \(rate)")
+                }
+            }
         } else {
             print("inference:  ✗ not responding on :8000 (run `mill start`)")
         }
@@ -256,7 +267,15 @@ struct Doctor: AsyncParsableCommand {
         checks.append(("privacy_box built", boot.isPrivacyBoxInstalled, "run: mill install"))
         checks.append(("Vault tools built", boot.isMillfolioInstalled, "run: mill install"))
         checks.append(("App web server built", boot.isAppServerInstalled, "run: mill install"))
-        checks.append(("Inference server responding (:8000)", boot.inferenceVersion() != nil, "run: mill start"))
+        let engineUp = boot.inferenceVersion() != nil
+        checks.append(("Inference server responding (:8000)", engineUp, "run: mill start"))
+        // Decode-wedge check — only meaningful when the engine is up AND reports the
+        // signal AND has decoded at least once (nil health → skip, not a failure).
+        if engineUp, let dh = boot.decodeHealth(), dh.tokPerSec != nil {
+            let rate = dh.tokPerSec.map { String(format: " (%.1f tok/s)", $0) } ?? ""
+            checks.append(("Engine decode healthy\(rate)", dh.healthy,
+                           "Metal decode is wedged — restart: mill stop && mill start"))
+        }
 
         // ── render to the console ──
         print("mill doctor — environment + install\n")
