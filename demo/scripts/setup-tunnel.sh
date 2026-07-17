@@ -56,10 +56,51 @@ UID_NUM="$(id -u "$RUN_USER" 2>/dev/null || true)"
 [[ -n "$UID_NUM" ]] && launchctl bootout "gui/$UID_NUM/app.millfolio.demo-tunnel" 2>/dev/null || true
 rm -f "$RUN_HOME/Library/LaunchAgents/app.millfolio.demo-tunnel.plist" 2>/dev/null || true
 
-echo "==> cloudflared service install  (config: $CONFIG)"
+echo "==> installing com.cloudflare.cloudflared  (config: $CONFIG)"
 # Reinstall cleanly so a re-run is idempotent.
 cloudflared service uninstall >/dev/null 2>&1 || true
-cloudflared --config "$CONFIG" --no-autoupdate service install
+
+# WRITE THE PLIST OURSELVES rather than trusting `cloudflared service install`.
+# On cloudflared 2026.6.1, `cloudflared --config <yml> service install` writes a plist
+# whose ProgramArguments is the BARE binary — no --config, no `tunnel run`. That daemon
+# finds no config (it searches /etc/cloudflared, /var/root/.cloudflared — not ours),
+# serves nothing, and the origin goes unreachable (Cloudflare 530) with EMPTY logs, so
+# it looks "running" while being a no-op. That silent failure took the public demo down
+# after a reboot. The invocation below is the one that actually works (and is what the
+# old tunnel.sh did): explicit --config + `tunnel run`.
+PLIST=/Library/LaunchDaemons/com.cloudflare.cloudflared.plist
+launchctl bootout system/com.cloudflare.cloudflared 2>/dev/null || true
+cat > "$PLIST" <<PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.cloudflare.cloudflared</string>
+  <key>ProgramArguments</key><array>
+    <string>$(command -v cloudflared)</string>
+    <string>--config</string><string>$CONFIG</string>
+    <string>--no-autoupdate</string>
+    <string>tunnel</string><string>run</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>/Library/Logs/com.cloudflare.cloudflared.out.log</string>
+  <key>StandardErrorPath</key><string>/Library/Logs/com.cloudflare.cloudflared.err.log</string>
+</dict></plist>
+PLISTEOF
+chown root:wheel "$PLIST"; chmod 644 "$PLIST"
+launchctl bootstrap system "$PLIST"
+
+# Prove it actually connected — an empty log + "running" is the failure mode above.
+echo "==> waiting for the tunnel to register…"
+for _ in $(seq 1 20); do
+  grep -qiE "Registered tunnel connection|Connection .* registered" \
+    /Library/Logs/com.cloudflare.cloudflared.{out,err}.log 2>/dev/null && { echo "    ✓ tunnel connected"; break; }
+  sleep 1
+done
+grep -qiE "Registered tunnel connection|Connection .* registered" \
+  /Library/Logs/com.cloudflare.cloudflared.{out,err}.log 2>/dev/null \
+  || echo "    ⚠ no 'Registered tunnel connection' yet — check the logs below"
 
 echo
 echo "==> installed com.cloudflare.cloudflared (system LaunchDaemon, starts at boot)."
