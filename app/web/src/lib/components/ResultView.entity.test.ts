@@ -10,6 +10,8 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const rv = readFileSync(join(here, "ResultView.svelte"), "utf-8");
 const vp = readFileSync(join(here, "VaultPanel.svelte"), "utf-8");
+const bar = readFileSync(join(here, "charts/BarChart.svelte"), "utf-8");
+const pie = readFileSync(join(here, "charts/PieChart.svelte"), "utf-8");
 
 describe("ResultView entity links", () => {
   it("prefers the spec's explicit entities and falls back to header names", () => {
@@ -28,6 +30,42 @@ describe("ResultView entity links", () => {
   });
   it("only text cells become links (money/count cells stay plain)", () => {
     expect(rv).toMatch(/cell\.type === "text"/);
+  });
+});
+
+describe("ResultView chart-label entity links", () => {
+  it("infers a category chart's entity from its title (merchant/tag/month)", () => {
+    expect(rv).toMatch(/function entityForCategory/);
+    expect(rv).toMatch(/\\bmerchants\?\\b/);
+    expect(rv).toMatch(/\\btags\?\\b/);
+    expect(rv).toMatch(/\\bmonths\?\\b/);
+  });
+  it("only a CATEGORY axis links its labels (a time/line axis does not)", () => {
+    expect(rv).toMatch(/seriesKind === "category"\s*\n?\s*\?\s*entityForCategory/);
+  });
+  it("preview results never deep-link chart labels", () => {
+    // both the series and pie paths gate the entity on !result.preview
+    expect(rv).toMatch(/!result\.preview && b\.seriesKind === "category"/);
+    expect(rv).toMatch(/result\.preview \? null : entityForCategory\(undefined, b\.title\)/);
+  });
+  it("passes a Vault-filter href builder to the bar + pie charts", () => {
+    expect(rv).toMatch(/function labelHrefFor/);
+    expect(rv).toMatch(/\/vault\?\$\{entity\}=/);
+    expect(rv).toMatch(/<BarChart[^>]*labelHref=\{labelHrefFor\(u\.entity\)\}/);
+    expect(rv).toMatch(/<PieChart[^>]*labelHref=\{labelHrefFor\(u\.entity\)\}/);
+  });
+});
+
+describe("chart components render labels as links only when given an href", () => {
+  it("BarChart wraps the bar + x-label in an anchor when labelHref is set", () => {
+    expect(bar).toMatch(/labelHref\?: \(label: string\) => string/);
+    expect(bar).toMatch(/\{#if labelHref\}/);
+    expect(bar).toMatch(/<a class="hit" href=\{labelHref\(xValues\[i\]\)\}/);
+  });
+  it("PieChart wraps the slice + legend label in an anchor when labelHref is set", () => {
+    expect(pie).toMatch(/labelHref\?: \(label: string\) => string/);
+    expect(pie).toMatch(/<a class="hit" href=\{labelHref\(slices\[i\]\.label\)\}/);
+    expect(pie).toMatch(/<a class="lbl link" href=\{labelHref\(s\.label\)\}/);
   });
 });
 

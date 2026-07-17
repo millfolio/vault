@@ -20,7 +20,16 @@
     xValues,
     raw,
     text,
-  }: { title: string; xValues: string[]; raw: number[]; text: string[] } = $props();
+    labelHref,
+  }: {
+    title: string;
+    xValues: string[];
+    raw: number[];
+    text: string[];
+    // When set, each category's bar + x-axis label links into the filtered Vault
+    // view (e.g. /vault?merchant=…). Absent → plain, non-clickable labels.
+    labelHref?: (label: string) => string;
+  } = $props();
 
   const n = $derived(xValues.length);
   const dom = $derived(moneyDomain(raw));
@@ -55,14 +64,25 @@
     <line class="axis" x1={LAYOUT.ml} y1={baseline} x2={LAYOUT.W - LAYOUT.mr} y2={baseline} />
 
     {#each raw as v, i}
-      <path class="bar" d={barPath(cx(i) - barW / 2, barW, baseline, y(v))}>
-        <title>{xValues[i]}: {text[i]}</title>
-      </path>
+      {#if labelHref}
+        <a class="hit" href={labelHref(xValues[i])} aria-label={`${xValues[i]}: ${text[i]} — show in Vault`}>
+          <path class="bar" d={barPath(cx(i) - barW / 2, barW, baseline, y(v))}>
+            <title>{xValues[i]}: {text[i]} — show in Vault</title>
+          </path>
+          {#if i % stride === 0 || i === n - 1}
+            <text class="xtick linked" x={cx(i)} y={LAYOUT.H - 12} text-anchor="middle">{xValues[i]}</text>
+          {/if}
+        </a>
+      {:else}
+        <path class="bar" d={barPath(cx(i) - barW / 2, barW, baseline, y(v))}>
+          <title>{xValues[i]}: {text[i]}</title>
+        </path>
+        {#if i % stride === 0 || i === n - 1}
+          <text class="xtick" x={cx(i)} y={LAYOUT.H - 12} text-anchor="middle">{xValues[i]}</text>
+        {/if}
+      {/if}
       {#if n <= 8}
         <text class="cap" x={cx(i)} y={Math.min(y(v), baseline) - 5} text-anchor="middle">{text[i]}</text>
-      {/if}
-      {#if i % stride === 0 || i === n - 1}
-        <text class="xtick" x={cx(i)} y={LAYOUT.H - 12} text-anchor="middle">{xValues[i]}</text>
       {/if}
     {/each}
   </svg>
@@ -117,6 +137,23 @@
   }
   .bar {
     fill: var(--chart-1);
+  }
+  /* A category linked into the filtered Vault view: pointer + subtle affordances. */
+  .hit {
+    cursor: pointer;
+  }
+  .hit:hover .bar {
+    fill: var(--accent, var(--chart-1));
+    opacity: 0.85;
+  }
+  .xtick.linked {
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .hit:hover .xtick.linked {
+    fill: var(--accent, var(--text));
+    text-decoration-style: solid;
   }
   .data {
     margin-top: 4px;

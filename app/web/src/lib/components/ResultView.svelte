@@ -25,10 +25,10 @@
   type Unit =
     | { t: "kpi"; label: string; value: ResultValue }
     | { t: "table"; headers: string[]; rows: ResultValue[][]; entities: (EntityKind | null)[] }
-    | { t: "chart"; mark: "line" | "bar"; title: string; x: string[]; raw: number[]; text: string[] }
+    | { t: "chart"; mark: "line" | "bar"; title: string; x: string[]; raw: number[]; text: string[]; entity: EntityKind | null }
     | { t: "group"; title: string; xcats: string[]; series: { title: string; raw: number[]; text: string[] }[] }
     | { t: "map"; level: "country" | "state" | "city"; title: string; points: { code: string; value: ResultValue; label?: string }[] }
-    | { t: "pie"; title: string; slices: { label: string; value: ResultValue }[] };
+    | { t: "pie"; title: string; slices: { label: string; value: ResultValue }[]; entity: EntityKind | null };
 
   // The mark for ONE series, from its shape (+ optional hint override).
   function markFor(s: SeriesBlock): "line" | "bar" {
@@ -70,7 +70,12 @@
       } else if (b.kind === "map") {
         if ((b.points?.length ?? 0) > 0) out.push({ t: "map", level: b.level, title: b.title, points: b.points });
       } else if (b.kind === "pie") {
-        out.push({ t: "pie", title: b.title, slices: b.slices ?? [] });
+        out.push({
+          t: "pie",
+          title: b.title,
+          slices: b.slices ?? [],
+          entity: result.preview ? null : entityForCategory(undefined, b.title),
+        });
       } else {
         // series
         if (b.x.values.length === 0) continue; // empty → nothing to draw
@@ -87,7 +92,13 @@
           });
           i++; // consumed the pair
         } else {
-          out.push({ t: "chart", mark: markFor(b), title: b.title, x: b.x.values, raw: b.y.raw, text: b.y.text });
+          // Only a CATEGORY axis (bar) links its labels; a time axis (line) has
+          // dates, not entities. Preview data never deep-links (synthetic values).
+          const entity =
+            !result.preview && b.seriesKind === "category"
+              ? entityForCategory(b.x.entity, b.title)
+              : null;
+          out.push({ t: "chart", mark: markFor(b), title: b.title, x: b.x.values, raw: b.y.raw, text: b.y.text, entity });
         }
       }
     }
@@ -120,6 +131,29 @@
    *  the NORMALIZED entity string the aggregation used, matched exactly server-side). */
   function entityHref(kind: EntityKind, cell: ResultValue): string {
     return `/vault?${kind}=${encodeURIComponent(cellText(cell))}`;
+  }
+
+  /** Entity kind for a CATEGORY chart axis: the spec's explicit `x.entity` wins,
+   *  else infer from the block TITLE so charts saved before the field existed
+   *  become clickable without regeneration. Conservative — only the known words. */
+  function entityForCategory(
+    explicit: EntityKind | null | undefined,
+    title: string,
+  ): EntityKind | null {
+    if (explicit === "merchant" || explicit === "tag" || explicit === "month") return explicit;
+    const t = (title || "").toLowerCase();
+    if (/\bmerchants?\b/.test(t)) return "merchant";
+    if (/\btags?\b/.test(t)) return "tag";
+    if (/\bmonths?\b/.test(t)) return "month";
+    return null;
+  }
+
+  /** A chart-label → Vault-filter href builder, passed to the chart so it can turn
+   *  category labels into links. Undefined when the axis carries no entity (labels
+   *  stay plain text). The label IS the normalized entity string. */
+  function labelHrefFor(entity: EntityKind | null): ((label: string) => string) | undefined {
+    if (!entity) return undefined;
+    return (label: string) => `/vault?${entity}=${encodeURIComponent(label)}`;
   }
 
   function cellText(v: ResultValue): string {
@@ -167,11 +201,11 @@
       {:else if u.t === "map"}
         <MapChart title={u.title} level={u.level} points={u.points} />
       {:else if u.t === "pie"}
-        <PieChart title={u.title} slices={u.slices} />
+        <PieChart title={u.title} slices={u.slices} labelHref={labelHrefFor(u.entity)} />
       {:else if u.mark === "line"}
         <LineChart title={u.title} xValues={u.x} raw={u.raw} text={u.text} />
       {:else}
-        <BarChart title={u.title} xValues={u.x} raw={u.raw} text={u.text} />
+        <BarChart title={u.title} xValues={u.x} raw={u.raw} text={u.text} labelHref={labelHrefFor(u.entity)} />
       {/if}
     {/each}
   </div>

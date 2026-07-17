@@ -12,7 +12,14 @@
   let {
     title,
     slices,
-  }: { title: string; slices: { label: string; value: ResultValue }[] } = $props();
+    labelHref,
+  }: {
+    title: string;
+    slices: { label: string; value: ResultValue }[];
+    // When set, each slice + its legend label links into the filtered Vault view
+    // (e.g. /vault?merchant=…). Absent → plain, non-clickable labels.
+    labelHref?: (label: string) => string;
+  } = $props();
 
   const HUES = [
     "var(--chart-1)",
@@ -66,13 +73,25 @@
       >
         {#each arcs as a, i}
           {#if a.frac > 0}
-            <path
-              class="slice"
-              style="fill:{HUES[i % HUES.length]}"
-              d={donutSector(CX, CY, R, RI, a.a0, a.a1)}
-            >
-              <title>{slices[i].label}: {valText(slices[i].value)} ({pct(a.frac)})</title>
-            </path>
+            {#if labelHref}
+              <a class="hit" href={labelHref(slices[i].label)} aria-label={`${slices[i].label}: ${valText(slices[i].value)} — show in Vault`}>
+                <path
+                  class="slice"
+                  style="fill:{HUES[i % HUES.length]}"
+                  d={donutSector(CX, CY, R, RI, a.a0, a.a1)}
+                >
+                  <title>{slices[i].label}: {valText(slices[i].value)} ({pct(a.frac)}) — show in Vault</title>
+                </path>
+              </a>
+            {:else}
+              <path
+                class="slice"
+                style="fill:{HUES[i % HUES.length]}"
+                d={donutSector(CX, CY, R, RI, a.a0, a.a1)}
+              >
+                <title>{slices[i].label}: {valText(slices[i].value)} ({pct(a.frac)})</title>
+              </path>
+            {/if}
           {/if}
         {/each}
       </svg>
@@ -82,7 +101,11 @@
         {#each slices as s, i}
           <li class="key">
             <span class="sw" style="background:{HUES[i % HUES.length]}"></span>
-            <span class="lbl">{s.label}</span>
+            {#if labelHref}
+              <a class="lbl link" href={labelHref(s.label)} title="Show these records in the Vault">{s.label}</a>
+            {:else}
+              <span class="lbl">{s.label}</span>
+            {/if}
             <span class="val">{valText(s.value)}</span>
             <span class="pct">{pct(arcs[i]?.frac ?? 0)}</span>
           </li>
@@ -141,6 +164,23 @@
   .slice {
     stroke: var(--surface);
     stroke-width: 1.5;
+  }
+  .hit {
+    cursor: pointer;
+  }
+  .hit:hover .slice {
+    opacity: 0.85;
+  }
+  a.lbl.link {
+    color: var(--text);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  a.lbl.link:hover {
+    color: var(--accent, var(--text));
+    text-decoration-style: solid;
   }
   .legend {
     list-style: none;

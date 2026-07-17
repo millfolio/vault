@@ -76,7 +76,11 @@ export type ResultBlock =
       seriesKind: "time" | "category";
       title: string;
       hint?: string; // optional presenter nudge ("line"/"bar"/…) — Phase 2
-      x: { type: "date" | "category"; values: string[] };
+      // `entity`: like a table column's entity, but for a CATEGORY x-axis — its
+      // labels (merchant/tag/month names) become links into the filtered Vault
+      // view. Optional + additive; the renderer also infers it from the block
+      // TITLE so dashboards saved before this field become clickable without regen.
+      x: { type: "date" | "category"; values: string[]; entity?: EntityKind | null };
       y: { type: "money"; raw: number[]; text: string[] };
     }
   | {
