@@ -17,15 +17,34 @@ Disabled in the public demo (a single fixed vault) — every handler 401s there.
 
 from std.os import getenv
 from std.os.path import isdir
+from std.ffi import external_call
 
 from flare.prelude import *
 
 from json import loads
 
-from osutil import _is_demo
+from osutil import _is_demo, _cstr
 from httputil import unauthorized, _cors
 from events import json_escape
 import vaults
+
+
+def _restart_app_server_soon():
+    """Ask launchd to restart THIS app-server agent (me.millfolio.appserver) after a
+    short delay — long enough to flush the HTTP response first. Applying a vault
+    switch needs a restart (the boot hook re-reads the active vault); doing it here
+    means the user never has to hunt for a restart, on any surface. The engine
+    (a separate agent) stays up, so only the fast app server bounces. No-op off
+    launchd (kickstart just fails into /dev/null)."""
+    var uid = Int(external_call["getuid", UInt32]())
+    var cmd = (
+        String("(sleep 1; launchctl kickstart -k gui/")
+        + String(uid)
+        + "/me.millfolio.appserver) >/dev/null 2>&1 &"
+    )
+    var cc = _cstr(cmd)
+    _ = external_call["system", Int32](cc)
+    cc.free()
 
 
 def handle_vaults_list() raises -> Response:
@@ -51,13 +70,17 @@ def handle_vaults_select(req: Request) raises -> Response:
         return _cors(bad_request('{"error":"empty id"}'))
     if not vaults.set_active(id):
         return _cors(bad_request('{"error":"unknown vault"}'))
-    var pending = "true" if id != vaults.running_vault_id() else "false"
+    # Apply the switch by restarting the app server (the boot hook re-reads the
+    # active vault). Skip when we're already running that vault (no-op switch).
+    var restarting = id != vaults.running_vault_id()
+    if restarting:
+        _restart_app_server_soon()
     return _cors(
         ok_json(
             '{"ok":true,"active":'
             + json_escape(id)
-            + ',"pendingRestart":'
-            + pending
+            + ',"restarting":'
+            + ("true" if restarting else "false")
             + "}"
         )
     )
@@ -116,8 +139,16 @@ def handle_vaults_add_demo() raises -> Response:
         return _cors(unauthorized('{"error":"vaults are fixed in the demo"}'))
     var id = vaults.ensure_demo_vault()
     _ = vaults.set_active(id)
+    # Restart into the demo vault so its (empty) first-run onboarding comes up.
+    var restarting = id != vaults.running_vault_id()
+    if restarting:
+        _restart_app_server_soon()
     return _cors(
         ok_json(
-            '{"ok":true,"id":' + json_escape(id) + ',"pendingRestart":true}'
+            '{"ok":true,"id":'
+            + json_escape(id)
+            + ',"restarting":'
+            + ("true" if restarting else "false")
+            + "}"
         )
     )

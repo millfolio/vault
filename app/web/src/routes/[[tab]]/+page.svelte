@@ -196,15 +196,18 @@
   // ── Multi-vault switcher (bottom status bar) ────────────────────────────────
   // The registry of vaults + which is active (selected) vs running (booted). A
   // vault is a separate SOURCE + isolated derived data (index/tags/transactions/
-  // docs). Switching is restart-scoped: selecting a vault persists the choice and
-  // the running server keeps serving its booted vault until relaunched, so
-  // `vaultPending` drives a "restart to apply" chip just like a version change.
+  // docs). Switching is restart-scoped, but the server applies it FOR us: selecting
+  // a vault persists the choice and restarts the (fast) app server so it boots on
+  // the new vault — we show a "Switching…" overlay and reload once it's back.
   type VaultInfo = { id: string; name: string; source: string; active: boolean };
   let vaultsList = $state<VaultInfo[]>([]);
   let activeVaultId = $state("main");
   let vaultPending = $state(false);
   let vaultMenuOpen = $state(false);
   let vaultBusy = $state(false);
+  // Non-empty = a switch is in flight (the app server is restarting onto this
+  // vault); drives the full-screen overlay and blocks further switches.
+  let vaultSwitching = $state("");
   const activeVaultName = $derived(
     vaultsList.find((v) => v.id === activeVaultId)?.name || activeVaultId,
   );
@@ -223,12 +226,35 @@
     } catch {}
   }
 
+  // Poll /api/vaults until the app server is back AND booted on the target vault,
+  // then hard-reload so every tab (Vault/Tags/Board/Chat) shows the new vault.
+  async function pollVaultBackAndReload(targetId: string, targetName: string) {
+    vaultSwitching = targetName;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 900));
+      try {
+        const d = await fetch("/api/vaults", { cache: "no-store" }).then((r) =>
+          r.ok ? r.json() : null,
+        );
+        if (d && d.running === targetId) {
+          location.reload();
+          return;
+        }
+      } catch {
+        /* app server mid-restart (connection refused) — keep polling */
+      }
+    }
+    location.reload(); // timed out — reload anyway so we don't hang on the overlay
+  }
+
   async function selectVault(id: string) {
-    if (vaultBusy || id === activeVaultId) {
+    if (vaultBusy || vaultSwitching || id === activeVaultId) {
       vaultMenuOpen = false;
       return;
     }
     vaultBusy = true;
+    vaultMenuOpen = false;
     try {
       const r = await fetch("/api/vaults/select", {
         method: "POST",
@@ -238,29 +264,34 @@
       if (r.ok) {
         const d = await r.json();
         activeVaultId = typeof d.active === "string" ? d.active : id;
-        vaultPending = !!d.pendingRestart;
+        if (d.restarting) {
+          const name = vaultsList.find((v) => v.id === id)?.name || id;
+          pollVaultBackAndReload(id, name); // keeps vaultBusy true; page reloads
+          return;
+        }
       }
-    } catch {} finally {
-      vaultBusy = false;
-      vaultMenuOpen = false;
-    }
+    } catch {}
+    vaultBusy = false;
   }
 
   async function loadDemoVault() {
-    if (vaultBusy) return;
+    if (vaultBusy || vaultSwitching) return;
     vaultBusy = true;
+    vaultMenuOpen = false;
     try {
       const r = await fetch("/api/vaults/add-demo", { method: "POST" });
       if (r.ok) {
         const d = await r.json();
+        const id = typeof d.id === "string" ? d.id : "demo";
+        activeVaultId = id;
+        if (d.restarting) {
+          pollVaultBackAndReload(id, "Demo Vault");
+          return;
+        }
         await loadVaults();
-        activeVaultId = typeof d.id === "string" ? d.id : "demo";
-        vaultPending = true;
       }
-    } catch {} finally {
-      vaultBusy = false;
-      vaultMenuOpen = false;
-    }
+    } catch {}
+    vaultBusy = false;
   }
 
   async function addFolderVault() {
@@ -1269,9 +1300,61 @@
         >→ {installedVersion} · restart to apply</span>
     {/if}
   </footer>
+
+  {#if vaultSwitching}
+    <div class="vault-switching" role="alertdialog" aria-live="assertive">
+      <div class="vsw-card">
+        <span class="vsw-spinner" aria-hidden="true"></span>
+        <div class="vsw-title">Switching to {vaultSwitching}…</div>
+        <div class="vsw-sub">The app is reloading with your selected vault.</div>
+      </div>
+    </div>
+  {/if}
 </main>
 
 <style>
+  /* Full-screen overlay while the app server restarts onto the switched vault. */
+  .vault-switching {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg, #000) 70%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  .vsw-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 32px;
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+  .vsw-title {
+    font-weight: 600;
+  }
+  .vsw-sub {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .vsw-spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    animation: vsw-spin 0.8s linear infinite;
+  }
+  @keyframes vsw-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
   main {
     padding-bottom: 44px; /* clears the fixed statusbar */
     height: 100vh; /* fallback for browsers without dvh */
