@@ -1411,6 +1411,83 @@ public final class Bootstrapper: ObservableObject {
         return dir
     }
 
+    // ── Multi-vault registry (mirrors app/server/src/vaults.mojo) ─────────────
+    // The app server owns switching; the CLI READS the same registry so that
+    // `mill index/ask/run/status` operate on whatever vault the app is switched
+    // to, with the same isolated data dir. `vaultDir()` above is deliberately NOT
+    // registry-aware — it stays the MAIN vault (it seeds the app-server launch
+    // agent, which in turn seeds the registry's "main"); only the read-side vault
+    // commands consult the active vault.
+
+    /// The Millfolio app-support dir — parent of `data/` and home of `vaults.json`.
+    /// Identical to the app server's `_app_dir()`.
+    public var appSupportDir: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Millfolio", isDirectory: true).path
+    }
+
+    public struct ActiveVault: Sendable {
+        public let id: String
+        public let name: String
+        public let source: String
+        public let dataDir: String
+    }
+
+    /// The active vault selected in `vaults.json`, or nil when there's no registry
+    /// yet (a pure-CLI install that never launched the app — callers fall back to
+    /// the single-vault defaults). The per-vault data dir mirrors the app: "main"
+    /// keeps the legacy `data/`, others live under `data/vaults/<id>/`.
+    public func activeVault() -> ActiveVault? {
+        let path = appSupportDir + "/vaults.json"
+        guard let data = FileManager.default.contents(atPath: path),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let arr = root["vaults"] as? [[String: Any]], !arr.isEmpty
+        else { return nil }
+        let active = (root["active"] as? String) ?? ""
+        let chosen = arr.first(where: { ($0["id"] as? String) == active }) ?? arr[0]
+        guard let id = chosen["id"] as? String,
+              let source = chosen["source"] as? String
+        else { return nil }
+        let name = (chosen["name"] as? String) ?? id
+        let dataDir = id == "main"
+            ? appSupportDir + "/data"
+            : appSupportDir + "/data/vaults/" + id
+        return ActiveVault(id: id, name: name, source: source, dataDir: dataDir)
+    }
+
+    /// Env that points a vault child process (index/ask/run) at the ACTIVE vault —
+    /// source (MILLFOLIO_VAULT + PRIVACY_BOX_VAULT_DIR, the latter outranks the
+    /// former in vaultcfg) and derived data (MILLFOLIO_DATA_DIR). Empty when there's
+    /// no registry. A key the user has ALREADY exported is left untouched, so an
+    /// explicit `MILLFOLIO_VAULT=… mill ask` override still wins.
+    public func activeVaultChildEnv() -> [String: String] {
+        guard let av = activeVault() else { return [:] }
+        let cur = ProcessInfo.processInfo.environment
+        var e: [String: String] = [:]
+        if (cur["MILLFOLIO_VAULT"] ?? "").isEmpty {
+            e["MILLFOLIO_VAULT"] = av.source
+            e["PRIVACY_BOX_VAULT_DIR"] = av.source
+        }
+        if (cur["MILLFOLIO_DATA_DIR"] ?? "").isEmpty {
+            e["MILLFOLIO_DATA_DIR"] = av.dataDir
+        }
+        return e
+    }
+
+    /// The SOURCE dir `mill ask`/`run` operate over: the active vault's source
+    /// (registry), else the single-vault `vaultDir()`. Honors an explicit
+    /// $MILLFOLIO_VAULT export. Creates the dir (privacy_box's `manifest` needs it).
+    @discardableResult
+    public func ensureActiveVaultDir() -> String {
+        let env = ProcessInfo.processInfo.environment["MILLFOLIO_VAULT"]
+        let dir: String
+        if let env, !env.isEmpty { dir = env }
+        else { dir = activeVault()?.source ?? vaultDir() }
+        try? FileManager.default.createDirectory(
+            atPath: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     /// `mill install` — install the combined inference server (+ both
     /// models' weights) + privacy_box + millfolio, idempotently. Each step skips what's
     /// already installed (see the guards in installServer/PrivacyBoxEngine/Millfolio-
@@ -2052,8 +2129,9 @@ public final class Bootstrapper: ObservableObject {
         // privacy_box orchestrator appends the outside-model prompt + program to it.
         let session = newSessionLog(for: question)
         set("session transcript → \(session.path)")
-        return try runLoggedScript(script.path, args, label: "ask",
-                                   env: ["MILLFOLIO_SESSION_LOG": session.path])
+        var env = activeVaultChildEnv()   // point the child at the ACTIVE vault's data
+        env["MILLFOLIO_SESSION_LOG"] = session.path
+        return try runLoggedScript(script.path, args, label: "ask", env: env)
     }
 
     /// Run a SUPPLIED vault program (from `mill run <path-or-url>`) over the vault
@@ -2077,8 +2155,9 @@ public final class Bootstrapper: ObservableObject {
         // Per-run transcript: the supplied program + its (local-only) output.
         let session = newSessionLog(for: "run " + URL(fileURLWithPath: programPath).lastPathComponent)
         set("session transcript → \(session.path)")
-        return try runLoggedScript(script.path, args, label: "run",
-                                   env: ["MILLFOLIO_SESSION_LOG": session.path])
+        var env = activeVaultChildEnv()   // point the child at the ACTIVE vault's data
+        env["MILLFOLIO_SESSION_LOG"] = session.path
+        return try runLoggedScript(script.path, args, label: "run", env: env)
     }
 
     /// Run the millfolio engine `index <path…>` over one or more files/folders.
@@ -2096,7 +2175,10 @@ public final class Bootstrapper: ObservableObject {
             ("mojo compiler", millfolioMojoPrefix.appendingPathComponent("bin/mojo").path),
             ("paths", paths.joined(separator: " ")),
         ])
-        return try runLoggedScript(script.path, args, label: "index")
+        // Index INTO the active vault's isolated data dir (the source folder(s) come
+        // from the args; only the destination index/tags are vault-scoped).
+        return try runLoggedScript(script.path, args, label: "index",
+                                   env: activeVaultChildEnv())
     }
 
     /// Run the millfolio binary and CAPTURE its stdout — for the config get/set

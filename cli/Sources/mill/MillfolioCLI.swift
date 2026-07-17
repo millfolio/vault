@@ -156,6 +156,14 @@ struct Status: AsyncParsableCommand {
         print("privacy_box:   \(mark(boot.isPrivacyBoxInstalled))")
         print("millfolio:    \(mark(boot.isMillfolioInstalled))")
         print("app web server: \(mark(boot.isAppServerInstalled))")
+        // Active vault (multi-vault): which vault `mill index/ask/run` operate on.
+        // Only shown once the registry exists (the app has run + seeded it); a
+        // pure-CLI single-vault install has no registry and prints nothing here.
+        if let av = boot.activeVault() {
+            let tag = av.id == "main" ? "" : "  [\(av.id)]"
+            print("active vault: \(av.name)\(tag) — \(av.source)")
+            print("  index data: \(av.dataDir)")
+        }
         // Live health (probe the port, not just "installed"): is the inference
         // server actually answering on :8000, and at what build version?
         if let v = boot.inferenceVersion() {
@@ -374,7 +382,7 @@ struct Ask: AsyncParsableCommand {
         discussion: """
         Runs the privacy_box vault loop over your vault dir: a model writes a Mojo \
         program that uses the millfolio vault tools over your real data locally, and \
-        the answer is printed here. The vault dir is $MILLFOLIO_VAULT, else ~/.config/millfolio/vault. \
+        the answer is printed here. Runs over the ACTIVE vault (see `mill status`); $MILLFOLIO_VAULT overrides it. \
         Needs the inference server running.
         """)
     @Argument(parsing: .remaining, help: "The question to ask your vault.")
@@ -386,7 +394,7 @@ struct Ask: AsyncParsableCommand {
         }
         let boot = streaming()   // stream progress to the console
         let q = question.joined(separator: " ")
-        let dir = boot.ensureVaultDir()
+        let dir = boot.ensureActiveVaultDir()   // the active vault (registry), else default
         // The vault loop calls the model via the inference server — make sure it's
         // up, else `ask` blocks on a dead endpoint with no feedback.
         try boot.ensureInferenceServer()
@@ -409,7 +417,7 @@ struct Run: AsyncParsableCommand {
         Seatbelt sandbox that model-written programs run in (network-denied except \
         127.0.0.1, writes confined to scratch), so it's as sandboxed as codegen \
         output — but it's arbitrary code you chose to run, so only run programs you \
-        trust. The vault dir is $MILLFOLIO_VAULT, else ~/.config/millfolio/vault. \
+        trust. Runs over the ACTIVE vault (see `mill status`); $MILLFOLIO_VAULT overrides it. \
         Needs the inference server running (a program may call search()/ask_local()).
         """)
     @Argument(help: "A local .mojo file path OR an https:// URL to a `from vault import *` program.")
@@ -417,7 +425,7 @@ struct Run: AsyncParsableCommand {
 
     @MainActor func run() async throws {
         let boot = streaming()   // stream progress to the console
-        let dir = boot.ensureVaultDir()
+        let dir = boot.ensureActiveVaultDir()   // the active vault (registry), else default
         // Resolve the program to a LOCAL file: download an https URL to a temp file,
         // or use the local path directly. http:// and other schemes are rejected.
         let resolved = try await resolveRunProgram(source)
