@@ -1,7 +1,7 @@
 name: bundle
 
 # Builds millfolio.zip — the single source bundle the `mill` installer downloads
-# (runner/ + privacy_box/ + millfolio/ + app/). See scripts/package_bundle.sh.
+# (runner/ + enclave/ + millfolio/ + app/). See scripts/package_bundle.sh.
 on:
   push:
     branches: [main]
@@ -76,7 +76,7 @@ jobs:
       - uses: actions/checkout@v6
         with: { repository: millfolio/docx.mojo, path: docx.mojo, ref: "${{ env.PIN_DOCX_MOJO }}" }
       - uses: actions/checkout@v6
-        with: { repository: millfolio/logging.mojo, path: logging.mojo, ref: "${{ env.PIN_LOGGING_MOJO }}" }   # privacy_box: from logging import log
+        with: { repository: millfolio/logging.mojo, path: logging.mojo, ref: "${{ env.PIN_LOGGING_MOJO }}" }   # enclave: from logging import log
 
       # ── caches: skip re-downloading the Mojo toolchain + recompiling the Rust shim ──
       - name: Cache pixi/conda packages (Mojo toolchain + deps)

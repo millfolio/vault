@@ -17,7 +17,7 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         // Shared engine-lifecycle logic: install/build/start the millfolio inference
-        // server + privacy_box + the millfolio vault. The same Bootstrapper the millfolio
+        // server + enclave + the millfolio vault. The same Bootstrapper the millfolio
         // app uses (it installs into the shared ~/Library/Application Support/Millfolio
         // tree + the me.millfolio.server launchd job), so the `millfolio` and `millfolio`
         // CLIs interoperate on one server.

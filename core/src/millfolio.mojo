@@ -2,7 +2,7 @@
 
 For now: `mill manifest <dir>` prints the aliased, frontier-visible view of a
 vault directory — the confidentiality boundary, before any of the heavier
-machinery (indexer, vault tools, the privacy_box-driven ask loop) is wired in.
+machinery (indexer, vault tools, the enclave-driven ask loop) is wired in.
 """
 
 from std.sys import argv

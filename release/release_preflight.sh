@@ -5,7 +5,7 @@
 # for users.
 #
 # The guard has two halves, because the binaries split into two build models:
-#   • privacy_box + the app server + millfolio ship PREBUILT — their (CPU-only)
+#   • enclave + the app server + millfolio ship PREBUILT — their (CPU-only)
 #     packagers `mojo build` them, so a vendoring gap (the v0.4.30/runqueue class
 #     of bug) fails inside `package_bundle.sh` HERE, before the tag. We then assert
 #     those three binaries are actually in the bundle.
@@ -39,7 +39,7 @@ fi
 echo "    ✓ GPU gates pass"
 
 # ── codegen prompt examples compile ─────────────────────────────────────────
-# Every ```mojo example in privacy_box-system.md is a real program the frontier
+# Every ```mojo example in enclave-system.md is a real program the frontier
 # model imitates; compile each against the vault package so a broken example (a
 # wrong tool/field like the `.id` vs `.alias` regression) can't ship. Cheap; runs
 # before the slow bundle build. (Lives here, not in the hermetic vault `test`, so
@@ -49,7 +49,7 @@ echo "==> codegen prompt examples compile against the vault package…"
 echo "    ✓ prompt examples compile"
 
 echo "==> [1/3] building millfolio.zip locally (compiles the 3 prebuilt CPU binaries)…"
-# package_bundle.sh runs every component packager. The privacy_box + app + millfolio
+# package_bundle.sh runs every component packager. The enclave + app + millfolio
 # packagers `mojo build` their binaries with the exact include set the installer
 # used, so a vendoring gap or a broken example fails RIGHT HERE. The engine packager
 # ships source (no build).
@@ -59,7 +59,7 @@ echo "==> [1/3] building millfolio.zip locally (compiles the 3 prebuilt CPU bina
 EX="$TMP/extract"; mkdir -p "$EX"; unzip -q "$OUT" -d "$EX"
 
 echo "==> [2/3] confirming the bundle carries the 3 PREBUILT CPU binaries…"
-for b in privacy_box/privacy_box/build/privacy_box \
+for b in enclave/enclave/build/enclave \
          app/build/millfolio-server \
          millfolio/millfolio/build/millfolio; do
   [[ -x "$EX/$b" ]] || { echo "error: bundle missing prebuilt binary: $b" >&2; exit 1; }
@@ -75,4 +75,4 @@ echo "==> [3/3] compile-checking the ENGINE from the bundle SOURCE — the on-de
 ( cd "$ROOT/../engine" && pixi run bash -c "cd '$EX/runner/inference-server' && mkdir -p build && mojo build src/server.mojo -I ../jinja2.mojo/src -I ../flare -o build/server" )
 echo "    ✓ engine compiles from bundle source"
 
-echo "✅ GPU gates pass + bundle builds (privacy_box + app + millfolio prebuilt) + engine compiles on-device. Safe to release."
+echo "✅ GPU gates pass + bundle builds (enclave + app + millfolio prebuilt) + engine compiles on-device. Safe to release."

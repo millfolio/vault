@@ -15,7 +15,7 @@
 # Runs on macOS (the per-query sandbox is Seatbelt). Intended to run in a dedicated
 # demo macOS account on the Mac mini. Generated programs may call the on-device model
 # (ask_local()/search()); the demo points those at its OWN inference server on :8001
-# (PRIVACY_BOX_LOCAL_URL) so it never touches the production engine on :8000. That
+# (ENCLAVE_LOCAL_URL) so it never touches the production engine on :8000. That
 # demo engine must be running (on a GUI/GPU-capable account) — see scripts/README.
 set -euo pipefail
 
@@ -31,17 +31,17 @@ APP_SERVER="${MILLFOLIO_SERVER:-$BUNDLE/app/build/millfolio-server}"
 
 # Toolchain env — the app server shells `mojo build` to compile each generated
 # program in the sandbox, so it needs CONDA_PREFIX/MODULAR_HOME/PATH + the codegen
-# include dir (PRIVACY_BOX_MILLFOLIO → <…>/pkgs). Normally the launchd agent sets
+# include dir (ENCLAVE_MILLFOLIO → <…>/pkgs). Normally the launchd agent sets
 # these; we launch the server directly, so we set them here.
 export CONDA_PREFIX="$TOOLCHAIN"
 export MODULAR_HOME="$TOOLCHAIN/share/max"
 export PATH="$TOOLCHAIN/bin:$PATH"
-export PRIVACY_BOX_MILLFOLIO="${PRIVACY_BOX_MILLFOLIO:-$BUNDLE/millfolio/millfolio}"
-# privacy_box resolves its resources/ (the codegen system prompt) + sandbox/*.sb.template
-# by ABSOLUTE path under PRIVACY_BOX_HOME — never cwd. Point it at the bundle's privacy_box
+export ENCLAVE_MILLFOLIO="${ENCLAVE_MILLFOLIO:-$BUNDLE/millfolio/millfolio}"
+# enclave resolves its resources/ (the codegen system prompt) + sandbox/*.sb.template
+# by ABSOLUTE path under ENCLAVE_HOME — never cwd. Point it at the bundle's enclave
 # dir; without this the app-server would fail to load the real prompt (it no longer falls
 # back to a cwd-relative path or a stub).
-export PRIVACY_BOX_HOME="${PRIVACY_BOX_HOME:-$BUNDLE/privacy_box/privacy_box}"
+export ENCLAVE_HOME="${ENCLAVE_HOME:-$BUNDLE/enclave/enclave}"
 # flare's TLS (OpenSSL) needs a CA bundle to verify EXTERNAL HTTPS. Codegen goes to the
 # local replay proxy over HTTP, so this only bites the Turnstile siteverify call —
 # without it OpenSSL can't find a root store ("unable to get local issuer certificate").
@@ -55,13 +55,13 @@ export MILLFOLIO_PORT="${MILLFOLIO_PORT:-10010}"   # demo listens here (10000 is
 export MILLFOLIO_WORKERS="${MILLFOLIO_WORKERS:-8}"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:${DEMO_PORT}/v1"
 export ANTHROPIC_API_KEY="demo"                 # non-empty → codegen uses the (proxied) remote
-export PRIVACY_BOX_REMOTE_TOKEN_BUDGET="1000000000"   # never deplete → never fall back to local
+export ENCLAVE_REMOTE_TOKEN_BUDGET="1000000000"   # never deplete → never fall back to local
 # Codegen model for the demo. Pinned to claude-sonnet-4-6: the shipping default
 # (claude-sonnet-5) currently writes programs that don't compile / open raw files for
 # these questions (the eval flags this), which breaks the replayed answers. The demo is
 # a replay of the codegen, so it must be primed with a model that produces WORKING
 # programs. Revisit once the sonnet-5 codegen prompt is fixed.
-export PRIVACY_BOX_MODEL="${PRIVACY_BOX_MODEL:-claude-sonnet-4-6}"
+export ENCLAVE_MODEL="${ENCLAVE_MODEL:-claude-sonnet-4-6}"
 export MILLFOLIO_VAULT="$DEMO_VAULT"
 # Data dir: deploy.sh stages the synthetic index into ~/.config/millfolio, but the
 # rc.8 default moved to ~/Library/.../data. Without this, the app-server reads the wrong
@@ -71,7 +71,7 @@ export MILLFOLIO_VAULT="$DEMO_VAULT"
 export MILLFOLIO_DATA_DIR="${MILLFOLIO_DATA_DIR:-$HOME/.config/millfolio}"
 export MILLFOLIO_WEB_DIR="${MILLFOLIO_WEB_DIR:-$BUNDLE/app/web/dist}"
 # Local, NON-REPO secrets file (Turnstile keys, etc.) — the analogue of
-# ~/.config/privacy_box/config.json for privacy_box. The launchd daemon's plist only
+# ~/.config/enclave/config.json for enclave. The launchd daemon's plist only
 # exports HOME/PATH, so put real secrets HERE (never in this repo). It's sourced, so
 # use `export KEY=value` lines. Override the path with $MILLFOLIO_DEMO_ENV.
 DEMO_ENV_FILE="${MILLFOLIO_DEMO_ENV:-$HOME/.config/millfolio/demo.env}"
@@ -97,8 +97,8 @@ fi
 # demo engine loads the shared weights (/Users/Shared/millfolio/hf) and runs on a
 # GUI/GPU-capable account; the bgent app reaches it over loopback.
 DEMO_ENGINE_PORT="${DEMO_ENGINE_PORT:-8001}"
-export PRIVACY_BOX_LOCAL_URL="${PRIVACY_BOX_LOCAL_URL:-http://127.0.0.1:${DEMO_ENGINE_PORT}/v1}"
-# The orchestrator reads PRIVACY_BOX_LOCAL_URL, but the GENERATED program's vault tools
+export ENCLAVE_LOCAL_URL="${ENCLAVE_LOCAL_URL:-http://127.0.0.1:${DEMO_ENGINE_PORT}/v1}"
+# The orchestrator reads ENCLAVE_LOCAL_URL, but the GENERATED program's vault tools
 # (ask_local/search) read MILLFOLIO_LOCAL_URL / MILLFOLIO_EMBED_URL (default :8000).
 # Point those at the demo engine too, else document questions hit the dead prod :8000
 # (ConnectionRefused). The sandboxed program inherits these via the server's env.
@@ -114,7 +114,7 @@ curl -fs "http://127.0.0.1:${DEMO_PORT}/health" && echo
 
 # The demo's inference engine must be up — generated programs that call ask_local()/
 # search() will hang/fail otherwise. We don't start it here (it needs the GPU + a GUI
-# session); just warn loudly if it isn't answering on PRIVACY_BOX_LOCAL_URL.
+# session); just warn loudly if it isn't answering on ENCLAVE_LOCAL_URL.
 if curl -fs -o /dev/null --max-time 3 "http://127.0.0.1:${DEMO_ENGINE_PORT}/v1/models" 2>/dev/null; then
   echo "==> demo inference engine: up on :$DEMO_ENGINE_PORT"
 else
@@ -170,6 +170,6 @@ echo "==> app server: $APP_SERVER"
 [[ -x "$APP_SERVER" ]] || { echo "error: app server not found/built at $APP_SERVER (set MILLFOLIO_SERVER)"; exit 1; }
 echo "==> serving the demo at http://localhost:10010  (vault: $DEMO_VAULT)"
 
-# privacy_box's sandbox templates resolve relative to cwd; run from its dir.
-cd "$BUNDLE/privacy_box/privacy_box" 2>/dev/null || true
+# enclave's sandbox templates resolve relative to cwd; run from its dir.
+cd "$BUNDLE/enclave/enclave" 2>/dev/null || true
 exec "$APP_SERVER"

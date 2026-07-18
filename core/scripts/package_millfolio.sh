@@ -41,7 +41,7 @@ mkdir -p "$D/build" "$D/pkgs"
 
 echo "==> assembling the vault tool surface + libs into pkgs/" >&2
 # Reuse a caller-built set (package_bundle precompiles it ONCE and shares it via
-# PKGS — privacy_box + app compile against it too) to avoid a 3rd slow precompile;
+# PKGS — enclave + app compile against it too) to avoid a 3rd slow precompile;
 # else build it here. scripts/precompile_pkgs.sh inherits the lib path overrides
 # (FLARE/JSON/…) that package_bundle.sh exports; standalone it defaults to the
 # umbrella sibling layout.
@@ -59,7 +59,7 @@ echo "==> building the prebuilt millfolio binary against the .mojoc set" >&2
 # lib (e.g. the CI runner's $CONDA_PREFIX/lib = /Users/runner/work/...), which
 # doesn't exist on the user's machine — so the Mojo runtime libs it links via
 # @rpath (libKGENCompilerRTShared.dylib, libMSupportGlobals.dylib, …) fail to load
-# with a dyld error. Unlike privacy_box/engine (built ON-DEVICE → local rpath),
+# with a dyld error. Unlike enclave/engine (built ON-DEVICE → local rpath),
 # millfolio ships PREBUILT (its source isn't bundled), so we must make it
 # relocatable here. The on-device layout is fixed: the binary lands at
 # <root>/bundle/millfolio/millfolio/build/millfolio and the toolchain at

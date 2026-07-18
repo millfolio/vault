@@ -1,0 +1,62 @@
+# Pre-release PROMPT eval — golden set (TAB-separated; '#' lines ignored).
+#
+# columns:  question <TAB> must_contain <TAB> must_not_contain <TAB> manifest
+#   must_contain / must_not_contain are COMMA-separated literal substrings checked
+#   against the generated program (grep -F). This is the STABLE tier: it asserts the
+#   model picks the right TOOLS / program SHAPE, which is far less flaky than scoring
+#   the numeric answer. Each rule encodes a enclave-system.md HARD RULE or a
+#   regression we fixed (the "$224,303 phone bill"). Shapes checked:
+#     transactions(  — spending/count/total/biggest use the structured tool
+#     money(         — amounts formatted with money(), not String(x)
+#     manifest(      — vault-structure questions answer from the manifest
+#     .tags / <tag>  — category spending filters transactions() on a KNOWN tag
+#                      (the tag name appears in the filter), NOT ask_local/search
+#     SUGGEST_TAG    — an UNKNOWN durable category MUST propose a tag
+#                      (# SUGGEST_TAG: name : q) — required, not optional — including
+#                      recurring bills/utilities (electricity/gas/water/internet); it
+#                      may still classify inline this time; and must NOT force a wrong
+#                      near-match (e.g. "health" for gym/electricity)
+#     ask_local      — reading a value out of a DOCUMENT (a renewal date, a plate)
+#                      calls the on-device reader; a meta count must NOT call it at
+#                      all. An EXTRACTION/reading query stays INLINE and must NOT emit
+#                      a `# SUGGEST_TAG:` (over-tag guard) — tags live on TRANSACTION
+#                      .desc, not on documents. `ask_local_batch` is the DEFAULT for a
+#                      LIST; single ask_local is the one-item case.
+#     months_ago(    — a relative-date question ("last N months/days", "this year")
+#                      uses the wall-clock API (wall_clock()/months_ago()/days_ago())
+#                      and filters t.date >= … ; a row requiring it ALSO trips a
+#                      scoped guard if the program hardcodes a YYYY-MM-DD literal
+#                      (relative windows come from the clock, never a baked-in date).
+#     ].id           — manifest files are VaultFile (field is `.alias`, not `.id`;
+#                      `files[i].id` won't compile — the phone-bill regression)
+#     search(        — wrong for exact transaction aggregates / meta questions
+#     $" +           — manual dollar concat = the raw-float formatting bug
+#     kpi( / table( / series( — RICH OUTPUT (Phase 2): emit typed result data. A
+#                      total/count → kpi; a per-month/day breakdown → series; a
+#                      ranked list → table. The CLIENT picks the chart, not the model.
+#     money_val(     — typed money in result data (raw + $ display); the spec-money
+#                      lint FAILS a bare float or a money() string handed to a builder.
+#
+# The fixture tags (eval/fixtures/data/categories.txt) are the product defaults:
+# phone, travel, restaurant, groceries, health, transfers, rewards. gym is deliberately
+# NOT one → SUGGEST.
+# A GEO breakdown (by country/state) emits a geo_map(…) block, grouped on Txn.country/
+# .state; the eval greps the "map(" substring of geo_map(. Top-merchants groups on
+# .merchant (the cleaned index-time field), not raw .desc.
+#
+# question	must_contain	must_not_contain	manifest
+how much did I pay for my phone bill	transactions(,money(,phone	].id,search(,$" +,ask_local	statements.txt
+how much did I spend on groceries	transactions(,money(,groceries	].id,search(,$" +,ask_local	statements.txt
+how much did I spend on gym membership	SUGGEST_TAG,gym	"health",search(	statements.txt
+how many transactions do I have	transactions(	].id,search(	statements.txt
+what is the total of my transactions	transactions(,money(	].id,search(,$" +	statements.txt
+what was my biggest transaction	transactions(,money(	].id,search(	statements.txt
+how many documents are in my vault	manifest(	search(,ask_local	statements.txt
+when does my car insurance renew	ask_local	transactions(	statements.txt
+show my spending by month	transactions(,series(,money_val(	].id,search(	statements.txt
+give me a dashboard of my total spending and income	transactions(,kpi(,money_val(	].id,search(	statements.txt
+list my top merchants by total spending	spending(,table(,money_val(,.merchant	].id,search(	statements.txt
+which countries did I spend the most in	transactions(,map(,.country,money_val(	].id,search(	statements.txt
+what are my expenses in the last 3 months	transactions(,months_ago(,money(	].id,search(	statements.txt
+how much did I spend on electricity over the last 6 months	SUGGEST_TAG,electricity,transactions(,months_ago(	].id,search(,"health"	statements.txt
+what is the license plate on my car	ask_local	# SUGGEST_TAG:,transactions(	statements.txt

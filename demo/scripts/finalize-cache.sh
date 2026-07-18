@@ -14,7 +14,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CACHE="${REPLAY_CACHE_DIR:-$ROOT/replay/cache}"
 LOG="${MILLFOLIO_LOG:-$HOME/Library/Logs/millfolio-demo.log}"
-SCRATCH="${PRIVACY_BOX_SCRATCH:-$HOME/.config/privacy_box/scratch}/gen.mojo"
+SCRATCH="${ENCLAVE_SCRATCH:-$HOME/.config/enclave/scratch}/gen.mojo"
 PORT="${MILLFOLIO_PORT:-10010}"
 
 [[ -f "$LOG" ]] || { echo "error: log not found at $LOG"; exit 1; }

@@ -14,7 +14,7 @@ umbrella command.
 | dir | language | what it does |
 |---|---|---|
 | **`core/`** | Mojo | the vault: indexer, embeddings, the tool surface a sandboxed program imports, the ask loop |
-| **`privacy-box/`** | Mojo | the privacy harness: brokers between the local engine and a frontier model, sandboxes generated code, enforces egress |
+| **`enclave/`** | Mojo | the privacy harness: brokers between the local engine and a frontier model, sandboxes generated code, enforces egress |
 | **`cli/`** | Swift | the `mill` umbrella command — `install` / `start` / `stop` / `index` / `ask`; provisions the engine + sandbox + vault |
 
 ## Dependencies (separate repos in the `millfolio` org)
@@ -37,9 +37,9 @@ access is just an `ANTHROPIC_API_KEY` the user supplies — nothing to install.
 One `pixi.toml` at the repo root builds both Mojo binaries — the "one mojo":
 
 ```sh
-pixi run build       # -> build/vault (core) + build/privacy_box
+pixi run build       # -> build/vault (core) + build/enclave
 pixi run vault       # just the vault binary
-pixi run privacy-box # just the privacy harness
+pixi run enclave # just the privacy harness
 pixi run cli         # the Swift umbrella CLI (separate toolchain)
 ```
 

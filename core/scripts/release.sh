@@ -4,12 +4,12 @@
 # attaches the release asset, in dependency order:
 #
 #   1. millfolio   (this repo)  -> millfolio-zip.yml  attaches millfolio.zip
-#   2. privacy_box               -> privacy_box-zip.yml attaches privacy_box.zip
+#   2. enclave               -> enclave-zip.yml attaches enclave.zip
 #   3. cli                    -> release.yml      attaches millfolio-macos.tar.gz
 #   4. homebrew-tap           -> formula bumped to the cli asset's url + sha256
 #
-# The engine + privacy_box are the assets the CLI's Bootstrapper fetches at runtime
-# (millfolio.zip + privacy_box.zip from releases/latest); they have no build-time tie
+# The engine + enclave are the assets the CLI's Bootstrapper fetches at runtime
+# (millfolio.zip + enclave.zip from releases/latest); they have no build-time tie
 # to cli, so they just go first. The tap MUST come after cli: update-formula.sh
 # downloads the cli release asset to compute its sha256, so the asset has to
 # exist first. This script waits for each asset to appear before moving on.
@@ -20,12 +20,12 @@
 # explicit vX.Y.Z to override. The run is non-interactive (no prompts); use
 # --dry-run to print the resolved version + plan and exit.
 #
-# Layout: the repos are siblings under one umbrella dir (privacy_box/, cli/,
-# homebrew-tap/ next to this millfolio/ checkout). Override with PRIVACY_BOX_DIR /
+# Layout: the repos are siblings under one umbrella dir (enclave/, cli/,
+# homebrew-tap/ next to this millfolio/ checkout). Override with ENCLAVE_DIR /
 # CLI_DIR / TAP_DIR if yours differ.
 #
 #   Usage: scripts/release.sh [vX.Y.Z] [--major|--minor|--patch]
-#                  [--skip-engine] [--skip-privacy_box] [--skip-app] [--skip-tap] [--dry-run]
+#                  [--skip-engine] [--skip-enclave] [--skip-app] [--skip-tap] [--dry-run]
 #
 set -euo pipefail
 
@@ -33,18 +33,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"          # the millfolio repo
 UMBRELLA="$(cd "$ENGINE_DIR/.." && pwd)"
-PRIVACY_BOX_DIR="${PRIVACY_BOX_DIR:-$UMBRELLA/privacy_box}"
+ENCLAVE_DIR="${ENCLAVE_DIR:-$UMBRELLA/enclave}"
 APP_DIR="${APP_DIR:-$UMBRELLA/app}"
 CLI_DIR="${CLI_DIR:-$UMBRELLA/cli}"
 TAP_DIR="${TAP_DIR:-$UMBRELLA/homebrew-tap}"
 
 ENGINE_REPO="${ENGINE_REPO:-millfolio/millfolio}"
-PRIVACY_BOX_REPO="${PRIVACY_BOX_REPO:-millfolio/privacy_box}"
+ENCLAVE_REPO="${ENCLAVE_REPO:-millfolio/enclave}"
 APP_REPO="${APP_REPO:-millfolio/app}"
 CLI_REPO="${CLI_REPO:-millfolio/cli}"
 
 ENGINE_ASSET="millfolio.zip"
-PRIVACY_BOX_ASSET="privacy_box.zip"
+ENCLAVE_ASSET="enclave.zip"
 APP_ASSET="millfolio-app.zip"
 CLI_ASSET="millfolio-macos.tar.gz"
 TAP_FORMULA="millfolio.rb"
@@ -53,14 +53,14 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-2400}"   # seconds to wait for a CI asset (engine 
 POLL_INTERVAL="${POLL_INTERVAL:-20}"
 
 # -- args ---------------------------------------------------------------------
-VERSION="" BUMP="patch" SKIP_ENGINE=0 SKIP_PRIVACY_BOX=0 SKIP_APP=0 SKIP_TAP=0 DRY_RUN=0
+VERSION="" BUMP="patch" SKIP_ENGINE=0 SKIP_ENCLAVE=0 SKIP_APP=0 SKIP_TAP=0 DRY_RUN=0
 for a in "$@"; do
   case "$a" in
     --major)         BUMP="major" ;;
     --minor)         BUMP="minor" ;;
     --patch)         BUMP="patch" ;;
     --skip-engine)   SKIP_ENGINE=1 ;;
-    --skip-privacy_box) SKIP_PRIVACY_BOX=1 ;;
+    --skip-enclave) SKIP_ENCLAVE=1 ;;
     --skip-app)      SKIP_APP=1 ;;
     --skip-tap)      SKIP_TAP=1 ;;
     --dry-run)       DRY_RUN=1 ;;
@@ -78,7 +78,7 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # Every vX.Y.Z tag across the release repos, one per line (deduped, sorted).
 all_release_tags() {
   local dir
-  for dir in "$ENGINE_DIR" "$PRIVACY_BOX_DIR" "$APP_DIR" "$CLI_DIR"; do
+  for dir in "$ENGINE_DIR" "$ENCLAVE_DIR" "$APP_DIR" "$CLI_DIR"; do
     git -C "$dir" ls-remote --tags origin 2>/dev/null \
       | sed -E 's#.*refs/tags/##; s#\^\{\}$##' \
       | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true
@@ -133,7 +133,7 @@ resolve_version() {
 # build a commit GitHub hasn't seen).
 tag_and_push() {
   local dir="$1" repo="$2"
-  [ -d "$dir/.git" ] || die "$dir is not a git repo (set PRIVACY_BOX_DIR/CLI_DIR/TAP_DIR?)"
+  [ -d "$dir/.git" ] || die "$dir is not a git repo (set ENCLAVE_DIR/CLI_DIR/TAP_DIR?)"
   ( cd "$dir"
     [ -z "$(git status --porcelain)" ] || die "$repo working tree is dirty -- commit or stash first"
     local branch; branch="$(git symbolic-ref --quiet --short HEAD || true)"
@@ -182,7 +182,7 @@ resolve_version
 echo
 log "Release plan for $VERSION"
 [ "$SKIP_ENGINE" = 0 ]   && echo "    1. engine    $ENGINE_REPO  -> $ENGINE_ASSET"     || echo "    1. engine    (skipped)"
-[ "$SKIP_PRIVACY_BOX" = 0 ] && echo "    2. privacy_box  $PRIVACY_BOX_REPO  -> $PRIVACY_BOX_ASSET" || echo "    2. privacy_box  (skipped)"
+[ "$SKIP_ENCLAVE" = 0 ] && echo "    2. enclave  $ENCLAVE_REPO  -> $ENCLAVE_ASSET" || echo "    2. enclave  (skipped)"
 [ "$SKIP_APP" = 0 ]      && echo "    3. app       $APP_REPO  -> $APP_ASSET"           || echo "    3. app       (skipped)"
 echo                         "    4. cli       $CLI_REPO  -> $CLI_ASSET"
 [ "$SKIP_TAP" = 0 ]      && echo "    5. tap       formula bump -> $TAP_DIR/Formula/$TAP_FORMULA" || echo "    5. tap       (skipped)"
@@ -198,14 +198,14 @@ if [ "$SKIP_ENGINE" = 0 ]; then
   wait_for_asset "$ENGINE_REPO" "$ENGINE_ASSET"
 fi
 
-# -- 2. privacy_box (privacy_box.zip) -----------------------------------------------
-if [ "$SKIP_PRIVACY_BOX" = 0 ]; then
-  tag_and_push "$PRIVACY_BOX_DIR" "$PRIVACY_BOX_REPO"
-  wait_for_asset "$PRIVACY_BOX_REPO" "$PRIVACY_BOX_ASSET"
+# -- 2. enclave (enclave.zip) -----------------------------------------------
+if [ "$SKIP_ENCLAVE" = 0 ]; then
+  tag_and_push "$ENCLAVE_DIR" "$ENCLAVE_REPO"
+  wait_for_asset "$ENCLAVE_REPO" "$ENCLAVE_ASSET"
 fi
 
 # -- 3. app (millfolio-app.zip: ws_server source + web/dist) --------------------
-# Independent of cli (the CLI builds it on-device against privacy_box at install).
+# Independent of cli (the CLI builds it on-device against enclave at install).
 if [ "$SKIP_APP" = 0 ]; then
   tag_and_push "$APP_DIR" "$APP_REPO"
   wait_for_asset "$APP_REPO" "$APP_ASSET"

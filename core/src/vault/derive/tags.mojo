@@ -1,7 +1,7 @@
 """Tags — the on-device tag-registry READ layer (categories.txt + readiness).
 
 Split out of `store.mojo` so it can be shared IN-PROCESS by every consumer,
-including the privacy_box orchestrator, WITHOUT dragging the mutate layer
+including the enclave orchestrator, WITHOUT dragging the mutate layer
 (`classify`/`retag`/backfill — which links flare's HTTP client) into the
 privacy sandbox binary. This module depends only on `categorize`, `ledger`, and
 the `TxnRow` TSV round-trip (all LanceDB-free and network-free), so importing it

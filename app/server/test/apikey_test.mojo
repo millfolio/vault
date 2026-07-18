@@ -1,6 +1,6 @@
 """apikey_test — unit tests for the pure API-key helpers (apikey.mojo).
 
-Builds + runs as a plain Mojo program (no flare/privacy_box): `pixi run
+Builds + runs as a plain Mojo program (no flare/enclave): `pixi run
 test-apikey`. Asserts the validation gate, the last-4 masking (the hint NEVER
 leaks more than 4 chars), and the status-JSON shape. Pure functions → fully
 deterministic, no fixtures.

@@ -4,7 +4,7 @@ name: millfolio zip
 # downloads (commercial IP protection: ships .mojopkg + prebuilt binary + FFI
 # shims, NO .mojo source for the vault surface or its libs). See
 # scripts/package_millfolio.sh (which precompiles via scripts/precompile_pkgs.sh).
-# Mirrors privacy_box's privacy_box-zip.yml; millfolio links the full toolbox (flare
+# Mirrors enclave's enclave-zip.yml; millfolio links the full toolbox (flare
 # HTTP, the LanceDB Rust shim, pdftotext + zlib), so the siblings are checked out
 # and their FFI shims built before precompiling. The `.mojopkg`s are tied to the
 # pinned Mojo nightly, so this re-runs (and re-attaches) on every nightly bump.

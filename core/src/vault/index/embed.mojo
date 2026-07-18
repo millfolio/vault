@@ -2,7 +2,7 @@
 
 POSTs to `POST <base_url>/embeddings` (OpenAI shape) with `{"input": <text>}` and
 parses `{"data":[{"embedding":[...]}]}` into a `List[Float32]`. Mirrors
-privacy_box/src/transport.mojo's LocalClient flare wiring; local-only, no egress
+enclave/src/transport.mojo's LocalClient flare wiring; local-only, no egress
 guard.
 
 The embedding model is Qwen3-Embedding-0.6B -> dim 1024. This is the CLIENT side:

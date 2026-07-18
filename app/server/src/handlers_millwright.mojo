@@ -867,7 +867,7 @@ def _widget_catalog() raises -> String:
 
 def handle_millwright_assist(req: Request) raises -> Response:
     """POST /api/millwright/assist {"instruction"} → the model edits the spec.
-    The call rides privacy-box's transport (the app's ONLY Anthropic egress:
+    The call rides enclave's transport (the app's ONLY Anthropic egress:
     EgressGuard, budget, codegen disk cache, prompt caching) with the viewgen
     system prompt. The reply is validated by the SAME lint as a hand edit before
     it becomes a version — the model can propose, only `_accept_spec` disposes.

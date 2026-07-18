@@ -23,7 +23,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CACHE_DIR="${REPLAY_CACHE_DIR:-$ROOT/replay/cache}"
-SCRATCH="${PRIVACY_BOX_SCRATCH:-$HOME/.config/privacy_box/scratch}/gen.mojo"
+SCRATCH="${ENCLAVE_SCRATCH:-$HOME/.config/enclave/scratch}/gen.mojo"
 QUESTIONS_JSON="$CACHE_DIR/questions.json"
 FALLBACK_SENTINEL="This is the millfolio demo over a synthetic vault"
 PROXY_PORT="${PRIME_PROXY_PORT:-18788}"

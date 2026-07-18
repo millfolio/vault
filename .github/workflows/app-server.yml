@@ -7,9 +7,9 @@ name: server
 on:
   push:
     branches: [main]
-    paths: ["app/server/**", "core/**", "privacy-box/**", ".github/workflows/app-server.yml"]
+    paths: ["app/server/**", "core/**", "enclave/**", ".github/workflows/app-server.yml"]
   pull_request:
-    paths: ["app/server/**", "core/**", "privacy-box/**", ".github/workflows/app-server.yml"]
+    paths: ["app/server/**", "core/**", "enclave/**", ".github/workflows/app-server.yml"]
   workflow_dispatch:
 
 jobs:

@@ -176,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Scan ALL content blocks for text — newer models (claude-sonnet-5)
                 # emit a leading `thinking`/`tool_use` block, so content[0] often has no
                 # `text` and the old content[0]["text"] captured "" → nothing stored.
-                # (Mirrors the same fix in privacy_box transport._anthropic.)
+                # (Mirrors the same fix in enclave transport._anthropic.)
                 prog = "".join(
                     b.get("text", "")
                     for b in (upj.get("content") or [])

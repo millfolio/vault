@@ -6,13 +6,13 @@ tasks:
   build:
     command: 'pixi run build'
     toolchain: 'system'
-    # The server compiles with `-I ../../core/src -I ../../privacy-box/src`,
+    # The server compiles with `-I ../../core/src -I ../../enclave/src`,
     # so it IMPORTS those sibling sources — declare them as inputs (workspace-relative,
     # `/`-prefixed) or moon can't see a vault change and serves a STALE cached binary.
     inputs:
       - 'src/**/*.mojo'
       - '/vault/core/src/**/*.mojo'
-      - '/vault/privacy-box/src/**/*.mojo'
+      - '/vault/enclave/src/**/*.mojo'
       - 'pixi.toml'
       - 'pixi.lock'
   test: # events wire-format + run-queue invariants

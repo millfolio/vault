@@ -34,11 +34,11 @@ ffi = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; source ../flare/flare/tls/ff
 # core = the vault binary (indexer, embeddings, tool surface, ask loop).
 vault = { cmd = "mkdir -p build && mojo build core/src/millfolio.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/vault", depends-on = ["ffi"] }
 
-# privacy-box = the privacy harness (frontier/local broker, codegen, egress guard).
-privacy-box = { cmd = "mkdir -p build && mojo build privacy-box/src/privacy_box.mojo -I core/src -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/privacy_box", depends-on = ["ffi"] }
+# enclave = the privacy harness (frontier/local broker, codegen, egress guard).
+enclave = { cmd = "mkdir -p build && mojo build enclave/src/enclave.mojo -I core/src -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/enclave", depends-on = ["ffi"] }
 
 # the "one mojo" — both Mojo binaries.
-build = { depends-on = ["vault", "privacy-box"] }
+build = { depends-on = ["vault", "enclave"] }
 
 # precompile = the precompiled .mojoc set the install bundle ships (vault tool
 # surface + libs). The RELEASE depends on this (package_millfolio.sh runs the same
@@ -53,11 +53,11 @@ precompile = { cmd = "bash core/scripts/precompile_pkgs.sh build/pkgs" }
 # the Swift umbrella CLI (separate toolchain; install/start/stop/index/ask).
 cli = "swift build --package-path cli -c release"
 
-# Pre-release PROMPT eval — drives `privacy_box codegen` on a synthetic manifest and
-# lints the generated program against shape rules (privacy-box/eval/golden.tsv). NOT
+# Pre-release PROMPT eval — drives `enclave codegen` on a synthetic manifest and
+# lints the generated program against shape rules (enclave/eval/golden.tsv). NOT
 # in `test`/`check`: codegen is model-nondeterministic and needs ANTHROPIC_API_KEY,
 # so it's a manual pre-release gate, not a pre-push one. `pixi run eval`.
-eval = { cmd = "bash privacy-box/eval/run_eval.sh", depends-on = ["privacy-box"] }
+eval = { cmd = "bash enclave/eval/run_eval.sh", depends-on = ["enclave"] }
 
 # Gate: pure-Mojo SHA-256 against FIPS known-answer vectors (used for the
 # incremental-reindex content hash). No FFI/-I beyond core/src.
@@ -74,7 +74,7 @@ test-result = { cmd = "mkdir -p build && mojo build core/test/result_test.mojo -
 # Gate: `_strip_progress` drops the RESULT-SPEC line (and every other sentinel line)
 # from the captured answer, leaving only the real reply text. Guards the seam that
 # keeps the serialized spec out of the message TEXT (it rides the message.result field).
-test-strip = { cmd = "mkdir -p build && mojo build privacy-box/test/strip_test.mojo -I privacy-box/src -I core/src -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/strip-test && ./build/strip-test" }
+test-strip = { cmd = "mkdir -p build && mojo build enclave/test/strip_test.mojo -I enclave/src -I core/src -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/strip-test && ./build/strip-test" }
 # Gate: the deterministic tag matcher (vault.derive.categorize) — seed taxonomy
 # tags phone/travel/restaurant/groceries/health, multi-valued, and a credit-card/
 # transfer line with a digit run gets NO tag (guards the on-device classifier's
@@ -142,10 +142,10 @@ test-index-steps = { cmd = "mkdir -p build && rm -rf build/index-steps-data && M
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
-test-sandbox = { cmd = "mkdir -p build && mojo build privacy-box/test/sandbox_test.mojo -I privacy-box/src -I ../logging.mojo/src -o build/sandbox-test && PRIVACY_BOX_HOME=\"$PWD/privacy-box\" ./build/sandbox-test" }
+test-sandbox = { cmd = "mkdir -p build && mojo build enclave/test/sandbox_test.mojo -I enclave/src -I ../logging.mojo/src -o build/sandbox-test && ENCLAVE_HOME=\"$PWD/enclave\" ./build/sandbox-test" }
 # Gate: run_poll preserves raw multi-byte UTF-8 (em-dash) in the streamed line —
 # no byte-by-byte Latin-1 re-encode. Regression guard for the mojibake title bug.
-test-emdash = { cmd = "mkdir -p build && mojo build privacy-box/test/emdash_utf8_test.mojo -I privacy-box/src -I ../logging.mojo/src -o build/emdash-utf8-test && ./build/emdash-utf8-test" }
+test-emdash = { cmd = "mkdir -p build && mojo build enclave/test/emdash_utf8_test.mojo -I enclave/src -I ../logging.mojo/src -o build/emdash-utf8-test && ./build/emdash-utf8-test" }
 # Gate: M/D statement dates fold with the statement's year into sortable ISO.
 test-dates = { cmd = "mkdir -p build && mojo build core/test/extract/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
 # Gate: the relative-date wall-clock API (wall_clock/days_ago/months_ago/years_ago)
@@ -176,20 +176,20 @@ test-transactions = { cmd = "mkdir -p build && mojo build core/test/extract/tran
 test-location = { cmd = "mkdir -p build && mojo build core/test/extract/location_test.mojo -I core/src -o build/location-test && ./build/location-test" }
 # Gate: the EgressGuard blocks real-value fingerprints + canary tokens (even
 # reformatted — matching is normalized) and redacts PII shapes from survivors.
-test-egress = { cmd = "mkdir -p build && mojo build privacy-box/test/egress_test.mojo -I privacy-box/src -o build/egress-test && ./build/egress-test" }
+test-egress = { cmd = "mkdir -p build && mojo build enclave/test/egress_test.mojo -I enclave/src -o build/egress-test && ./build/egress-test" }
 # Gate: guard SEEDING — canary dotfile minted-once/persisted in the vault dir +
 # fingerprints sampled from real CSV cells (identifiers in, merchant names out),
 # proven end-to-end against the guard. Runs over a throwaway build/seed-data dir.
-test-seed = { cmd = "mkdir -p build && rm -rf build/seed-data && mojo build privacy-box/test/seed_test.mojo -I privacy-box/src -o build/seed-test && SEED_TEST_DIR=\"$PWD/build/seed-data\" ./build/seed-test" }
+test-seed = { cmd = "mkdir -p build && rm -rf build/seed-data && mojo build enclave/test/seed_test.mojo -I enclave/src -o build/seed-test && SEED_TEST_DIR=\"$PWD/build/seed-data\" ./build/seed-test" }
 # Gate: budget directive parsing/accounting.
-test-budget = { cmd = "mkdir -p build && mojo build privacy-box/test/budget_test.mojo -I privacy-box/src -o build/budget-test && ./build/budget-test" }
+test-budget = { cmd = "mkdir -p build && mojo build enclave/test/budget_test.mojo -I enclave/src -o build/budget-test && ./build/budget-test" }
 # Gate: the local persistent CODEGEN DISK CACHE (codegen_cache.mojo) — the FNV-1a
 # stable hash (deterministic + model-sensitive), write-then-read round-trip that
 # records the model, and miss(None)/hit(program) semantics. Exercises the read/write
 # layer directly against a temp dir (no network). Pinned MILLFOLIO_CODEGEN_CACHE_DIR
 # (hermetic); links ../json for the entry JSON parse.
-test-codegen-cache = { cmd = "mkdir -p build && rm -rf build/codegen-cache-data && MILLFOLIO_CODEGEN_CACHE_DIR=\"$PWD/build/codegen-cache-data\" bash -c 'mojo build privacy-box/test/codegen_cache_test.mojo -I privacy-box/src -I ../json -o build/codegen-cache-test && MILLFOLIO_CODEGEN_CACHE_DIR=\"$PWD/build/codegen-cache-data\" ./build/codegen-cache-test'" }
-# Gate: every ```mojo example in the codegen system prompt (privacy_box-system.md)
+test-codegen-cache = { cmd = "mkdir -p build && rm -rf build/codegen-cache-data && MILLFOLIO_CODEGEN_CACHE_DIR=\"$PWD/build/codegen-cache-data\" bash -c 'mojo build enclave/test/codegen_cache_test.mojo -I enclave/src -I ../json -o build/codegen-cache-test && MILLFOLIO_CODEGEN_CACHE_DIR=\"$PWD/build/codegen-cache-data\" ./build/codegen-cache-test'" }
+# Gate: every ```mojo example in the codegen system prompt (enclave-system.md)
 # COMPILES against the vault package — catches a wrong tool/field (the `.id` vs
 # `.alias` regression) before it reaches a release. Needs the SIBLING lib repos on
 # the -I path (flare/json/lancedb/…), so it is NOT part of the hermetic `test`

@@ -4,7 +4,7 @@ Builds + runs as a plain Mojo program: `pixi run test-vaults`. Hermetic — driv
 $HOME (which roots the registry + per-vault data dirs) to a temp dir via setenv,
 and clears the demo/active env so `_is_demo()` is false and the seed is
 deterministic. Covers: first-run seeding of "main", boot env resolution
-(PRIVACY_BOX_VAULT_DIR + MILLFOLIO_VAULT + MILLFOLIO_DATA_DIR), demo-vault add +
+(ENCLAVE_VAULT_DIR + MILLFOLIO_VAULT + MILLFOLIO_DATA_DIR), demo-vault add +
 select + pendingRestart, folder add with slugified id, restart re-activation, and
 remove semantics (main is protected; removing the active vault falls back to main).
 """
@@ -36,9 +36,9 @@ def main() raises:
     _ = setenv("MILLFOLIO_ACTIVE_VAULT", "", overwrite=True)
     _ = setenv("MILLFOLIO_DATA_DIR", "", overwrite=True)
     _ = setenv("MILLFOLIO_VAULT", "", overwrite=True)
-    _ = setenv("PRIVACY_BOX_VAULT_DIR", "/Users/me/realvault", overwrite=True)
+    _ = setenv("ENCLAVE_VAULT_DIR", "/Users/me/realvault", overwrite=True)
 
-    # ── first-run boot: seeds "main" from PRIVACY_BOX_VAULT_DIR, sets all 3 envs ──
+    # ── first-run boot: seeds "main" from ENCLAVE_VAULT_DIR, sets all 3 envs ──
     vaults.activate_selected_vault()
     expect_eq(
         getenv("MILLFOLIO_VAULT", ""),
@@ -46,9 +46,9 @@ def main() raises:
         "boot sets MILLFOLIO_VAULT to the active source",
     )
     expect_eq(
-        getenv("PRIVACY_BOX_VAULT_DIR", ""),
+        getenv("ENCLAVE_VAULT_DIR", ""),
         "/Users/me/realvault",
-        "boot overrides PRIVACY_BOX_VAULT_DIR (it outranks MILLFOLIO_VAULT)",
+        "boot overrides ENCLAVE_VAULT_DIR (it outranks MILLFOLIO_VAULT)",
     )
     expect_true(
         getenv("MILLFOLIO_DATA_DIR", "").find("/Millfolio/data") >= 0

@@ -430,7 +430,7 @@
   }
 
   // ── model-assisted edit: the instruction goes to the frontier via the
-  // server (privacy-box transport); the reply is linted by the same validator
+  // server (enclave transport); the reply is linted by the same validator
   // as a hand edit before it becomes a version. Errors surface verbatim.
   let assistDraft = $state("");
   let assistBusy = $state(false);

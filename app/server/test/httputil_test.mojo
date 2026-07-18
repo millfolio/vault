@@ -1,7 +1,7 @@
 """httputil_test — unit tests for the HTTP response builders + host allow-list
 (httputil.mojo).
 
-Builds + runs as a plain Mojo program (flare only, no privacy_box): `pixi run
+Builds + runs as a plain Mojo program (flare only, no enclave): `pixi run
 test-httputil`. Covers content-type guessing, host extraction, the DNS-rebinding
 allow-list (incl. the MILLFOLIO_ALLOWED_HOSTS knob), the canned error responses
 (401/403) + their headers, the CORS scaffolding (methods/headers set, Allow-Origin

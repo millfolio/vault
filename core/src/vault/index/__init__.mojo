@@ -20,7 +20,7 @@ from vault.index.index import (
 
 # The tag-registry READ layer (vault.derive.tags — LanceDB- and network-free) and
 # the mutate/report layer (vault.derive.store) are shared in-process with the app
-# server and privacy_box; re-exported here so existing `vault.index` callers keep
+# server and enclave; re-exported here so existing `vault.index` callers keep
 # their imports, each from the module that DEFINES it.
 from vault.derive.tags import (
     effective_tags,

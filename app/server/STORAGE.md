@@ -153,7 +153,7 @@ kv/doc shapes the `mill` CLI and the server use in-process).
 
 - **Not on the `from vault import *` tool surface.** `vault.storage` is internal
   infra, deliberately left OUT of `vault/core/src/vault/__init__.mojo`'s wildcard — a
-  privacy_box-generated program can't reach it; it's importable only by name.
+  enclave-generated program can't reach it; it's importable only by name.
 - **Acyclic.** `vault.storage` depends on nothing but stdlib + the `flare` sibling lib
   (for `MutUntrackedOrigin`) — it imports NOTHING from `app/server`. The two helpers it
   used to borrow from the server (`osutil._config_dir` for the data dir, `osutil._chmod`
@@ -311,7 +311,7 @@ the layer) so both the app server AND the vault-side owners share it in-process:
   - **`manifest.tsv`** (`vault.index`): `_load_manifest` read + `_write_manifest` write route
     through `default_manifest_store(config_dir())`; the `#meta` header + TSV serialize/parse
     are untouched. The app server's three manifest READERS (`handle_vault`, the alias→path
-    resolve, `_indexed_file_count`) route through the store too. The `privacy-box` sandbox
+    resolve, `_indexed_file_count`) route through the store too. The `enclave` sandbox
     readers (a different, sandbox-granted dir) are left as-is. Proven byte-identical by
     **`test-golden`** / `test-index-steps` / `test-procversion`, all still green.
   - **`indexed-paths.json`** (app-side `server.mojo`): `_read_tracked` read + `_write_tracked`
@@ -322,7 +322,7 @@ the layer) so both the app server AND the vault-side owners share it in-process:
   overwrite (last-write-wins), plain-umask mode, and the per-doc factories.
 
 > **Out of scope:** `config.json` is listed as a doc-shape file but isn't a live read/write
-> site yet, so it's left for whenever it lands. The `privacy-box` manifest readers stay
+> site yet, so it's left for whenever it lands. The `enclave` manifest readers stay
 > inline (they read a sandbox-granted dir, not `vault.storage`, and `sandbox_test` builds
 > without `-I core/src`).
 

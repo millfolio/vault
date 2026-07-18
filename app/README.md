@@ -15,7 +15,7 @@ the contract once, update the server and every client in one commit.
 ```
 app/
 ├── protocol/   # the chat + workflow/approval/debug contract — source of truth
-├── server/     # Mojo HTTP server (over Tailscale); wraps the privacy_box orchestrator
+├── server/     # Mojo HTTP server (over Tailscale); wraps the enclave orchestrator
 ├── shared/     # generated TS client + design tokens shared by the web app
 ├── web/        # SvelteKit web app  (✅ scaffolded)
 ├── ios/        # SwiftUI client      (✅ scaffolded)
@@ -28,7 +28,7 @@ app/
 web / iOS / android  ──(millfolio protocol, over Tailscale)──▶  server (Mojo)
                                                                   │
                                                                   ▼
-                                                       privacy_box orchestrator
+                                                       enclave orchestrator
                                                        (vault codegen + sandbox)
                                                                   │
                                                                   ▼
@@ -38,9 +38,9 @@ web / iOS / android  ──(millfolio protocol, over Tailscale)──▶  server
 - The apps are **thin clients**: they never run the engine locally. They reach
   the Mojo `server/` over the user's tailnet (`tailscale serve`), which is the
   auth boundary — only the user's own devices can connect.
-- `server/` is a thin HTTP/protocol layer that imports the **privacy_box**
+- `server/` is a thin HTTP/protocol layer that imports the **enclave**
   orchestrator (vault codegen loop + sandbox + egress guard) as a Mojo library,
-  the same way privacy_box's current `src/server.mojo` does. Migrating that server
+  the same way enclave's current `src/server.mojo` does. Migrating that server
   in here is the first server task — see `server/README.md`.
 
 ## Develop

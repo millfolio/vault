@@ -7,7 +7,7 @@ import MillfolioCore
 // lifecycle as the millfolio app's Bootstrapper, into the shared install tree
 // (~/Library/Application Support/Millfolio) + the me.millfolio.server launchd job, so
 // `millfolio` and the `millfolio` CLI interoperate on one inference server. `install`
-// provisions the server + privacy_box + the millfolio vault; `start` brings them all up
+// provisions the server + enclave + the millfolio vault; `start` brings them all up
 // (the vault site at http://localhost:10000); `stop` tears them down.
 
 @main
@@ -22,11 +22,11 @@ struct Millfolio: AsyncParsableCommand {
 // ── mill install ──────────────────────────────────────────────────────────
 struct Install: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Install the millfolio inference server, privacy_box, and the millfolio web app.",
+        abstract: "Install the millfolio inference server, enclave, and the millfolio web app.",
         discussion: """
         Idempotent — reuses anything already installed. Provisions the combined \
         inference server (chat + embeddings, including both models' weights), the \
-        privacy_box vault orchestrator + sandbox, the millfolio vault tools, and the \
+        enclave vault orchestrator + sandbox, the millfolio vault tools, and the \
         millfolio web app (UI on :10000). If millfolio was already running, it is \
         restarted so the freshly installed version actually serves (--no-restart \
         to leave the old one running).
@@ -39,7 +39,7 @@ struct Install: AsyncParsableCommand {
         print("Logging to \(boot.logFileURL.path)")
         print("  (if a step fails, the full timestamped output is there)")
         try await boot.installVault()
-        print("✓ millfolio installed (inference server + privacy_box + millfolio web app)")
+        print("✓ millfolio installed (inference server + enclave + millfolio web app)")
         try await restartToApply(boot, skip: noRestart)
     }
 }
@@ -66,7 +66,7 @@ struct Update: AsyncParsableCommand {
         abstract: "Update millfolio and its components to the latest release.",
         discussion: """
         Upgrades the `millfolio` CLI via Homebrew, then refreshes the downloadable \
-        components (inference server, privacy_box, vault engine, app web server) to their \
+        components (inference server, enclave, vault engine, app web server) to their \
         latest releases. The Mojo toolchains and the model weights are kept, so it \
         only re-fetches + rebuilds the source bundles. Progress is logged to \
         ~/Library/Logs/Millfolio/<date>.log.
@@ -153,7 +153,7 @@ struct Status: AsyncParsableCommand {
         print("server:     \(mark(boot.isServerInstalled))")
         print("weights:    \(mark(boot.weightsPresent))")
         print("embeddings: \(mark(boot.embedWeightsPresent))")
-        print("privacy_box:   \(mark(boot.isPrivacyBoxInstalled))")
+        print("enclave:   \(mark(boot.isEnclaveInstalled))")
         print("millfolio:    \(mark(boot.isMillfolioInstalled))")
         print("app web server: \(mark(boot.isAppServerInstalled))")
         // Active vault (multi-vault): which vault `mill index/ask/run` operate on.
@@ -272,7 +272,7 @@ struct Doctor: AsyncParsableCommand {
         checks.append(("Inference server built", boot.isServerInstalled, "run: mill install"))
         checks.append(("Chat model weights", boot.weightsPresent, "run: mill install"))
         checks.append(("Embedding model weights", boot.embedWeightsPresent, "run: mill install"))
-        checks.append(("privacy_box built", boot.isPrivacyBoxInstalled, "run: mill install"))
+        checks.append(("enclave built", boot.isEnclaveInstalled, "run: mill install"))
         checks.append(("Vault tools built", boot.isMillfolioInstalled, "run: mill install"))
         checks.append(("App web server built", boot.isAppServerInstalled, "run: mill install"))
         let engineUp = boot.inferenceVersion() != nil
@@ -380,7 +380,7 @@ struct Ask: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "One-shot vault answer (`mill ask \"<question>\"`).",
         discussion: """
-        Runs the privacy_box vault loop over your vault dir: a model writes a Mojo \
+        Runs the enclave vault loop over your vault dir: a model writes a Mojo \
         program that uses the millfolio vault tools over your real data locally, and \
         the answer is printed here. Runs over the ACTIVE vault (see `mill status`); $MILLFOLIO_VAULT overrides it. \
         Needs the inference server running.
@@ -399,7 +399,7 @@ struct Ask: AsyncParsableCommand {
         // up, else `ask` blocks on a dead endpoint with no feedback.
         try boot.ensureInferenceServer()
         print("Thinking — progress below (first run can take a minute):")
-        // Run the privacy_box vault loop (`vault "<q>" <dir>`) as a logged child so its
+        // Run the enclave vault loop (`vault "<q>" <dir>`) as a logged child so its
         // streamed progress + the answer (and any failure) surface here and in the log.
         let code = try boot.runVaultAsk(question: q, vaultDir: dir)
         try finish(code, boot, "mill ask")

@@ -1,7 +1,7 @@
 """Store — pure, dependency-free builders for the on-device JSON stores.
 
 Separated from server.mojo (which wraps these with the actual file I/O + HTTP
-Response) so they unit-test as a plain Mojo program with no flare/privacy_box —
+Response) so they unit-test as a plain Mojo program with no flare/enclave —
 mirrors events.mojo. Covered by test/record_builders_test.mojo.
 
 Two stores + one info blob:

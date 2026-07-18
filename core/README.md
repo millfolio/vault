@@ -10,7 +10,7 @@ my car?"_ — over a private vault of **CSV, PDF, and Markdown** documents,
 **without your data ever leaving the machine**.
 
 millfolio is the **vault application**. It builds on the
-[privacy_box](https://github.com/millfolio/privacy_box) privacy harness and the
+[enclave](https://github.com/millfolio/enclave) privacy harness and the
 millfolio toolbox: [lancedb.mojo](https://github.com/millfolio/lancedb.mojo) for
 the on-device vector index,
 [pdftotext.mojo](https://github.com/millfolio/pdftotext.mojo) for PDF extraction,
@@ -32,7 +32,7 @@ There are **two models**, deliberately asymmetric:
   inference server and sees the real text.
 
 So the frontier model orchestrates over aliases; the local model reads; the data
-and the final answer stay on the machine. This is enforced by privacy_box's egress
+and the final answer stay on the machine. This is enforced by enclave's egress
 guard and a network-denied sandbox — the generated program runs locally and can
 only reach the local model.
 
@@ -55,7 +55,7 @@ The generated program does `from vault import *` and has:
 ```
 your files ─▶ index: chunk + embed (local) ─▶ LanceDB vector store
                                                       │
-question ─▶ privacy_box: frontier writes a vault program │ (sees only aliases)
+question ─▶ enclave: frontier writes a vault program │ (sees only aliases)
                           │                           ▼
                           └─▶ sandbox run ─▶ search / read / ask_local ─▶ answer (local)
 ```
@@ -64,8 +64,8 @@ question ─▶ privacy_box: frontier writes a vault program │ (sees only alia
 
 Vault data plane is wired: the **manifest** (confidentiality boundary), the
 three **readers** (CSV/PDF/Markdown), the **embedding client** + **LanceDB
-indexer/search**, and the **`vault` tool library** that privacy_box-generated
-programs import. Still to come: the privacy_box-driven `ask` loop on top.
+indexer/search**, and the **`vault` tool library** that enclave-generated
+programs import. Still to come: the enclave-driven `ask` loop on top.
 
 What's verified vs. pending a live server:
 

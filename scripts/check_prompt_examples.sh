@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # check_prompt_examples.sh — every ```mojo block in the codegen system prompt
-# (privacy_box-system.md) is a REAL program the frontier model is told to imitate.
+# (enclave-system.md) is a REAL program the frontier model is told to imitate.
 # Compile each one against the actual vault package, so a broken example — a wrong
 # tool name, or a wrong field like the `.id` vs `.alias` regression that failed "how
 # much did I pay for my phone bill" — can never reach a release. Deterministic; wired
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"   # vault/
-PROMPT="$ROOT/privacy-box/resources/privacy_box-system.md"
+PROMPT="$ROOT/enclave/resources/enclave-system.md"
 MOJO="${MOJO:-mojo}"
 # The SAME include set the vault binary builds with (core/src + the sibling libs).
 INC=(-I "$ROOT/core/src"
@@ -56,6 +56,6 @@ done
 if [ "$fail" = 0 ]; then
   echo "✓ all $count prompt examples compile"
 else
-  echo "✗ a prompt example failed to compile — fix privacy_box-system.md" >&2
+  echo "✗ a prompt example failed to compile — fix enclave-system.md" >&2
   exit 1
 fi

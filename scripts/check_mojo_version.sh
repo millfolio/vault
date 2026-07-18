@@ -4,7 +4,7 @@
 #
 # Two places pin the Mojo nightly and they MUST agree:
 #   • pixi.toml          — the nightly CI precompiles the bundle's vault.mojoc with.
-#   • the `mill` CLI     — Bootstrapper.{mojoVersion,privacy_boxMojoVersion}, the
+#   • the `mill` CLI     — Bootstrapper.{mojoVersion,enclaveMojoVersion}, the
 #                          toolchain the installer provisions on the user's machine.
 # A `.mojoc` is version-locked: a compiler older/newer than the one that built it
 # REFUSES to load it ("Mojo precompiled file is incompatible…"), so a drift breaks the
@@ -21,7 +21,7 @@ pin="$(grep -oE '1\.0\.0b3\.dev[0-9]+' "$DIR/pixi.toml" | head -1)"
 [ -n "$pin" ] || { echo "check-mojo-version: no mojo pin found in $DIR/pixi.toml" >&2; exit 1; }
 
 fail=0
-for name in mojoVersion privacy_boxMojoVersion; do
+for name in mojoVersion enclaveMojoVersion; do
     v="$(grep -oE "${name} = \"1\.0\.0b3\.dev[0-9]+" "$BS" | grep -oE '1\.0\.0b3\.dev[0-9]+' | head -1)"
     if [ "$v" != "$pin" ]; then
         echo "✗ Bootstrapper.$name = '${v:-<missing>}' but pixi.toml pins '$pin'." >&2

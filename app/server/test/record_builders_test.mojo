@@ -1,6 +1,6 @@
 """Record_builders_test — unit tests for the on-device JSON store builders (record_builders.mojo).
 
-Builds + runs as a plain Mojo program (no flare/privacy_box): `pixi run test-record-builders`.
+Builds + runs as a plain Mojo program (no flare/enclave): `pixi run test-record-builders`.
 Asserts that the ask-history record is valid, escaped JSON; that the history array
 comes back newest-first and skips blank lines; and that the /api/system blob carries
 the expected data + log paths. Pure functions → fully deterministic, no fixtures.

@@ -11,7 +11,7 @@
 # `.mojo` source shipped for the app server.
 #
 # The binary is built here with the SAME `mojo build` invocation the installer
-# used (Bootstrapper.installAppServer): its own src + the privacy_box orchestrator
+# used (Bootstrapper.installAppServer): its own src + the enclave orchestrator
 # source + the vendored flare/json/jinja2/logging siblings + the vault pkgs/*.mojoc
 # (in-process `from vault.derive.store import …`). Its rpath is relocated to a
 # device-relative @loader_path (the CI machine's $CONDA_PREFIX/lib is absent on the
@@ -26,7 +26,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"                 # app/
 UMBRELLA="${UMBRELLA:-$(cd "$ROOT/.." && pwd)}"               # the vault repo root (monorepo)
-PRIVACY_BOX="${PRIVACY_BOX:-$UMBRELLA/privacy-box}"
+ENCLAVE="${ENCLAVE:-$UMBRELLA/enclave}"
 FLARE="${FLARE:-$UMBRELLA/../flare}"
 JSON="${JSON:-$UMBRELLA/../json}"
 JINJA2="${JINJA2:-$UMBRELLA/../jinja2.mojo}"
@@ -56,7 +56,7 @@ echo "==> building prebuilt millfolio-server" >&2
 # modules (events.mojo, runqueue.mojo, store.mojo, imported by server.mojo).
 "$MOJO" build "$ROOT/server/src/server.mojo" \
     -I "$ROOT/server/src" \
-    -I "$PRIVACY_BOX/src" \
+    -I "$ENCLAVE/src" \
     -I "$FLARE" -I "$JSON" -I "$JINJA2/src" -I "$LOGGING/src" \
     -I "$PKGS" \
     -o "$STAGE/build/millfolio-server"
@@ -65,7 +65,7 @@ echo "==> building prebuilt millfolio-server" >&2
 # a device-relative @loader_path to the toolchain's mojo/lib. The on-device layout
 # is fixed — the binary lands at <support>/bundle/app/build/millfolio-server and
 # the toolchain at <support>/mojo/lib, so 3 dirs up to <support> then mojo/lib
-# (one level shallower than privacy_box/millfolio — the app tree isn't double-
+# (one level shallower than enclave/millfolio — the app tree isn't double-
 # nested). Only the Mojo runtime dylibs resolve here; the flare shims are dlopen'd
 # from $CONDA_PREFIX/lib at runtime. Ad-hoc sign (matches package_millfolio).
 PREFIX="${CONDA_PREFIX:-}"

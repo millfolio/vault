@@ -5,7 +5,7 @@
 #
 #   millfolio.zip
 #   ├── runner/        ← engine     (package_engine.sh:      inference-server + flare + jinja2 + TLS libs)
-#   ├── privacy_box/   ← vault       (package_privacy_box.sh: privacy_box + web + FFI shims + flare/json/jinja2)
+#   ├── enclave/   ← vault       (package_enclave.sh: enclave + web + FFI shims + flare/json/jinja2)
 #   ├── millfolio/     ← vault       (package_millfolio.sh:   core + FFI shims + flare/json/lancedb/pdftotext/zlib/csv)
 #   └── app/           ← app         (package-app.sh:         ws_server src + built web UI)
 #
@@ -26,12 +26,12 @@ ZIPS="$WORK/zips"; STAGE="$WORK/bundle"; mkdir -p "$ZIPS" "$STAGE"
 # The component packagers reference the mojo libs by env override (default ../<lib>);
 # point them at the umbrella-level checkouts so the consolidated layout resolves.
 export FLARE="$UMBRELLA/flare" JSON="$UMBRELLA/json" JINJA2="$UMBRELLA/jinja2.mojo"
-export LOGGING="$UMBRELLA/logging.mojo"   # privacy_box + app server: `from logging import log`
+export LOGGING="$UMBRELLA/logging.mojo"   # enclave + app server: `from logging import log`
 export LANCEDB="$UMBRELLA/lancedb.mojo" PDFTOTEXT="$UMBRELLA/pdftotext.mojo"
 export ZLIB="$UMBRELLA/zlib.mojo" CSV="$UMBRELLA/csv.mojo" DOCX="$UMBRELLA/docx.mojo"
 
 # The vault package set (vault.mojoc etc.) is now needed by THREE packagers:
-# privacy_box + app compile against it (`-I $PKGS`), and millfolio ships it.
+# enclave + app compile against it (`-I $PKGS`), and millfolio ships it.
 # Precompile it ONCE here and share via PKGS so a full bundle build doesn't repeat
 # the (slow) precompile three times. Each packager self-builds a throwaway set when
 # run standalone (PKGS unset).
@@ -43,8 +43,8 @@ export PKGS="$WORK/pkgs"
 echo "==> [1/4] engine → runner.zip (ships SOURCE — compiled on-device; its GPU/Metal kernels can't build on GPU-less CI)" >&2
 ( cd "$ENGINE" && pixi run flare-tls && pixi run bash scripts/package_engine.sh "$ZIPS/runner.zip" )
 
-echo "==> [2/4] privacy_box → privacy_box.zip (prebuilt privacy_box)" >&2
-( cd "$VAULT" && pixi run ffi && pixi run bash privacy-box/scripts/package_privacy_box.sh "$ZIPS/privacy_box.zip" )
+echo "==> [2/4] enclave → enclave.zip (prebuilt enclave)" >&2
+( cd "$VAULT" && pixi run ffi && pixi run bash enclave/scripts/package_enclave.sh "$ZIPS/enclave.zip" )
 
 echo "==> [3/4] vault engine → millfolio.zip (prebuilt millfolio, reuses PKGS)" >&2
 ( cd "$VAULT" && pixi run bash core/scripts/package_millfolio.sh "$ZIPS/millfolio.zip" )
@@ -55,7 +55,7 @@ echo "==> [4/4] app server → millfolio-app.zip (prebuilt millfolio-server)" >&
 
 echo "==> combining into one bundle" >&2
 unzip -q "$ZIPS/runner.zip"        -d "$STAGE/runner"
-unzip -q "$ZIPS/privacy_box.zip"   -d "$STAGE/privacy_box"
+unzip -q "$ZIPS/enclave.zip"   -d "$STAGE/enclave"
 unzip -q "$ZIPS/millfolio.zip"     -d "$STAGE/millfolio"
 unzip -q "$ZIPS/millfolio-app.zip" -d "$STAGE/app"
 
@@ -75,5 +75,5 @@ printf '%s\n' "$BUNDLE_VERSION" > "$STAGE/VERSION"
 echo "==> stamped bundle VERSION = $BUNDLE_VERSION" >&2
 
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr -X "$OUT" runner privacy_box millfolio app VERSION )
+( cd "$STAGE" && zip -qr -X "$OUT" runner enclave millfolio app VERSION )
 echo "==> wrote $OUT ($(du -h "$OUT" | cut -f1))" >&2

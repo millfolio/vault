@@ -71,9 +71,9 @@ def vault_data_dir(id: String) -> String:
 
 def _default_main_source() -> String:
     """Seed the "main" vault's source from the inherited env, in vaultcfg's own
-    precedence (PRIVACY_BOX_VAULT_DIR > MILLFOLIO_VAULT), else the default vault dir.
+    precedence (ENCLAVE_VAULT_DIR > MILLFOLIO_VAULT), else the default vault dir.
     """
-    var pv = String(getenv("PRIVACY_BOX_VAULT_DIR", "").strip())
+    var pv = String(getenv("ENCLAVE_VAULT_DIR", "").strip())
     if pv.byte_length() > 0:
         return pv
     var v = String(getenv("MILLFOLIO_VAULT", "").strip())
@@ -182,10 +182,10 @@ def activate_selected_vault() raises:
         makedirs(data, exist_ok=True)
     except:
         pass
-    # Set ALL THREE resolver inputs to the active vault. PRIVACY_BOX_VAULT_DIR
+    # Set ALL THREE resolver inputs to the active vault. ENCLAVE_VAULT_DIR
     # outranks MILLFOLIO_VAULT in vaultcfg.vault_dir() and the launch agent bakes it,
     # so overriding only MILLFOLIO_VAULT would leave the switch ignored — set it too.
-    _ = setenv("PRIVACY_BOX_VAULT_DIR", source, True)
+    _ = setenv("ENCLAVE_VAULT_DIR", source, True)
     _ = setenv("MILLFOLIO_VAULT", source, True)
     _ = setenv("MILLFOLIO_DATA_DIR", data, True)
     # Record which vault THIS process actually booted on, so the UI can detect a

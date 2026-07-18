@@ -41,7 +41,7 @@ A **persisted, user- and model-editable registry** of attribute definitions
 
 - a **rule set** — keyword/regex → value (the common, safe case),
 - a **Mojo predicate** — model- or user-authored, for logic rules can't express
-  (runs in the existing privacy_box sandbox; no new trust surface),
+  (runs in the existing enclave sandbox; no new trust surface),
 - an **ML classifier** — for the fuzzy tail, results cached.
 
 Key principle: **the model writes rules INTO the registry, not into a throwaway
