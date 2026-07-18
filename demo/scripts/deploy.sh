@@ -140,7 +140,7 @@ echo "==> demo + synthetic vault (incl. its pre-built index) → $BGENT"
 # it's gitignored — only the .example is in the repo). Without this exclude, --delete
 # WIPES it every deploy; the running tunnel survives on its in-memory copy but a reboot
 # would then drop the demo with no config to load.
-rsync_to --delete --exclude '.git' --exclude 'replay/cloudflared-config.yml' "$DEMO_DIR/"  "$BGENT:demo/"
+rsync_to --delete --exclude '.git' --exclude 'replay/cloudflared-config.yml' --exclude 'replay/cache' "$DEMO_DIR/"  "$BGENT:demo/"
 rsync_to --delete --exclude '.git' "$VAULT_DIR/" "$BGENT:demo-vault/"
 
 # Stamp the deployed build version into the demo dir (after the rsync, which --deletes)
@@ -161,6 +161,11 @@ awk -F'\t' -v OFS='\t' -v v="$HOME/demo-vault/vault" 'NR==1 && $1=="#meta"{$4=v}
 echo "  staged: $(wc -l <"$HOME/.config/millfolio/transactions.tsv") verified transactions"
 REMOTE
 
+if [[ "${NO_RESTART:-0}" == 1 ]]; then
+  echo "==> NO_RESTART=1 — synced but NOT restarting (the live demo keeps serving its"
+  echo "    in-memory build). Re-prime the cache, then cut over with:"
+  echo "    ssh $BGENT sudo -n launchctl kickstart -k system/app.millfolio.demo"
+else
 echo "==> restart demo services"
 # Try both launchd domains: gui/<uid> (LaunchAgent mode) and system (LaunchDaemon
 # mode, headless — needs passwordless sudo, hence sudo -n). Whichever is installed wins.
@@ -174,6 +179,7 @@ echo "==> restart demo services"
     echo "   set up: bash ~/demo/scripts/setup-bgent.sh [--daemon]; or for a daemon"
     echo "   run on bgent: sudo launchctl kickstart -k system/app.millfolio.demo)"
   fi'
+fi
 
 # Close the shared connection.
 "${SSH[@]}" -O exit "$BGENT" 2>/dev/null || true
