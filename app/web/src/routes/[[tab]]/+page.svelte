@@ -1356,7 +1356,12 @@
     }
   }
   main {
-    padding-bottom: 44px; /* clears the fixed statusbar */
+    /* One source of truth for the fixed statusbar's height, used both to size the
+       bar and to reserve exactly that much space below the content. Keeping them
+       equal avoids a dark gap between the last content and the bar (they drifted:
+       44px reserved vs a 26px bar → an 18px strip). */
+    --statusbar-h: 26px;
+    padding-bottom: var(--statusbar-h); /* clears the fixed statusbar, exactly */
     height: 100vh; /* fallback for browsers without dvh */
     height: 100dvh; /* dynamic viewport — excludes the iOS Safari URL bar */
     display: flex;
@@ -1662,7 +1667,7 @@
     background: var(--surface);
     font-size: 12px;
     color: var(--text-dim);
-    min-height: 26px;
+    min-height: var(--statusbar-h);
   }
   .statusbar .spacer {
     flex: 1;
