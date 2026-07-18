@@ -423,15 +423,9 @@ def main() raises:
     try:
         var mth = ThreadHandle.spawn[_scheduler_worker](_null_ptr())
         mth.detach()
-        print(
-            "  scheduler: on (indexing + AI-tag backfill, one at a"
-            " time)"
-        )
+        print("  scheduler: on (indexing + AI-tag backfill, one at a time)")
     except:
-        print(
-            "  scheduler: could not start (index-time backfill still"
-            " works)"
-        )
+        print("  scheduler: could not start (index-time backfill still works)")
     # Background weight provisioner: ensure the required embedding model + a default
     # chat model are present (both no-ops when cached), so indexing/search + chat work
     # out of the box after a weights-free install; then kickstart the engine to serve

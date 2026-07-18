@@ -134,9 +134,7 @@ def load_config() -> Config:
     remote_model = _env_or("ENCLAVE_MODEL", remote_model^)
     api_key = _env_or("ANTHROPIC_API_KEY", api_key^)
     if getenv("ENCLAVE_REMOTE_TOKEN_BUDGET", "") != "":
-        token_budget = parse_budget(
-            getenv("ENCLAVE_REMOTE_TOKEN_BUDGET", "")
-        )
+        token_budget = parse_budget(getenv("ENCLAVE_REMOTE_TOKEN_BUDGET", ""))
     if getenv("ENCLAVE_MOCK", "") != "":
         mock = True
     if getenv("ENCLAVE_LOCAL", "") != "":

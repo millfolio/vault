@@ -30,9 +30,7 @@ def scratch_dir() -> String:
     return getenv("HOME", "") + "/.config/enclave/scratch"
 
 
-def build_vault_harness(
-    cfg: Config, vault_dir: String
-) raises -> Harness:
+def build_vault_harness(cfg: Config, vault_dir: String) raises -> Harness:
     """Wire the harness for the VAULT path (run_vault_task):
 
     - the sandbox policy is in "loopback" network mode with the vault dir as the
