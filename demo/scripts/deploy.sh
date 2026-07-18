@@ -76,7 +76,14 @@ if [[ "${SYNC_RUNTIME:-0}" == 1 ]]; then
   # flavor protects portably (-s needs a 3.x receiver; a backslash is taken literally
   # by a 3.x sender). Sync through a no-space symlink — robust on any rsync, any end.
   "${SSH[@]}" "$BGENT" 'mkdir -p "$HOME/Library/Application Support/Millfolio" && ln -sfn "$HOME/Library/Application Support/Millfolio" "$HOME/.millfolio-support"'
-  rsync_to --delete "$SUPPORT/bundle/" "$BGENT:.millfolio-support/bundle/"
+  # KEEP_STALE_BUNDLE=1 drops --delete on the bundle sync so a still-running OLD demo
+  # process keeps the binaries it spawns per query (e.g. the sandbox) on disk while the
+  # NEW layout lands alongside it — used for a prime-then-cutover deploy where the live
+  # demo must keep serving until the kickstart. A later normal deploy (--delete) prunes
+  # the stale files. Without it, --delete can unlink a binary the old process re-spawns.
+  BUNDLE_DELETE=(--delete); [[ "${KEEP_STALE_BUNDLE:-0}" == 1 ]] && BUNDLE_DELETE=()
+  # bash-3.2-safe expansion for a possibly-EMPTY array under `set -u`.
+  rsync_to ${BUNDLE_DELETE[@]+"${BUNDLE_DELETE[@]}"} "$SUPPORT/bundle/" "$BGENT:.millfolio-support/bundle/"
   # Exclude the Mojo compile cache from the --delete: it lives UNDER the toolchain
   # (share/max/cache/.mojo_cache) and is bgent-specific + warmed there. Wiping it made
   # every post-deploy compile a cold ~32s instead of the warm ~4s (the dependency
