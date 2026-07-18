@@ -33,7 +33,7 @@ from vaultcfg import millfolio_bin, vault_include_paths
 
 # The tag-registry READ layer, shared IN-PROCESS with the CLI + app server. It's
 # LanceDB- and network-free (no flare/HTTP), so pulling it into the sandbox
-# orchestrator keeps the trust surface small — and lets codegen read tags without
+# harness keeps the trust surface small — and lets codegen read tags without
 # spawning the CLI binary.
 from vault.derive.tags import codegen_tags_describe
 
@@ -41,7 +41,7 @@ from vault.derive.tags import codegen_tags_describe
 # The progress-line sentinel — MUST match `vault.progress` in vault/core/src/vault.mojo
 # (which can't be imported here: vault is only on the *generated* program's include
 # path, not enclave's). The server imports THIS constant so it can't drift from
-# the orchestrator. Keep all three copies of the literal in lockstep.
+# the harness. Keep all three copies of the literal in lockstep.
 comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
 comptime STAT_SENTINEL = "\x1f@@stat@@\x1f"
 # On-device-model exchange line (debug; gated by $MILLFOLIO_LOG_LOCAL). Matches the

@@ -1,6 +1,6 @@
-"""Pure scheduling helpers for the work orchestrator (see `ORCHESTRATOR.md` §2.3–2.5).
+"""Pure scheduling helpers for the work scheduler (see `SCHEDULER.md` §2.3–2.5).
 
-The orchestrator loop in `server.mojo` owns the I/O (subprocess dispatch, engine
+The scheduler loop in `server.mojo` owns the I/O (subprocess dispatch, engine
 calls, the queue file); this module holds the **pure decision logic** at its seams so
 each can be unit-tested hermetically (`test/scheduler_test.mojo`):
 
@@ -29,7 +29,7 @@ comptime KIND_INDEX = "index"
 comptime KIND_FINALIZE = "finalize"
 comptime KIND_BACKFILL = "backfill"
 # The first-run sample-data import: ONE item that downloads + unpacks the demo vault
-# (via flare's HttpClient, off-reactor in the orchestrator loop), then enqueues a
+# (via flare's HttpClient, off-reactor in the scheduler loop), then enqueues a
 # normal index run over it. Not an index kind (no engine); runs at index priority so
 # it's picked ahead of backfill. See server.mojo `_run_demo_download_item`.
 comptime KIND_DEMO = "demo-download"

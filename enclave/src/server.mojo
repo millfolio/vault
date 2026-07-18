@@ -1,12 +1,12 @@
 """server — enclave over HTTP (flare). The local backend for enclave-web (web/).
 
-Runs the SAME vault orchestrator the CLI does, on localhost:10000, behind one route:
+Runs the SAME vault harness the CLI does, on localhost:10000, behind one route:
 
     POST /chat   { "message": <question> }  ->  { "reply": <answer> }
     GET  /health
     OPTIONS *    (CORS preflight, so the browser app on :5173 can call us)
 
-Single-threaded reactor — one task in flight at a time. The orchestrator lives
+Single-threaded reactor — one task in flight at a time. The harness lives
 in a heap `EnclaveState` reached through a pointer so the borrowed-self handler
 can still run `mut` codegen (mirrors inference-server/server.mojo).
 
@@ -31,7 +31,7 @@ comptime PORT = 10000
 
 
 struct EnclaveState(Movable):
-    """The vault orchestrator + vault dir, loaded once and reached by the
+    """The vault harness + vault dir, loaded once and reached by the
     (borrowed-self) handler through a pointer so `run_vault_task` can still take
     `mut self`. `/chat` always runs `run_vault_task` over `vault_dir`."""
 
@@ -160,7 +160,7 @@ struct Api(Copyable, Handler, Movable):
 def main() raises:
     var cfg = load_config()
 
-    # VAULT-ONLY: build the vault orchestrator over the resolved vault dir
+    # VAULT-ONLY: build the vault harness over the resolved vault dir
     # (ENCLAVE_VAULT_DIR / $MILLFOLIO_VAULT / $ENCLAVE_DATA / ~/millfolio) and route
     # /chat to run_vault_task.
     var vault_dir = resolve_vault_dir()

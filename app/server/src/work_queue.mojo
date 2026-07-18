@@ -1,4 +1,4 @@
-"""Disk-backed **work queue** for the orchestrator (see `ORCHESTRATOR.md` §2.1–2.2).
+"""Disk-backed **work queue** for the scheduler (see `SCHEDULER.md` §2.1–2.2).
 
 This module is now a **thin facade over the storage seam** (`vault.storage`, promoted
 to `vault/core` in Phase 2 slice B1 — see `STORAGE.md`). It keeps the public `wq_*` API

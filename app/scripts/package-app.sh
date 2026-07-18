@@ -11,7 +11,7 @@
 # `.mojo` source shipped for the app server.
 #
 # The binary is built here with the SAME `mojo build` invocation the installer
-# used (Bootstrapper.installAppServer): its own src + the enclave orchestrator
+# used (Bootstrapper.installAppServer): its own src + the enclave harness
 # source + the vendored flare/json/jinja2/logging siblings + the vault pkgs/*.mojoc
 # (in-process `from vault.derive.store import …`). Its rpath is relocated to a
 # device-relative @loader_path (the CI machine's $CONDA_PREFIX/lib is absent on the

@@ -8,7 +8,7 @@ deterministic parts):
   • POST /api/categories/preview   — dry-run edited rules (validation loop).
   • GET  /api/backfill/status      — per-AI-tag backfill progress.
   • POST /api/backfill/run         — run ONE bounded backfill slice via the engine.
-  • POST /api/{orchestrator,backfill}/{pause,resume,priority} — the global throttle.
+  • POST /api/{scheduler,backfill}/{pause,resume,priority} — the global throttle.
   • POST /api/tags/preview-ai      — time-boxed preview of an AI rule.
   • POST /api/tags/add             — append a keyword|AI rule + retag.
   • GET  /api/tags/missing-defaults, POST /api/tags/add-defaults — built-in defaults.
@@ -43,7 +43,7 @@ from vault.derive.store import (
 from osutil import _is_demo, _engine_url, _epoch_s
 from httputil import _cors, _forbidden
 from events import json_escape
-from work_orchestrator import _append_operation
+from scheduler_loop import _append_operation
 
 
 def _record_retag_op(detail: String, changed: Int):

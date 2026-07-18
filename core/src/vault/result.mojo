@@ -44,7 +44,7 @@ from vault.tools.tools import money
 # `RESULT_SENTINEL + <json> + "\n"` line on fd 1 (unbuffered raw write(2), like
 # `progress()`). \x1f (US) can't appear in a normal answer, so it can't be spoofed
 # by ordinary text. THREE copies of this literal must stay in lockstep: here, the
-# orchestrator (enclave, which strips it from the captured answer + captures it
+# harness (enclave, which strips it from the captured answer + captures it
 # separately), and the app server (which attaches it to the message event).
 comptime RESULT_SENTINEL = "\x1f@@result@@\x1f"
 

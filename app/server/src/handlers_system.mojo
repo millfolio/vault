@@ -63,7 +63,7 @@ def handle_health() raises -> Response:
 # access log in noise, so they're skipped (a page load / chat / model query is the
 # meaningful "access").
 comptime _ACCESS_SKIP = String(
-    " /api/gpu /api/backfill/status /api/orchestrator/queue"
+    " /api/gpu /api/backfill/status /api/scheduler/queue"
     " /api/index/status /health /api/model /favicon.svg /favicon.png "
 )
 

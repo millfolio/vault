@@ -2,7 +2,7 @@
 
 The Vault/Files indexing surface + the durable operations history:
   • GET  /api/operations          — the durable history of COMPLETED runs (jsonl).
-  • GET  /api/orchestrator/queue  — the work-queue contents (running + pending).
+  • GET  /api/scheduler/queue  — the work-queue contents (running + pending).
   • POST /api/index               — index an arbitrary local folder/file (tracked).
   • GET  /api/index/status        — the folder-index job's progress.
   • GET  /api/index/folders       — the tracked-folders registry.
@@ -12,15 +12,15 @@ The Vault/Files indexing surface + the durable operations history:
 The on-device indexer keys its store on the common-ancestor of the paths it's
 handed and rebuilds when that base shifts, so index/reindex always run the UNION
 of every tracked path (see handle_index). One job at a time; the actual index
-steps run as subprocesses through the work orchestrator.
+steps run as subprocesses through the work scheduler.
 
 Phase-1B slice 2: pure moves of the `Api.handle_*` methods (and the inline
-`/api/index/status` + `/api/orchestrator/queue` + `/api/index/folders` route
+`/api/index/status` + `/api/scheduler/queue` + `/api/index/folders` route
 bodies, now free `handle_*` functions) plus the index/tracked-folders helper
 cluster. None deref `self.st`; the `self`-qualified helper calls resolve to the
 already-extracted leaf modules (`osutil`, `httputil`, `events`, `store`,
-`vault.storage`, `work_orchestrator`, `scheduler`, `work_queue`, `handlers_demo`).
-`work_orchestrator` never imports this module, and `handlers_demo` doesn't either,
+`vault.storage`, `scheduler_loop`, `scheduler`, `work_queue`, `handlers_demo`).
+`scheduler_loop` never imports this module, and `handlers_demo` doesn't either,
 so it stays acyclic. `server._route` now delegates here.
 
 Five write-only/never-called path helpers (`_index_state_path`, `_index_pid_path`,
@@ -42,7 +42,7 @@ from vault.storage import (
     DOC_INDEXED_PATHS,
     expand_home,
 )
-from work_orchestrator import (
+from scheduler_loop import (
     _finalize_index_op,
     _start_index_run,
     _write_tracked,
@@ -84,13 +84,13 @@ def handle_operations() raises -> Response:
     )
 
 
-def handle_orchestrator_queue() raises -> Response:
-    """GET /api/orchestrator/queue → the work-queue contents (running + pending) so
+def handle_scheduler_queue() raises -> Response:
+    """GET /api/scheduler/queue → the work-queue contents (running + pending) so
     Operations can show what's queued behind the running job. Empty in the demo.
     """
     if _is_demo():
         return _cors(ok_json('{"items":[]}'))
-    return _cors(ok_json(_orchestrator_queue_json()))
+    return _cors(ok_json(_scheduler_queue_json()))
 
 
 def handle_index_status() raises -> Response:
@@ -240,8 +240,8 @@ def _tracked_paths_path() -> String:
     return _config_dir() + "/indexed-paths.json"  # the tracked-folders registry
 
 
-def _orchestrator_queue_json() raises -> String:
-    """GET /api/orchestrator/queue → {"items":[…]} — the work-queue contents (pending
+def _scheduler_queue_json() raises -> String:
+    """GET /api/scheduler/queue → {"items":[…]} — the work-queue contents (pending
     + running) so Operations can show what's queued behind the running job. Ordered
     running-first (the active job), then pending in run-order (priority, then FIFO —
     the order `wq_list` returns). Payloads are shortened to a basename/count so no
@@ -310,7 +310,7 @@ def _index_status_json() raises -> String:
 
 # ── tracked-folders registry ──────────────────────────────────────────────────
 # A durable, append-only log of COMPLETED index/reindex/backfill runs lives in
-# operations.jsonl (recorded lazily by the work orchestrator); the tracked-folders
+# operations.jsonl (recorded lazily by the work scheduler); the tracked-folders
 # registry below is what index/reindex read to compute the union to re-embed.
 
 

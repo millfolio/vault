@@ -14,7 +14,7 @@ function stubFetch(apikey: unknown) {
       const url = String(input);
       if (url.includes("/api/settings/apikey")) return json(apikey);
       if (url.includes("/api/index/status")) return json({ state: "idle", detail: "" });
-      if (url.includes("/api/orchestrator/queue")) return json({ items: [] });
+      if (url.includes("/api/scheduler/queue")) return json({ items: [] });
       if (url.includes("/api/backfill/status"))
         return json({ status: "idle", paused_until: 0, priority: "medium", perTag: [], pendingTotal: 0 });
       if (url.includes("/api/gpu")) return json({ util: 12, mem: 40, disk: 55 });

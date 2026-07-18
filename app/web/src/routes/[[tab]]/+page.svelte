@@ -449,7 +449,7 @@
     } catch {}
     // Work queue: running kind + queued-behind count for the status-bar ops chip.
     try {
-      const r = await fetch("/api/orchestrator/queue");
+      const r = await fetch("/api/scheduler/queue");
       if (r.ok) {
         const d = await r.json();
         const items = (d.items ?? []) as { kind: string; state: string }[];
@@ -497,7 +497,7 @@
     bytesDone?: number;
     bytesTotal?: number;
     current?: number; // indexing phase: files done…
-    total?: number; //  …of this many (the demo import mirrors the orchestrator)
+    total?: number; //  …of this many (the demo import mirrors the scheduler)
   } | null>(null);
   let demoReady = $state(false);
   let demoImportTimer: ReturnType<typeof setTimeout> | undefined;

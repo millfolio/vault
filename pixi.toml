@@ -132,7 +132,7 @@ test-procversion = { cmd = "mkdir -p build && rm -rf build/procversion-data && M
 test-golden = { cmd = "mkdir -p build && mojo build core/test/index/golden_output_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/golden-test && ./build/golden-test" }
 # Gate: the PER-FILE / finalize refactor — build_index factored into index_one_file
 # (one file, committed) + finalize_index (prune + reconcile + retag) so the app-server
-# orchestrator can pause between files. Drives the FULL index end-to-end (needs the
+# scheduler can pause between files. Drives the FULL index end-to-end (needs the
 # lancedb store) via the MILLFOLIO_FAKE_EMBED hook (deterministic unit vectors, no
 # embed endpoint), asserting: N per-file steps + finalize == one build_index BYTE-FOR-
 # BYTE (manifest/transactions/chunks), a single step leaves a consistent partial index,

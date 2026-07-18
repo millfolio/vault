@@ -8,7 +8,7 @@ global**.
 
 ### Code layout (where the pieces live)
 
-The orchestrator is split across small modules over `vault.storage`, all imported
+The scheduler is split across small modules over `vault.storage`, all imported
 by `server.mojo` (which keeps only the HTTP surface). The dependency graph is
 acyclic — none of these import `server.mojo`:
 
@@ -17,16 +17,16 @@ acyclic — none of these import `server.mojo`:
 | `work_queue.mojo` | the disk-backed `WorkItem` queue facade (`wq_*`) over `vault.storage` |
 | `scheduler.mojo` | the PURE scheduling seams (enqueue plan, queue-derived status, pause/query gating, reconcile predicate, backfill readiness) — unit-tested, no I/O |
 | `runqueue.mojo` | the interactive chat/ask FIFO ticket (the "a query is running" signal) |
-| **`work_orchestrator.mojo`** | **the orchestrator RUNTIME: the `_orchestrator_worker` pthread loop (§2.3) + its job runners (`_run_index_item`/`_run_index_child`/`_run_demo_download_item`/`_demo_fetch_and_unpack`), the boot/loop `_reconcile_stale` (§2.5), the `_start_index_run` generator (§2.1), and the index/demo run STATE + OPERATIONS-recording helpers those read/write (markers, `operations.jsonl` append, `_finalize_index_op`).** |
+| **`scheduler_loop.mojo`** | **the scheduler RUNTIME: the `_scheduler_worker` pthread loop (§2.3) + its job runners (`_run_index_item`/`_run_index_child`/`_run_demo_download_item`/`_demo_fetch_and_unpack`), the boot/loop `_reconcile_stale` (§2.5), the `_start_index_run` generator (§2.1), and the index/demo run STATE + OPERATIONS-recording helpers those read/write (markers, `operations.jsonl` append, `_finalize_index_op`).** |
 
 `server.mojo` still **spawns** the loop
-(`ThreadHandle.spawn[_orchestrator_worker]`) at startup and runs the boot
-`_reconcile_stale()`. The **HTTP handlers** (`/api/orchestrator/*`,
+(`ThreadHandle.spawn[_scheduler_worker]`) at startup and runs the boot
+`_reconcile_stale()`. The **HTTP handlers** (`/api/scheduler/*`,
 `/api/index|reindex`, `/api/demo/download`) + the **status-JSON builders**
-(`_index_status_json`, `_demo_status_json`, `_orchestrator_queue_json`, …) live in
+(`_index_status_json`, `_demo_status_json`, `_scheduler_queue_json`, …) live in
 `handlers_operations.mojo` / `handlers_demo.mojo` (the Phase-1B per-domain carve-up;
 `server.mojo` is only the route dispatcher + `main()`) — those
-call into `work_orchestrator`'s enqueue/run/state helpers. Global **pause + priority**
+call into `scheduler_loop`'s enqueue/run/state helpers. Global **pause + priority**
 + the readiness/backfill drain live in `vault.derive.store`
 (`is_paused`/`get_priority`/`nap_ms_for_priority`/`ml_backfill_slice`).
 
@@ -52,7 +52,7 @@ patches over a missing abstraction. The user-facing controls are also fragmented
 *all* background engine work; and the state is split across the **System**,
 **Backfill**, and **Operations** panels.
 
-The fix is a single **orchestrator**: work generators enqueue **work items**; one
+The fix is a single **scheduler**: work generators enqueue **work items**; one
 scheduler decides what runs next based on the queue + global config; exactly one
 background job touches the engine at a time; interactive queries take precedence.
 
@@ -94,7 +94,7 @@ background job touches the engine at a time; interactive queries take precedence
 ### 2.1 Work items
 
 A work item is a small, serializable record. Both generators produce the same shape
-so the orchestrator treats them uniformly.
+so the scheduler treats them uniformly.
 
 ```
 WorkItem {
@@ -112,7 +112,7 @@ WorkItem {
   spawning directly; they **enumerate the files (the tracked-paths union) and enqueue
   one `index` item per file** (embed *this file* → its chunks + txn rows + manifest
   row), plus a final **finalize** item that settles the manifest once all file items
-  complete. Per-file granularity is deliberate: the orchestrator re-checks
+  complete. Per-file granularity is deliberate: the scheduler re-checks
   pause/priority **at each file boundary** — exactly like backfill between
   generation-groups — so a re-index can be **paused, or yield to an interactive query,
   between files** instead of only after the whole run. Re-requests coalesce/dedup by
@@ -129,7 +129,7 @@ WorkItem {
 
 We already have a **disk-backed FIFO** in `runqueue.mojo` — a per-port ticket
 counter that serializes chat/ask runs and survives process death (state in a file,
-`MILLFOLIO_RUNQ_PATH`). The orchestrator's work queue is the same idea, **generalized
+`MILLFOLIO_RUNQ_PATH`). The scheduler's work queue is the same idea, **generalized
 from an integer ticket to a small list of `WorkItem` records**:
 
 - Persisted next to the other index state under `_config_dir()` (e.g.
@@ -140,11 +140,11 @@ from an integer ticket to a small list of `WorkItem` records**:
   `runqueue.mojo` (a torn write is recoverable; unit-tested like
   `test/runqueue_test.mojo`).
 - Interactive chat/ask keeps its **own** fast ticket queue (latency-sensitive, no
-  disk round-trip per token). The orchestrator simply treats "a query is running" as
+  disk round-trip per token). The scheduler simply treats "a query is running" as
   a top-priority signal to pause background work (see §2.4). We do **not** funnel
   every chat token through the work queue.
 
-### 2.3 The orchestrator loop
+### 2.3 The scheduler loop
 
 A single loop (replacing the independent `_backfill_worker` poll) owns all background
 engine work:
@@ -173,18 +173,18 @@ loop:
 ### 2.4 Global config — pause + priority (moved out of Backfill)
 
 Today `set_pause`/`get_priority` gate only the backfill thread
-(`/api/backfill/pause`, `/api/backfill/priority`). They become **orchestrator-global**:
+(`/api/backfill/pause`, `/api/backfill/priority`). They become **scheduler-global**:
 
 - **Pause** — `paused_until` halts *all* background work (index *and* backfill). The
   "Pause for 1 hr" control sets `paused_until = now + 1h`. A queued index item simply
   waits; interactive chat/ask is **never** paused (queries always run).
 - **Priority** — a single global setting (`low`/`normal`/`high`) governs how
-  aggressively the orchestrator runs background work: the idle/inter-slice nap
+  aggressively the scheduler runs background work: the idle/inter-slice nap
   (`nap_ms_for_priority`) and whether it leaves GPU-idle gaps (laptop stays usable on
   `low`) or runs near back-to-back (`high`). **Class priority** (interactive > index
   > backfill) is fixed and separate from this user knob.
 - Endpoints migrate: `/api/backfill/pause` + `/api/backfill/priority` →
-  `/api/orchestrator/pause` + `/api/orchestrator/priority` (keep the old routes as
+  `/api/scheduler/pause` + `/api/scheduler/priority` (keep the old routes as
   thin aliases for one release).
 
 ### 2.5 Running marker + staleness detection
@@ -240,14 +240,14 @@ Each step is shippable on its own; we already did Phase 0.
 - **Phase 0 (done)** — point-fixes: backfill yields to `_index_running()`; PID-liveness
   guard + boot reconciliation; `fmtDur` clamp; tag names in backfill ops.
 - **Phase 1 — global pause/priority.** Rename backfill pause/priority to
-  orchestrator-global; make the index path also respect `paused_until`. Move the
+  scheduler-global; make the index path also respect `paused_until`. Move the
   controls into Operations. (Small; no queue yet.)
 - **Phase 2 — the work queue.** Generalize `runqueue.mojo` into `work_queue`
   (`WorkItem` list, `wq_*` API, unit tests). Index + backfill generators enqueue
   instead of running directly.
-- **Phase 3 — the orchestrator loop.** Replace `_backfill_worker`'s free poll with the
+- **Phase 3 — the scheduler loop.** Replace `_backfill_worker`'s free poll with the
   single loop (§2.3); one background job at a time; running marker generalized from
-  `.index.pid`. **(Later isolated into `work_orchestrator.mojo` — see "Code layout"
+  `.index.pid`. **(Later isolated into `scheduler_loop.mojo` — see "Code layout"
   above — lifting the loop + job runners + run-state/operations helpers out of the
   `server.mojo` god-file with zero behaviour change; `server.mojo` imports them back.)**
 - **Phase 4 — UI unification.** Absorb System + Backfill into Operations; surface
@@ -260,7 +260,7 @@ Each step is shippable on its own; we already did Phase 0.
 ## 5. Open questions
 
 - **Preemption granularity** — both generators are now sliced: backfill per
-  generation-group, **index per file**, so the orchestrator can pause or yield to a
+  generation-group, **index per file**, so the scheduler can pause or yield to a
   query at each file boundary. The remaining edge is a **single very large file** (e.g.
   the 554-chunk `Jan 01 2025 – Jul 01 2026.csv`): one file is still one indivisible
   unit, so a pause can wait up to one big-file embed. If that proves too coarse, slice

@@ -23,7 +23,7 @@ while IFS= read -r q; do
   mark=$(wc -l < "$LOG")
   curl -fs --max-time 120 -H 'Content-Type: application/json' \
     -d "{\"message\": \"$q\"}" "http://127.0.0.1:$PORT/chat" >/dev/null 2>&1 || true
-  # The orchestrator's FIRST replay call per question is the codegen (manifest is not a
+  # The harness's FIRST replay call per question is the codegen (manifest is not a
   # replay call); fixes come after. So the first HIT key after our request is codegen.
   key="$(tail -n +$((mark+1)) "$LOG" | grep -aoE '\[replay\] HIT  [0-9a-f]{12}' | head -1 | awk '{print $3}')"
   f="$(ls "$CACHE/$key"*.mojo 2>/dev/null | head -1)"

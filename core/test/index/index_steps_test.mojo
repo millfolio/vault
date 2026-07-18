@@ -1,6 +1,6 @@
 """Index-steps parity — the SAFETY NET for the per-file / finalize refactor.
 
-`build_index` was factored into per-file steps so the app-server orchestrator can
+`build_index` was factored into per-file steps so the app-server scheduler can
 drive indexing one file at a time (pausable between files): the whole-directory
 build is now exactly `_prepare_index_run` → `index_one_file` per candidate →
 `finalize_index`. This test pins that the sliced path stays behaviourally

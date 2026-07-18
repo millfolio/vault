@@ -2,7 +2,7 @@
 name = "millfolio-server"
 version = "0.0.1"
 authors = ["Marius S <marius@seritan.net>"]
-description = "Millfolio app backend — HTTP server over the enclave vault orchestrator."
+description = "Millfolio app backend — HTTP server over the enclave vault harness."
 # Same org nightly as enclave/flare/json/jinja2.mojo, so the cross-repo `-I`
 # includes resolve against one toolchain.
 channels = [
@@ -32,7 +32,7 @@ flare-ffi = "bash -c 'source ../../../flare/flare/tls/ffi/build.sh; source ../..
 # Compile the server. Serves BOTH the unary HTTP API and the streaming WebSocket
 # chat on one :10000 listener (flare's serve(handler, ws_handler)). `-I src`
 # resolves the sibling events.mojo (WS event serialization); imports the enclave
-# orchestrator (wiring/orchestrator/settings/vaultcfg) via -I ../../enclave/src,
+# harness (wiring/harness/settings/vaultcfg) via -I ../../enclave/src,
 # plus flare/json/jinja2. `-I ../../core/src` pulls vault.derive.store (the
 # LanceDB-free registry/tags/retag store — same functions the `millfolio` CLI uses,
 # so /api/tags + category edits run IN-PROCESS, no spawning the engine binary). The
@@ -52,7 +52,7 @@ test-record-builders = { cmd = "mkdir -p build && mojo build test/record_builder
 test-logstore = { cmd = "mkdir -p build && mojo build test/log_store_test.mojo -I src -I ../../core/src -I ../../../flare -I ../../../json -o build/logstore-test && rm -f /tmp/millfolio-logstore-test.jsonl /tmp/millfolio-logstore-test-ops.jsonl && ./build/logstore-test" }
 # Unit-test the KV / small-marker storage seam (storage.mojo — KvStore) — get/set/delete/exists over a temp MILLFOLIO_DATA_DIR.
 test-kvstore = { cmd = "mkdir -p build && mojo build test/kv_store_test.mojo -I src -I ../../core/src -I ../../../flare -I ../../../json -o build/kvstore-test && rm -rf /tmp/millfolio-kvstore-test && mkdir -p /tmp/millfolio-kvstore-test && MILLFOLIO_DATA_DIR=/tmp/millfolio-kvstore-test ./build/kvstore-test; rm -rf /tmp/millfolio-kvstore-test" }
-# Unit-test the pure orchestrator seams (scheduler.mojo) — enqueue plan, queue-derived
+# Unit-test the pure scheduler seams (scheduler.mojo) — enqueue plan, queue-derived
 # status, pause/query gating, reconcile predicate, backfill readiness.
 test-scheduler = { cmd = "mkdir -p build && mojo build test/scheduler_test.mojo -I src -I ../../core/src -I ../../../flare -o build/scheduler-test && ./build/scheduler-test" }
 # Unit-test the pure API-key helpers (apikey.mojo) — validation + last-4 masking + status JSON.

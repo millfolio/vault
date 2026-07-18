@@ -125,7 +125,7 @@ def _strip_fences(var s: String) raises -> String:
 
 def _mock_program() -> String:
     """Canned 'generated' program: count non-empty data rows in the CSV at the
-    `__DATA_CSV__` placeholder (the orchestrator injects the real path)."""
+    `__DATA_CSV__` placeholder (the harness injects the real path)."""
     var s = String("def main() raises:\n")
     s += "    var text: String\n"
     s += '    with open("__DATA_CSV__", "r") as f:\n'
@@ -262,7 +262,7 @@ struct LocalClient(Movable):
 
 struct Generated(Movable):
     """A code-generation result: the code + the token cost (from the remote API's
-    usage; 0 for mock). The orchestrator charges the Budget by `tokens`."""
+    usage; 0 for mock). The harness charges the Budget by `tokens`."""
 
     var code: String
     var tokens: Int

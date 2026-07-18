@@ -1,8 +1,8 @@
-"""Unit test for the pure orchestrator seams (src/scheduler.mojo).
+"""Unit test for the pure scheduler seams (src/scheduler.mojo).
 
 Build + run via pixi:  pixi run test-scheduler
 
-Covers the decision logic the orchestrator loop relies on, hermetically (no queue
+Covers the decision logic the scheduler loop relies on, hermetically (no queue
 file, no engine, no disk):
   - index_run_plan: prepare → per-file index → finalize, correct payloads + prio
   - split_payload: round-trips the tab-joined payloads
@@ -50,7 +50,7 @@ def _running(kind: String, payload: String, pid: Int) -> WorkItem:
 
 
 def main() raises:
-    print("scheduler_test — pure orchestrator seams")
+    print("scheduler_test — pure scheduler seams")
     var fails = 0
 
     # ── index_run_plan ─────────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ def main() raises:
     )
     fails += expect(parse_pending_total('{"status":"idle"}') == 0, "absent → 0")
 
-    # ── payload shortening (for /api/orchestrator/queue) ───────────────────────
+    # ── payload shortening (for /api/scheduler/queue) ───────────────────────
     fails += expect(basename("/v/sub/a.csv") == "a.csv", "basename strips dirs")
     fails += expect(basename("a.csv") == "a.csv", "basename no-slash → itself")
     fails += expect(

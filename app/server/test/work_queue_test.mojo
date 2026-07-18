@@ -3,7 +3,7 @@
 Build + run via pixi:  pixi run test-workqueue
 (the task points MILLFOLIO_WORKQ_PATH at a throwaway temp file).
 
-Covers the invariants the orchestrator will rely on:
+Covers the invariants the scheduler will rely on:
   - enqueue assigns increasing ids; wq_list returns them
   - priority + FIFO: peek returns lowest prio, ties by enq_at then id
   - dedup: an identical (kind, payload) that's pending/running coalesces

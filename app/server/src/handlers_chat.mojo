@@ -1,6 +1,6 @@
 """handlers_chat — the chat surface: the unary `/chat` handler + the WS ask loop.
 
-The two ways a question reaches the vault orchestrator:
+The two ways a question reaches the vault harness:
   • POST /chat      — one-shot: run the full codegen loop, return `{ "reply": … }`.
   • WS   (Upgrade)  — streaming chat: status/debug/approval/message events per
                       stage, the sandbox run gated on the user's approval, plus
@@ -16,7 +16,7 @@ Behaviour is identical. server.mojo keeps only the route dispatcher + `main()`,
 and wires `srv.config.ws_handler = handlers_chat.on_connect`.
 
 Acyclic like every handler module: imports `state` + the leaf seams
-(`osutil`/`auth`/`httputil`/`events`/`runqueue`/`vault.storage`/`work_orchestrator`),
+(`osutil`/`auth`/`httputil`/`events`/`runqueue`/`vault.storage`/`scheduler_loop`),
 never `server`.
 """
 
@@ -44,8 +44,8 @@ from runqueue import runq_take, runq_peek, runq_done
 # The stats + ask history stores — the two JSONL sinks the chat WS loop appends to.
 from vault.storage import default_stats_store, default_asks_store
 
-# The poll-loop sleep shared with the work orchestrator's scheduler loop.
-from work_orchestrator import _usleep
+# The poll-loop sleep shared with the scheduler loop.
+from scheduler_loop import _usleep
 
 # The category tag NAMES + scope notes the chat WS loop surfaces to codegen (never
 # the keyword RULES — those stay on-device).
@@ -148,7 +148,7 @@ def handle_chat(
     st: UnsafePointer[MillfolioState, MutUntrackedOrigin], req: Request
 ) raises -> Response:
     """POST /chat — one-shot: run the private-vault codegen loop over the served
-    vault dir and return the answer. Needs the long-lived orchestrator off
+    vault dir and return the answer. Needs the long-lived harness off
     `MillfolioState`, so it takes the state pointer (like `handle_vault`)."""
     ref s = st[]
     var msg = _extract_message(req.text())
@@ -393,7 +393,7 @@ def on_connect(mut conn: WsConnection) raises:
     One WS connection = one chat session: stream a status/debug event per stage and
     gate the sandbox run on the user's approval (the blocking `recv()` IS the pause).
 
-    flare's WS handler is THIN (non-capturing), so it builds the orchestrator per
+    flare's WS handler is THIN (non-capturing), so it builds the harness per
     connection — fine for a local single-user server. Events are ServerEvent JSON,
     one per text frame (see ../../protocol/events.ts / events.mojo)."""
     # Same-origin gate. Browsers don't apply the same-origin policy to ws://
@@ -903,10 +903,10 @@ def on_connect(mut conn: WsConnection) raises:
         )
         runq_done(ticket)  # leave the run slot → next waiter proceeds
         log("[run] queue slot released")
-        # AI-tag backfill is NOT run inline here anymore: the work orchestrator owns ALL
+        # AI-tag backfill is NOT run inline here anymore: the scheduler owns ALL
         # background engine work (one job at a time), so firing a slice from the query
         # path would bypass its serialization and re-introduce index/backfill contention.
-        # With the run slot released, the orchestrator picks up any pending backfill on
+        # With the run slot released, the scheduler picks up any pending backfill on
         # its next idle tick.
     except e:
         conn.send_text(error_event(String(e)))

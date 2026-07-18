@@ -2,7 +2,7 @@
 
 Migrated from headgate/src/server.mojo. The vault brains stay in headgate; this
 server imports them as a library via `-I ../../headgate/src` (build wired in
-pixi.toml + ../../.github/workflows/server.yml). Runs the SAME vault orchestrator
+pixi.toml + ../../.github/workflows/server.yml). Runs the SAME vault harness
 the CLI does, on localhost:10000, behind:
 
     POST /chat        { "message": <question> }  ->  { "reply": <answer> }
@@ -12,7 +12,7 @@ the CLI does, on localhost:10000, behind:
     WS   (Upgrade)    ->  streaming chat (status/approval/debug/message events)
     OPTIONS *         (CORS preflight, so a web app on another port can call us)
 
-Single-threaded reactor — one task in flight at a time. The orchestrator lives
+Single-threaded reactor — one task in flight at a time. The harness lives
 in a heap `MillfolioState` reached through a pointer so the borrowed-self handler
 can still run `mut` codegen.
 
@@ -48,12 +48,12 @@ from settings import load_config
 from wiring import build_vault_harness
 from runqueue import runq_reset
 
-# The work orchestrator's runtime (Phase 3 slice): the scheduler loop + its job
+# The scheduler's runtime (Phase 3 slice): the scheduler loop + its job
 # runners live in their own module. server.mojo keeps the composition root and imports
-# the spawn entry point (`_orchestrator_worker`) and the boot reconcile
+# the spawn entry point (`_scheduler_worker`) and the boot reconcile
 # (`_reconcile_stale`). The per-domain handler modules import the rest of the
-# orchestrator's state/op readers. work_orchestrator never imports server.mojo (acyclic).
-from work_orchestrator import _orchestrator_worker, _reconcile_stale
+# scheduler's state/op readers. scheduler_loop never imports server.mojo (acyclic).
+from scheduler_loop import _scheduler_worker, _reconcile_stale
 
 from vaultcfg import vault_dir as resolve_vault_dir
 from state import MillfolioState
@@ -196,8 +196,8 @@ struct Api(Copyable, Handler, Movable):
             return handlers_operations.handle_operations()
         # The work-queue contents (running + pending) so Operations can show what's
         # queued behind the running job. Read-only; empty in the demo.
-        if path == "/api/orchestrator/queue":
-            return handlers_operations.handle_orchestrator_queue()
+        if path == "/api/scheduler/queue":
+            return handlers_operations.handle_scheduler_queue()
         if path == "/api/index/folders":
             return handlers_operations.handle_index_folders()
         if req.method == Method.POST and path == "/api/index/reindex":
@@ -261,15 +261,15 @@ struct Api(Copyable, Handler, Movable):
             return handlers_tags.handle_backfill_status()
         if path == "/api/backfill/run":
             return handlers_tags.handle_backfill_run()
-        # Pause + priority are now ORCHESTRATOR-GLOBAL (govern index AND backfill).
-        # `/api/orchestrator/*` are the canonical routes; the `/api/backfill/*` ones
+        # Pause + priority are now SCHEDULER-GLOBAL (govern index AND backfill).
+        # `/api/scheduler/*` are the canonical routes; the `/api/backfill/*` ones
         # remain as thin aliases (both hit the same global controller) for one release.
-        if path == "/api/orchestrator/pause" or path == "/api/backfill/pause":
+        if path == "/api/scheduler/pause" or path == "/api/backfill/pause":
             return handlers_tags.handle_backfill_pause(req)
-        if path == "/api/orchestrator/resume" or path == "/api/backfill/resume":
+        if path == "/api/scheduler/resume" or path == "/api/backfill/resume":
             return handlers_tags.handle_backfill_resume()
         if (
-            path == "/api/orchestrator/priority"
+            path == "/api/scheduler/priority"
             or path == "/api/backfill/priority"
         ):
             return handlers_tags.handle_backfill_priority(req)
@@ -312,9 +312,9 @@ struct Api(Copyable, Handler, Movable):
 
 def main() raises:
     # `--fetch-demo <url> <dest>`: NOT the server — a one-shot download helper we re-exec
-    # as a SEPARATE PROCESS from the orchestrator loop (see `_demo_fetch_and_unpack`), so
+    # as a SEPARATE PROCESS from the scheduler loop (see `_demo_fetch_and_unpack`), so
     # the sample-vault zip's flare GET runs off the serving reactor. Do the fetch + exit
-    # before any server/orchestrator setup (never binds the port). The parent reads
+    # before any server/scheduler setup (never binds the port). The parent reads
     # success from the written file, so the return value is advisory only.
     var cli = argv()
     if len(cli) >= 2 and String(cli[1]) == "--fetch-demo":
@@ -333,7 +333,7 @@ def main() raises:
         pass
 
     var cfg = load_config()
-    # The `/chat` orchestrator is built once here from this cfg, so seed it from
+    # The `/chat` harness is built once here from this cfg, so seed it from
     # the in-app key store too (the WS ask path re-loads per connection). A key
     # pasted later still lands via the per-connection reload on the WS path.
     _apply_persisted_apikey(cfg)
@@ -366,7 +366,7 @@ def main() raises:
     except:
         pass
 
-    # VAULT-ONLY: build the vault orchestrator over the resolved vault dir
+    # VAULT-ONLY: build the vault harness over the resolved vault dir
     # (HEADGATE_VAULT_DIR / $MILLFOLIO_VAULT / $HEADGATE_DATA / ~/millfolio) and route
     # /chat to run_vault_task.
     var vault_dir = resolve_vault_dir()
@@ -415,21 +415,21 @@ def main() raises:
             ),
             sep="",
         )
-    # The work orchestrator: ONE detached scheduler loop drains the disk-backed work
+    # The scheduler: ONE detached scheduler loop drains the disk-backed work
     # queue — ALL background engine work (indexing + AI-tag backfill) — a single job at
     # a time, honoring the global pause + priority and yielding to interactive queries.
     # This replaces both the free-poll backfill thread and the direct index-spawn, so
-    # index and backfill can never contend for the engine (see ORCHESTRATOR.md §2.3).
+    # index and backfill can never contend for the engine (see SCHEDULER.md §2.3).
     try:
-        var mth = ThreadHandle.spawn[_orchestrator_worker](_null_ptr())
+        var mth = ThreadHandle.spawn[_scheduler_worker](_null_ptr())
         mth.detach()
         print(
-            "  work orchestrator: on (indexing + AI-tag backfill, one at a"
+            "  scheduler: on (indexing + AI-tag backfill, one at a"
             " time)"
         )
     except:
         print(
-            "  work orchestrator: could not start (index-time backfill still"
+            "  scheduler: could not start (index-time backfill still"
             " works)"
         )
     # Background weight provisioner: ensure the required embedding model + a default

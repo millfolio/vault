@@ -17,7 +17,7 @@ Phase-1B slice 2: pure moves of the `Api.handle_model_*` methods (and the inline
 `handle_*` functions) plus the model helper cluster. None deref `self.st`; the
 `self`-qualified helper calls resolve to the already-extracted leaf modules
 (`osutil`, `sysmetrics`, `auth`, `httputil`, `events`, `vault.storage`,
-`work_orchestrator`). `work_orchestrator` never imports this module, so it stays
+`scheduler_loop`). `scheduler_loop` never imports this module, so it stays
 acyclic. `server._route`/`server.main` now delegate here. Behaviour is identical.
 """
 
@@ -46,7 +46,7 @@ from sysmetrics import _memory_gb
 from auth import _turnstile_sitekey, _turnstile_enabled
 from httputil import unauthorized, _cors
 from events import json_escape
-from work_orchestrator import _kv_set, _write_small
+from scheduler_loop import _kv_set, _write_small
 
 # Weight provisioning (downloads moved OUT of the installer, INTO this server).
 comptime DEFAULT_CHAT_MODEL = "Qwen/Qwen2.5-3B-Instruct"

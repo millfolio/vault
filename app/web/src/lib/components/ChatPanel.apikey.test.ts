@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import ChatPanel from "./ChatPanel.svelte";
 
 // The missing-key affordance: when codegen errors with the no-key message
-// (orchestrator _NO_REMOTE_MSG, "…set ANTHROPIC_API_KEY and retry"), the chat
+// (harness _NO_REMOTE_MSG, "…set ANTHROPIC_API_KEY and retry"), the chat
 // surfaces an inline API-key field so a stuck native-app user can fix it right
 // there. Real product only — never in the demo (its own key handling).
 

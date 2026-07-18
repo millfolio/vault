@@ -162,9 +162,9 @@ def main() raises:
             roots.append(_default_dir())  # no paths → the configured vault dir
         build_index(roots^, _embed_url(), force)
     elif cmd == "index-prepare":
-        # Run-level setup for the app-server orchestrator, BEFORE its per-file steps:
+        # Run-level setup for the app-server scheduler, BEFORE its per-file steps:
         # the fresh-vs-incremental decision (a procversion bump / changed source dir
-        # rebuilds; else a no-op). Kept a distinct step so the orchestrator drives
+        # rebuilds; else a no-op). Kept a distinct step so the scheduler drives
         #   index-prepare → index-file* → index-finalize
         # exactly as the monolithic `index` (build_index) does internally.
         #   millfolio index-prepare <base> [--force]
@@ -176,11 +176,11 @@ def main() raises:
         prepare_index_run(base, force)
         print("index-prepare ok: " + base)
     elif cmd == "index-file":
-        # Per-file entrypoint for the app-server orchestrator: index ONE file against
+        # Per-file entrypoint for the app-server scheduler: index ONE file against
         # the current persisted index and commit it (pausable between files).
         #   millfolio index-file <base> <path>
         # `base` is the vault source dir (a file's name is relative to it); a fresh
-        # rebuild / force decision is the orchestrator's, not this step's.
+        # rebuild / force decision is the scheduler's, not this step's.
         if len(args) < 4:
             print("usage: millfolio index-file <base> <path>")
             return
@@ -224,7 +224,7 @@ def main() raises:
             _search(query, k)
     elif cmd == "tags":
         # `tags`        → the effective tag NAMES, comma-joined (the codegen
-        #                 orchestrator captures this to tell the frontier model
+        #                 harness captures this to tell the frontier model
         #                 which `.tags` it can filter on — names only).
         # `tags --json` → {"tags":[{"name","keywords":[…],"count":N}]} for the UI
         #                 Tags panel (per-tag keyword rules + how many stored
@@ -233,7 +233,7 @@ def main() raises:
             print(tags_report_json())
         elif len(args) >= 3 and String(args[2]) == "--describe":
             # One tag per line, `name <TAB> description` (description may be
-            # empty) — the codegen orchestrator formats this into the prompt so
+            # empty) — the codegen harness formats this into the prompt so
             # the model picks a tag by its scope, not just its name. Applies the
             # READINESS GATE: an ML tag not yet fully backfilled is withheld so
             # codegen never filters `.tags` on it and reports a false "no X".

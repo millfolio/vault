@@ -13,7 +13,7 @@ function stubFetch() {
     vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/index/status")) return json({ state: "idle", detail: "" });
-      if (url.includes("/api/orchestrator/queue")) return json({ items: [] });
+      if (url.includes("/api/scheduler/queue")) return json({ items: [] });
       if (url.includes("/api/backfill/status"))
         return json({ status: "idle", paused_until: 0, priority: "medium", perTag: [], pendingTotal: 0 });
       if (url.includes("/api/gpu")) return json({ util: 12, mem: 40, disk: 55 });

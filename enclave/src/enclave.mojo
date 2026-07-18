@@ -8,7 +8,7 @@ Layering (pi-shaped, PRIOR-ART.md):
               \\                                      /
                wiring.mojo   build_vault_harness(cfg, vault_dir)
                                   |
-    orchestrator.mojo    core loop: codegen -> compile-fix -> run (loopback)
+    harness.mojo    core loop: codegen -> compile-fix -> run (loopback)
         |        \\
     transport.mojo       egress.mojo   (confidentiality policy)
         |
@@ -60,7 +60,7 @@ def _run_program(program_path: String, var vault_dir: String) raises:
     vault WITHOUT calling the model. Reads the program from `program_path` (the
     CLI writes a temp file for a URL / passes the local file directly), then runs
     it through the SAME compile + Seatbelt + capture path a generated program
-    takes (orchestrator.run_vault_program). No codegen, no manifest, no budget —
+    takes (harness.run_vault_program). No codegen, no manifest, no budget —
     but the program is UNTRUSTED, so it runs in the identical loopback sandbox.
     """
     var cfg = load_config()

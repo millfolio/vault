@@ -98,7 +98,7 @@ fi
 # GUI/GPU-capable account; the bgent app reaches it over loopback.
 DEMO_ENGINE_PORT="${DEMO_ENGINE_PORT:-8001}"
 export ENCLAVE_LOCAL_URL="${ENCLAVE_LOCAL_URL:-http://127.0.0.1:${DEMO_ENGINE_PORT}/v1}"
-# The orchestrator reads ENCLAVE_LOCAL_URL, but the GENERATED program's vault tools
+# The harness reads ENCLAVE_LOCAL_URL, but the GENERATED program's vault tools
 # (ask_local/search) read MILLFOLIO_LOCAL_URL / MILLFOLIO_EMBED_URL (default :8000).
 # Point those at the demo engine too, else document questions hit the dead prod :8000
 # (ConnectionRefused). The sandboxed program inherits these via the server's env.

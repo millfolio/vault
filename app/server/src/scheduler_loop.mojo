@@ -1,21 +1,21 @@
-"""work_orchestrator — the app server's background-work runtime (Phase 3 slice).
+"""scheduler_loop — the app server's background-work runtime (Phase 3 slice).
 
-Lifts the WORK ORCHESTRATOR — the single scheduler loop plus its job runners —
-out of the server.mojo god-file, completing the orchestrator's isolation (the
+Lifts the WORK SCHEDULER — the single scheduler loop plus its job runners —
+out of the server.mojo god-file, completing the scheduler's isolation (the
 queue/scheduler/runqueue seams already live in `work_queue`/`scheduler`/
-`runqueue`). This module OWNS all background engine work: the `_orchestrator_worker`
+`runqueue`). This module OWNS all background engine work: the `_scheduler_worker`
 pthread loop drains the disk-backed work queue ONE item at a time — indexing
 (prepare → per-file embed → finalize) AND AI-tag backfill AND the sample-vault
 import — honoring a global pause + priority and yielding to interactive queries,
-so index and backfill can never contend for the engine (ORCHESTRATOR.md §2.3).
+so index and backfill can never contend for the engine (SCHEDULER.md §2.3).
 
 It also owns the run STATE + OPERATIONS RECORDING the runners read/write: the
 index/demo `.state`/pid/runtotal/pending-op markers, the operations.jsonl append,
 and the `_start_index_run` generator (enumerate files → enqueue per-file items).
 
 Pure move out of server.mojo — behaviour is byte-for-byte identical. server.mojo
-still SPAWNS the loop (`ThreadHandle.spawn[_orchestrator_worker]`) and keeps the
-HTTP surface (the `/api/orchestrator/*`, `/api/index|reindex`, `/api/demo/download`
+still SPAWNS the loop (`ThreadHandle.spawn[_scheduler_worker]`) and keeps the
+HTTP surface (the `/api/scheduler/*`, `/api/index|reindex`, `/api/demo/download`
 handlers + the status-JSON builders), importing the enqueue/run/state helpers back
 from here. Acyclic: this module imports the leaf seams (work_queue, scheduler,
 runqueue, vault.storage, vault.derive.*, vault.index.manifest, osutil, store,
@@ -188,8 +188,8 @@ def _run_index_child(subcmd: String, tail_args: List[String]) -> Bool:
     return Int(rc) == 0
 
 
-def _orchestrator_worker(arg: _OpaquePtr) -> _OpaquePtr:
-    """The single background scheduler loop (ORCHESTRATOR.md §2.3). Replaces the old
+def _scheduler_worker(arg: _OpaquePtr) -> _OpaquePtr:
+    """The single background scheduler loop (SCHEDULER.md §2.3). Replaces the old
     free-poll `_backfill_worker`: it owns ALL background engine work — indexing AND
     AI-tag backfill — draining the disk-backed work queue ONE item at a time so index
     and backfill can never contend for the engine again (the §1 stall is structurally
@@ -342,7 +342,7 @@ def _abort_index_run(reason: String):
 
 
 def _maybe_enqueue_backfill():
-    """The backfill generator (ORCHESTRATOR.md §2.1): when the queue is idle, enqueue
+    """The backfill generator (SCHEDULER.md §2.1): when the queue is idle, enqueue
     ONE `backfill` slice item iff the readiness signal shows pending ML generations —
     nothing when idle. Dedup on (backfill, "slice") keeps at most one queued. The old
     free-poll ran a slice every tick regardless; this only queues real work."""
@@ -409,15 +409,15 @@ def _demo_present() -> Bool:
 
 
 def _run_demo_download_item(item: WorkItem):
-    """Dispatch the one `demo-download` work item from the orchestrator loop (off the
+    """Dispatch the one `demo-download` work item from the scheduler loop (off the
     reactor). Download + unpack the sample vault, then hand the actual indexing to the
-    orchestrator by enqueuing a normal per-file index run over `<data>/demo-vault/` —
+    scheduler by enqueuing a normal per-file index run over `<data>/demo-vault/` —
     so the per-file embedding shows in Operations like any other index. On any failure
     the demo settles to `error`. Always `wq_done`s the item (a failed download isn't
     retried — the user can hit Retry). Never raises (a loop step must not)."""
     try:
         if _demo_fetch_and_unpack():
-            # Hand off to the orchestrator: enqueue prepare → per-file index → finalize
+            # Hand off to the scheduler: enqueue prepare → per-file index → finalize
             # over the demo dir. `record_op=False` so the whole import is ONE `demo` op,
             # not a separate `index` one. The loop drains these on the next iterations,
             # and `_demo_effective_state` settles the demo to done/error from that run.
@@ -471,7 +471,7 @@ def _demo_fetch_and_unpack() raises -> Bool:
     """Fetch the hosted sample-vault zip in a SEPARATE PROCESS — re-exec THIS server
     binary in `--fetch-demo` mode so flare's blocking HTTP client runs in that child,
     NEVER on the serving reactor (an in-loop flare GET can stall the shared reactor —
-    the "History timed out" we saw). We run it from the orchestrator loop thread and
+    the "History timed out" we saw). We run it from the scheduler loop thread and
     BLOCK on it (safe — the loop is not the reactor); a written, non-empty
     `<data>/.demo-vault.zip` is the success signal (the child writes it only on a 200).
     Then unpack into `<data>/demo-vault/`. Returns True once the folder is present. The
@@ -582,7 +582,7 @@ def _index_read_state() -> String:
     """Index state, DERIVED FROM THE WORK QUEUE. While any index-family item
     (prepare/index/finalize) is queued or running, an index run is in flight →
     `indexing`. Otherwise the settled outcome is the `.index.state` file the
-    orchestrator writes on the finalize step (`done`/`error`), else `idle`. Orphaned
+    scheduler writes on the finalize step (`done`/`error`), else `idle`. Orphaned
     runs are cleared by `_reconcile_stale`, so a dead run reads back settled — no
     phantom "running" row, no PID guard needed here anymore."""
     if index_active(_wq_list_safe()):
@@ -801,10 +801,10 @@ def _norm_roots(paths: List[String]) raises -> List[String]:
 def _start_index_run(
     paths: List[String], kind: String, record_op: Bool = True
 ) -> Bool:
-    """The index generator (ORCHESTRATOR.md §2.1): instead of spawning a detached
+    """The index generator (SCHEDULER.md §2.1): instead of spawning a detached
     monolithic `millfolio index`, ENUMERATE the tracked-paths union into its candidate
     files and enqueue one `index` work item per file (dedup coalesces repeats), bracketed
-    by a `index-prepare` first and a `finalize` last. The orchestrator loop then drains
+    by a `index-prepare` first and a `finalize` last. The scheduler loop then drains
     them ONE at a time, re-checking pause/priority + yielding to queries between files.
 
     Computes the source base + file set with the SAME helpers the indexer uses
@@ -812,7 +812,7 @@ def _start_index_run(
     Stamps every path as tracked (`lastIndexed = now`), resets the run log, records the
     file total (for the `[k/M]` bar) and — when `record_op` — the pending-op marker
     (kind index|reindex). The sample-data import passes `record_op=False`: it drives the
-    SAME per-file index run through the orchestrator (so it shows in Operations), but the
+    SAME per-file index run through the scheduler (so it shows in Operations), but the
     whole download+index is recorded as ONE `demo` op instead of a separate `index` op.
     False when the run-script isn't configured or no paths were given."""
     var run_script = String(getenv("MILLFOLIO_RUN_SCRIPT", "").strip())

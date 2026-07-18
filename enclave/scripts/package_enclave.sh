@@ -6,13 +6,13 @@
 #
 # The bundle unzips to one dir:
 #
-#   enclave/    build/enclave                     (prebuilt orchestrator binary)
+#   enclave/    build/enclave                     (prebuilt harness binary)
 #                sandbox/ (Seatbelt profiles) + scripts/ + resources/ + web/dist +
 #                build/{libflare_{tls,zlib,brotli,fs}.so + their OpenSSL/zlib/brotli
 #                deps, all rpath-fixed to @loader_path}
 #
 # so the app runs build/enclave directly — no on-device source build, no
-# `.mojo` source shipped for the orchestrator. (The per-query codegen still shells
+# `.mojo` source shipped for the harness. (The per-query codegen still shells
 # `mojo build` at runtime, but against the millfolio pkgs/*.mojoc — see the app's
 # vault include paths — not enclave's own source.)
 #
@@ -35,7 +35,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLARE="${FLARE:-$ROOT/../flare}"
 JSON="${JSON:-$ROOT/../json}"
 JINJA2="${JINJA2:-$ROOT/../jinja2.mojo}"
-LOGGING="${LOGGING:-$ROOT/../logging.mojo}"   # `from logging import log` (orchestrator/sandbox)
+LOGGING="${LOGGING:-$ROOT/../logging.mojo}"   # `from logging import log` (harness/sandbox)
 OUT="${1:-$ROOT/enclave.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac   # zip runs from a temp dir — need absolute
 PREFIX="${CONDA_PREFIX:?run via pixi — need CONDA_PREFIX for the flare FFI shims + their deps}"
@@ -46,7 +46,7 @@ STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 H="$STAGE/enclave"
 
 # The precompiled vault package set (vault.mojoc etc.) — needed on the build's
-# include path for the orchestrator's in-process tag reads. Reuse a caller-built
+# include path for the harness's in-process tag reads. Reuse a caller-built
 # set (package_bundle passes PKGS) or precompile a throwaway one for standalone runs.
 PKGS="${PKGS:-}"
 if [[ -z "$PKGS" ]]; then

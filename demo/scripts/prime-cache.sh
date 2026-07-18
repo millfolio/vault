@@ -95,7 +95,7 @@ drop_entries() {  # $1: question index → delete the cache files it captured
 finalize_one() {  # $1: STACK_LOG line count BEFORE this question's replay
   # Replace the question's CODEGEN cache entry with the FINAL compiling program
   # (scratch/gen.mojo) so replay returns a program that compiles on the first try —
-  # no fix round-trip, one compile instead of two. The orchestrator's FIRST replay
+  # no fix round-trip, one compile instead of two. The harness's FIRST replay
   # call per question is the codegen (manifest isn't a replay call), so the first HIT
   # after the mark is the codegen key. Returns 0 if it finalized.
   local key f

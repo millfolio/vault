@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/svelte";
 import OperationsPanel from "./OperationsPanel.svelte";
 
 // Route the merged panel's fetches to fixtures. It polls several endpoints on mount —
-// /api/operations (history), /api/index/status (running index), /api/orchestrator/queue
+// /api/operations (history), /api/index/status (running index), /api/scheduler/queue
 // (the queue behind it), /api/backfill/status (Controls + Backfill detail), /api/gpu
 // (System stats) and /api/model. Anything not stubbed 404s and its section just hides.
 function stubFetch(opts: {
@@ -23,7 +23,7 @@ function stubFetch(opts: {
       const url = String(input);
       if (url.includes("/api/index/status")) return json(opts.indexStatus ?? { state: "idle", detail: "" });
       if (url.includes("/api/demo/status")) return json(opts.demoStatus ?? { state: "idle", detail: "" });
-      if (url.includes("/api/orchestrator/queue")) return json(opts.queue ?? { items: [] });
+      if (url.includes("/api/scheduler/queue")) return json(opts.queue ?? { items: [] });
       if (url.includes("/api/backfill/status")) {
         if (opts.backfill) return json(opts.backfill);
         return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response);
@@ -139,7 +139,7 @@ describe("OperationsPanel", () => {
   });
 
   it("shows the sample-data index phase as 'Indexing sample data — n of M files'", async () => {
-    // The demo's per-file indexing runs through the orchestrator queue, so a running
+    // The demo's per-file indexing runs through the scheduler queue, so a running
     // index item is present too — but the demo import must own the single 'Now' row
     // (the generic Index row is suppressed while importing), enriched with n/M.
     stubFetch({

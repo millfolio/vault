@@ -82,7 +82,7 @@
   // their real result automatically (same path as ↻) as soon as the vault has
   // any records — synthetic data on a real install is confusing. Empty vault →
   // keep the examples (all-zero widgets are worse onboarding). Once per page
-  // load; the orchestrator serializes the runs server-side. Skipped in the
+  // load; the harness serializes the runs server-side. Skipped in the
   // demo (its board is the hermetic localStorage chain).
   let autoComputed = false;
   async function autoComputeExamples() {

@@ -17,7 +17,7 @@ and the owner-only `_chmod` (formerly `osutil._chmod`) are inlined here — both
 self-contained (env + a libc `chmod`), and duplicating them keeps `vault.storage` free of
 any app/server import while reproducing the exact on-disk paths + file modes byte-for-byte.
 
-**Slice 1 — the orchestrator work queue** (`QueueStore` / `FileQueueStore`). The
+**Slice 1 — the scheduler work queue** (`QueueStore` / `FileQueueStore`). The
 `WorkItem`/`QueueState` records, the `PRIO_*` class defaults, the path helper
 (`work_queue_path`, honoring `MILLFOLIO_WORKQ_PATH`), and the byte-for-byte JSONL
 persistence all live here; `work_queue.mojo` is a thin facade that re-exports them and
@@ -334,10 +334,10 @@ def _less(a: WorkItem, b: WorkItem) -> Bool:
 
 
 trait QueueStore(Copyable, Movable):
-    """Persistence interface for the orchestrator work queue.
+    """Persistence interface for the scheduler work queue.
 
     A store owns the queue of `WorkItem` records and the id counter; the
-    orchestrator (`server.mojo`) drives it through the `wq_*` delegators. Each
+    scheduler (`server.mojo`) drives it through the `wq_*` delegators. Each
     mutating op is load-modify-save under the store's own lock, so the file is safe
     across the server + `mill` CLI + a detached index worker. The trait is
     intentionally small (enqueue/peek/take/done/fail/list/running/reset) so a second

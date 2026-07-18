@@ -2,7 +2,7 @@
 
 How `/chat` grows from one-shot `{message}->{reply}` into the streaming millfolio
 protocol (status / approval-request / debug / message events). Grounded in what
-flare and the headgate orchestrator actually support today.
+flare and the headgate harness actually support today.
 
 ## Transport: WebSocket
 
@@ -30,7 +30,7 @@ Framing: one JSON object per text frame.
 ## Why the approval *pause* is simple here
 
 flare runs a handler synchronously to completion, and WS is full-duplex. So the
-orchestrator runs **inline in the WS handler**: it `ws.send`s each event as it
+harness runs **inline in the WS handler**: it `ws.send`s each event as it
 goes, and at the approval gate it **blocks on `ws.recv()`** until the client
 sends `approve`/`reject`. The blocking recv *is* the pause — no need to turn
 `run_vault_task` into a resumable state machine.
@@ -40,9 +40,9 @@ for the duration. That's acceptable for the local, single-user vault server — 
 task in flight at a time, same as today. If we later want concurrent sessions,
 flare supports multi-worker `serve`.)
 
-## The orchestrator event hook
+## The harness event hook
 
-`run_vault_task` (headgate `src/orchestrator.mojo`) is a linear pipeline; the
+`run_vault_task` (headgate `src/harness.mojo`) is a linear pipeline; the
 emit points map 1:1 to the workflow panel:
 
 | stage | events |
@@ -53,7 +53,7 @@ emit points map 1:1 to the workflow panel:
 | compile + run in sandbox | `status` running→done; `debug` sandbox stdout |
 | return | `message` the answer |
 
-The hook is an **event sink** the orchestrator emits through:
+The hook is an **event sink** the harness emits through:
 
 ```
 trait EventSink:
@@ -83,7 +83,7 @@ the sink type — settle this first when implementing, as it drives the diff sha
    WebSocket (mock kept as the no-server fallback). *(verifiable now)*
 3. **Server WS endpoint** — a WS `/chat` in `app/server` (model on
    `flare/examples/basic/ws_server.mojo`) that runs the vault task and streams a
-   `status` + final `message` (no orchestrator changes yet). *(CI-validated)*
+   `status` + final `message` (no harness changes yet). *(CI-validated)*
 4. **Harness event sink** — add the `EventSink` hook + the no-op default;
    wire the WS handler's sink so mid-run `status`/`debug`/`approval` flow.
 5. **Cutover** — point the CLI at `millfolio-server`, retire headgate's server/web.

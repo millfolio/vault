@@ -6,7 +6,7 @@ frontier request comes in again (same system prompt + aliased manifest + questio
 model + max_tokens), return the previously-generated program from disk and skip the
 network call entirely — no egress, no token spend.
 
-WHY THIS IS SAFE: the cached value is the codegen *program*, which the orchestrator
+WHY THIS IS SAFE: the cached value is the codegen *program*, which the harness
 re-executes over the LIVE vault on every run — it is NOT the final answer. Identical
 request bytes ⇒ identical program. If the vault schema changes, the aliased manifest
 embedded in the request changes ⇒ a different key ⇒ a cache miss ⇒ a fresh program.

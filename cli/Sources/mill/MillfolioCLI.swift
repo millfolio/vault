@@ -26,7 +26,7 @@ struct Install: AsyncParsableCommand {
         discussion: """
         Idempotent — reuses anything already installed. Provisions the combined \
         inference server (chat + embeddings, including both models' weights), the \
-        enclave vault orchestrator + sandbox, the millfolio vault tools, and the \
+        enclave vault harness + sandbox, the millfolio vault tools, and the \
         millfolio web app (UI on :10000). If millfolio was already running, it is \
         restarted so the freshly installed version actually serves (--no-restart \
         to leave the old one running).

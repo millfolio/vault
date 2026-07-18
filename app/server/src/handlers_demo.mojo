@@ -1,7 +1,7 @@
 """handlers_demo — the first-run sample-vault import (+ the demo bot gate).
 
 A new user with an empty vault can "try it with sample data": the import is a
-single `demo-download` work item the orchestrator loop drains — it fetches the
+single `demo-download` work item the scheduler loop drains — it fetches the
 small hosted zip (MILLFOLIO_DEMO_URL) in a SEPARATE PROCESS, unpacks it, then
 enqueues a normal per-file index run over it, so the whole import flows through
 the ONE scheduler and surfaces in Operations.
@@ -14,8 +14,8 @@ Phase-1B slice 2: pure moves of the `Api.handle_demo_*` methods (and the inline
 `_demo_*` / `_write_demo_pending_op` / `_finalize_demo_op` / `_fetch_demo_run`
 helper cluster. None deref `self.st`; the `self`-qualified helper calls resolve
 to the already-extracted leaf modules (`osutil`, `auth`, `httputil`, `events`,
-`vault.storage`, `work_orchestrator`, `scheduler`, `work_queue`).
-`work_orchestrator` never imports this module, so it stays acyclic.
+`vault.storage`, `scheduler_loop`, `scheduler`, `work_queue`).
+`scheduler_loop` never imports this module, so it stays acyclic.
 `server._route` delegates here; `server.main` calls `_fetch_demo_run` for its
 `--fetch-demo` mode, and `handlers_operations.handle_operations` calls
 `_finalize_demo_op`. Behaviour is identical.
@@ -30,7 +30,7 @@ from flare.http import HttpClient
 from json import loads
 
 from vault.storage import default_kv_store, KV_DEMO_STATE, KV_DEMO_OP
-from work_orchestrator import (
+from scheduler_loop import (
     _kv_set,
     _write_small,
     _demo_dir,
@@ -77,7 +77,7 @@ def handle_demo_verify(req: Request) raises -> Response:
 def handle_demo_download() raises -> Response:
     """POST /api/demo/download → import the hosted sample vault
     (MILLFOLIO_DEMO_URL, default https://millfolio.app/demo-vault.zip): ENQUEUE a
-    single `demo-download` work item and return immediately. The orchestrator loop
+    single `demo-download` work item and return immediately. The scheduler loop
     then downloads + unpacks it into `<data>/demo-vault/` (in a `--fetch-demo`
     subprocess, off-reactor), then enqueues a normal per-file index run over it — so
     the whole
@@ -106,7 +106,7 @@ def handle_demo_download() raises -> Response:
         )
     # Mark downloading synchronously (so an immediate status poll / re-POST sees it
     # in flight), stamp the pending Operations row, then enqueue the work item. The
-    # orchestrator loop picks it up and does the actual fetch + index off-reactor.
+    # scheduler loop picks it up and does the actual fetch + index off-reactor.
     _kv_set(KV_DEMO_STATE, "downloading")
     _write_small(_demo_log_path(), "Downloading sample data…")
     _write_demo_pending_op(_epoch_s())
@@ -155,7 +155,7 @@ def _demo_read_state() -> String:
 def _demo_effective_state() -> String:
     """The sample-data import's state, SETTLED against the index queue. While the raw
     `.demo.state` file says `indexing`, the actual per-file work runs as a normal index
-    run through the orchestrator — so the demo is still `indexing` while any index-family
+    run through the scheduler — so the demo is still `indexing` while any index-family
     item is queued/running, and once that drains it reflects the index run's outcome
     (`done`, or `error` if a step failed). The settled outcome is persisted back to
     `.demo.state` so the import records its Operations row exactly once. Other raw states
@@ -205,7 +205,7 @@ def _demo_status_json() raises -> String:
     The zip is tiny, so DOWNLOADING is a single full-body GET (in the `--fetch-demo`
     subprocess) with no incremental byte progress → `progress`/bytesDone/bytesTotal stay
     -1 (the client shows a spinner).
-    While INDEXING, the per-file work runs as a normal index run through the orchestrator,
+    While INDEXING, the per-file work runs as a normal index run through the scheduler,
     so we surface its `current`/`total` files (the SAME queue-derived count as
     /api/index/status) plus a `progress` percent, mirroring the download → indexing n/M
     onboarding progress. Also finalizes the operations-history row once settled (see

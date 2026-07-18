@@ -1,4 +1,4 @@
-"""vaultcfg — resolve the millfolio vault paths the orchestrator's vault path needs.
+"""vaultcfg — resolve the millfolio vault paths the harness's vault path needs.
 
 The vault path compiles a frontier-written program that does `from vault import *`
 and runs it. To do that enclave needs to know, all relative to a configured

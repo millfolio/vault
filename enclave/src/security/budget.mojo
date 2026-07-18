@@ -1,6 +1,6 @@
 """Budget — a token budget for EXTERNAL (remote frontier model) API calls.
 
-When the budget is depleted, the orchestrator routes code generation + fixes to
+When the budget is depleted, the harness routes code generation + fixes to
 the LOCAL model instead (trusted, free, lower quality) — graceful degradation
 rather than unbounded spend. Tokens are charged from the Anthropic response's
 `usage` (input + output); the mock path estimates from prompt size.

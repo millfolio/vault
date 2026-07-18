@@ -15,7 +15,7 @@ stable across runs.
 
 FINGERPRINTS — real-data spans that must never leave: the configured API key
 (the one secret we hold), the vault's real path (the known past leak class —
-the `vault:` line strip in orchestrator.vault_manifest), and PII-shaped values
+the `vault:` line strip in harness.vault_manifest), and PII-shaped values
 sampled from the first rows of the vault's CSVs (`looks_pii` — identifiers
 only, NEVER merchant names/amounts/dates, which users legitimately type into
 questions). Sampled values live only in process memory and feed only substring

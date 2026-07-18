@@ -1019,7 +1019,7 @@ public final class Bootstrapper: ObservableObject {
         //    relocated @loader_path rpath, and its per-query codegen still shells
         //    `mojo build` against the millfolio pkgs at runtime — the toolchain above
         //    stays for both.) The vault web UI is served by the app server; enclave
-        //    here is only the orchestrator/sandbox the generated programs run under.
+        //    here is only the harness/sandbox the generated programs run under.
         set("Installing enclave…")
         try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: enclaveBin.path)
 
@@ -1233,7 +1233,7 @@ public final class Bootstrapper: ObservableObject {
     /// the sandbox (enclave's CONDA_PREFIX). Cold, that recompiles the whole
     /// tool surface + its deps; warm (cache populated), it's a fraction of a
     /// second. Without this, the first query pays the full cold cost. We compile a
-    /// throwaway program with the EXACT include set the orchestrator uses
+    /// throwaway program with the EXACT include set the harness uses
     /// (vaultcfg.vault_include_paths → millfolio/src + the vendored siblings),
     /// under enclave's toolchain env, which fills enclave-mojo's
     /// .mojo_cache. Best-effort + idempotent: a failure here just means the first
@@ -1243,7 +1243,7 @@ public final class Bootstrapper: ObservableObject {
         guard isEnclaveInstalled, isMillfolioInstalled,
               let python = try? findPython() else { return }
         let mojo = enclaveMojoPrefix.appendingPathComponent("bin/mojo").path
-        // The orchestrator's include set (mirror of vaultcfg.vault_include_paths):
+        // The harness's include set (mirror of vaultcfg.vault_include_paths):
         // the single millfolio/pkgs dir of precompiled `.mojoc`s (vault + its
         // libs). No source on the include path.
         let inc = [
@@ -1590,10 +1590,10 @@ public final class Bootstrapper: ObservableObject {
         try requireEnv()                    // fail fast on missing Xcode/Metal/Python
         try await installServer()           // engine + chat + embedding weights
         // Millfolio (vault tools + precompiled pkgs) BEFORE enclave: the
-        // orchestrator now builds against the vault pkg for in-process tags, so the
+        // harness now builds against the vault pkg for in-process tags, so the
         // pkgs must be unpacked first.
         try await installMillfolioEngine()    // the vault tools + indexer + pkgs
-        try await installEnclaveEngine()   // the vault orchestrator/sandbox (needs vault pkgs)
+        try await installEnclaveEngine()   // the vault harness/sandbox (needs vault pkgs)
         try await installAppServer()        // the millfolio web app (UI on :10000, WS on :10001)
         linkVaultShims()                    // millfolio FFI shims → enclave-mojo/lib (vault-run dlopen)
         primeVaultCompile()                 // warm enclave-mojo's .mojo_cache so query #1 is fast
@@ -2126,7 +2126,7 @@ public final class Bootstrapper: ObservableObject {
             ("vault dir", vaultDir),
         ])
         // Per-ask transcript: the CLI names it (timestamp + question slug) and the
-        // enclave orchestrator appends the outside-model prompt + program to it.
+        // enclave harness appends the outside-model prompt + program to it.
         let session = newSessionLog(for: question)
         set("session transcript → \(session.path)")
         var env = activeVaultChildEnv()   // point the child at the ACTIVE vault's data

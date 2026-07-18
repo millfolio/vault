@@ -52,7 +52,7 @@ from vault.derive.ledger import (
 )
 
 # The tag-registry READ layer lives in `tags.mojo` (LanceDB- and network-free) so
-# the enclave orchestrator can share it in-process without linking classify's
+# the enclave harness can share it in-process without linking classify's
 # HTTP client. The mutate paths below (retag/backfill/save) reuse it from here.
 from vault.derive.tags import (
     config_dir,

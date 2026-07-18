@@ -34,7 +34,7 @@ re-expressed over a document abstraction:
 
 - `schema.mojo`: `_find_csv`, `SchemaSanitizer.sanitize`, `fingerprints_from_csv`,
   `synthetic_csv`, `csv_path_for`, `inject_data_path` (`__DATA_CSV__`).
-- `orchestrator.mojo`: the prompt *"reads the CSV at `__DATA_CSV__` … refer to
+- `harness.mojo`: the prompt *"reads the CSV at `__DATA_CSV__` … refer to
   columns by their aliases"*, the `synthetic.csv`, the real-path injection.
 - `wiring.mojo` / `enclave.mojo` / `server.mojo`: `has_csv`, `_resolve_data_dir`,
   `seed_demo`.
@@ -209,6 +209,6 @@ unstructured data **before** investing in parsers.
 ## 7. What stays the same
 
 The two guarantees (containment + confidentiality), the sandbox, the
-budget-with-local-fallback, the orchestrator's sanitize→debug→run loop shape,
+budget-with-local-fallback, the harness's sanitize→debug→run loop shape,
 and the alias/dealias + synthetic-debug mechanism. Document mode generalizes the
 *data layer* under that machinery — it doesn't change the harness's spine.

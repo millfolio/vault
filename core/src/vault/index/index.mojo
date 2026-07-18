@@ -649,9 +649,9 @@ def _skip_vector_store() -> Bool:
 
 
 # ── build (incremental) — factored into per-file steps + a finalize settle ─────
-# The indexer is now driven ONE FILE AT A TIME so the app-server orchestrator can
+# The indexer is now driven ONE FILE AT A TIME so the app-server scheduler can
 # pause / yield to an interactive query between files (see app/server
-# ORCHESTRATOR.md §2.1). `build_index` is exactly:
+# SCHEDULER.md §2.1). `build_index` is exactly:
 #     _prepare_index_run(base, force)          # fresh-reset decision (run-level)
 #     for f in files: index_one_file(f, base)  # embed ONE file, COMMIT it
 #     finalize_index(files, base)              # prune removed + reconcile + retag
@@ -821,8 +821,8 @@ def _extract_txn_rows(
 
 
 def prepare_index_run(base: String, force: Bool) raises:
-    """Public entrypoint for the app-server orchestrator's per-run setup step. The
-    orchestrator drives an index run as `prepare → index_one_file* → finalize_index`
+    """Public entrypoint for the app-server scheduler's per-run setup step. The
+    scheduler drives an index run as `prepare → index_one_file* → finalize_index`
     (the same decomposition `build_index` uses internally); this is the run-level
     fresh-vs-incremental decision (see `_prepare_index_run`) it invokes ONCE before
     the per-file loop — so a processing-version bump or a changed source dir still

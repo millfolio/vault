@@ -16,10 +16,10 @@ boxed and keeps real data off the wire. Reviewing this sub-package (plus the
   • broker  — the minimal capability allowlist generated code may call (no raw
     file handles or sockets — attack surface kept tiny).
   • budget  — the token budget for EXTERNAL (frontier) calls; on depletion the
-    orchestrator degrades to the LOCAL model instead of unbounded spend.
+    harness degrades to the LOCAL model instead of unbounded spend.
 
 ACYCLIC: this sub-package depends only on leaf modules (`vaultcfg`, `logging`,
-stdlib) — never back on `orchestrator`/`transport`/`wiring`/`enclave`, so the
+stdlib) — never back on `harness`/`transport`/`wiring`/`enclave`, so the
 boundary can't be short-circuited through a dependency cycle. Importers pull the
 public surface via `from security import …` (or `from security.sandbox import …`
 to reach an in-module test helper).

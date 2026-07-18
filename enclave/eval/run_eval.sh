@@ -113,7 +113,7 @@ fail=0
 while IFS=$'\t' read -r q must mustnot manifest; do
   case "$q" in '' | \#*) continue ;; esac
   # `codegen` promises "print ONLY the generated program" on stdout, but the
-  # orchestrator also emits a couple of timestamped diagnostic `log()` lines there
+  # harness also emits a couple of timestamped diagnostic `log()` lines there
   # (`[YYYY-MM-DD HH:MM:SS.mmm] • …`). Those are NOT the program — and their date
   # stamp (today's date) is a `20\d\d-\d\d-\d\d` literal that would trip the
   # relative-date hardcoded-date guard below on EVERY run. Drop only those log lines

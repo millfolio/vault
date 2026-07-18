@@ -59,7 +59,7 @@ from vault.extract.wall_clock import iso_from_julian as _iso_from_julian
 # writes `PROGRESS_SENTINEL + msg + "\n"` to fd 1; the server recognizes lines
 # with this prefix and streams them to the chat as live status, stripping them
 # from the final reply. \x1f (US, "unit separator") can't appear in a normal
-# answer, so it can't be spoofed by ordinary print_answer text. The orchestrator
+# answer, so it can't be spoofed by ordinary print_answer text. The harness
 # + server hold a matching copy of this exact string — keep them in lockstep.
 comptime PROGRESS_SENTINEL = "\x1f@@progress@@\x1f"
 

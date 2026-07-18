@@ -1,4 +1,4 @@
-"""wiring — build the enclave VAULT orchestrator.
+"""wiring — build the enclave VAULT harness.
 
 Shared by the CLI (enclave.mojo) and the HTTP server (server.mojo) so both go
 through one composition path. Kept out of enclave.mojo (which owns `main`) so
@@ -33,7 +33,7 @@ def scratch_dir() -> String:
 def build_vault_harness(
     cfg: Config, vault_dir: String
 ) raises -> Harness:
-    """Wire the orchestrator for the VAULT path (run_vault_task):
+    """Wire the harness for the VAULT path (run_vault_task):
 
     - the sandbox policy is in "loopback" network mode with the vault dir as the
       (read-only) data dir + the LanceDB index dir read-allowed, so the run

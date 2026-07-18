@@ -280,7 +280,7 @@
   }
   // ── Missing-key affordance ──────────────────────────────────────────────────
   // Codegen runs on the frontier model; with no ANTHROPIC_API_KEY it errors with the
-  // orchestrator's _NO_REMOTE_MSG ("…set ANTHROPIC_API_KEY and retry"). Native `.app`
+  // harness's _NO_REMOTE_MSG ("…set ANTHROPIC_API_KEY and retry"). Native `.app`
   // users never set that env var and have nowhere to fix it, so we surface an inline
   // key field right under that error. Real product only (the demo has its own key).
   function needsApiKey(text: string | undefined): boolean {

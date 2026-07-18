@@ -6,8 +6,8 @@ shapes — **queue / log / kv / doc** — now live behind `vault.storage` traits
 one-flag swap. This document
 describes the `Store` abstraction that the app server's on-disk state is migrating
 behind, and the order the remaining categories move. Cross-reference
-[`ORCHESTRATOR.md`](./ORCHESTRATOR.md) — the work queue whose store lands in this
-first slice is the same queue the orchestrator loop (§2.2–2.3) drives.
+[`SCHEDULER.md`](./SCHEDULER.md) — the work queue whose store lands in this
+first slice is the same queue the scheduler loop (§2.2–2.3) drives.
 
 ## 1. Why
 
@@ -208,8 +208,8 @@ The three **append-only JSONL logs** move behind one tiny trait, mirroring the q
   handler calls `store.rewrite()`. `_operations_path` / `_stats_path` / `_asks_path`
   delegate to the storage path helpers (the System page still reads them). Behavior is
   unchanged. Unit-tested by `test/log_store_test.mojo` (`pixi run test-logstore`).
-  (Phase 3: `_append_operation` moved with the orchestrator runtime to
-  `work_orchestrator.mojo`; `server.mojo` imports it back — still the same thin facade.)
+  (Phase 3: `_append_operation` moved with the scheduler runtime to
+  `scheduler_loop.mojo`; `server.mojo` imports it back — still the same thin facade.)
 
 > **Out of scope (kv slice):** `operations.jsonl` pairs with the lazy-finalize **KV
 > markers** `.index.op` / `.demo.op` (`_pending_op_path`, `_write_pending_op`) — those
@@ -243,8 +243,8 @@ queue + log slices:
   constants; writes go through `_kv_set(KEY, …)`, reads through `default_kv_store().get(KEY)`
   (inside their existing `try/except → default`), and the pending-op finalizers' presence
   check through `.exists(KEY)`. Behavior is unchanged. (Phase 3: the `_kv_set` / `_write_small`
-  facades + the index/demo marker path helpers they back moved with the orchestrator runtime
-  to `work_orchestrator.mojo`; `server.mojo` imports the ones its handlers still call.)
+  facades + the index/demo marker path helpers they back moved with the scheduler runtime
+  to `scheduler_loop.mojo`; `server.mojo` imports the ones its handlers still call.)
   Unit-tested by
   `test/kv_store_test.mojo` (`pixi run test-kvstore`, hermetic over a temp `MILLFOLIO_DATA_DIR`).
 

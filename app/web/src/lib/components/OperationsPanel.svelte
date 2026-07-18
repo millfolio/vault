@@ -8,7 +8,7 @@
   //   System    — GPU / mem / disk / model (the data & log locations live in the
   //               sibling Logs sub-tab, rendered by the OperationsView wrapper)
   //   Backfill  — per-AI-tag backfill progress, a detail of the running/last backfill
-  // Backed by /api/{operations,index/status,orchestrator/queue,backfill/*,gpu,model,system}.
+  // Backed by /api/{operations,index/status,scheduler/queue,backfill/*,gpu,model,system}.
   import { onMount, onDestroy } from "svelte";
   import { opLabel, fmtDur, fmtEta } from "$lib/format";
 
@@ -263,7 +263,7 @@
     }
     if (demo) return; // the demo has no queue/backfill/GPU story
     // The onboarding sample-data import (download → index) is its own tracked job,
-    // separate from the orchestrator index queue; surface it as a live "Now" row.
+    // separate from the scheduler index queue; surface it as a live "Now" row.
     try {
       const prevDemo = demoImport?.state;
       const dd = (await fetch(`${base}/api/demo/status`).then((r) => (r.ok ? r.json() : null))) as DemoStatus | null;
@@ -277,7 +277,7 @@
       /* transient — keep polling */
     }
     try {
-      const q = await fetch(`${base}/api/orchestrator/queue`).then((r) => (r.ok ? r.json() : null));
+      const q = await fetch(`${base}/api/scheduler/queue`).then((r) => (r.ok ? r.json() : null));
       if (q && Array.isArray(q.items)) queue = q.items as QueueItem[];
     } catch {}
     try {
@@ -293,11 +293,11 @@
     } catch {}
   }
 
-  // ── Controls: global pause + priority (orchestrator-wide) ───────────────────
+  // ── Controls: global pause + priority (scheduler-wide) ───────────────────
   async function pause(seconds: number) {
     const base = apiBase();
     if (base === null) return;
-    const r = await fetch(`${base}/api/orchestrator/pause`, {
+    const r = await fetch(`${base}/api/scheduler/pause`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seconds }),
@@ -308,7 +308,7 @@
     const base = apiBase();
     if (base === null) return;
     stop = false;
-    const r = await fetch(`${base}/api/orchestrator/resume`, { method: "POST" });
+    const r = await fetch(`${base}/api/scheduler/resume`, { method: "POST" });
     if (r.ok) bk = (await r.json()).status as BackfillStatus;
   }
   async function setPriority(p: string) {
@@ -316,7 +316,7 @@
     if (base === null) return;
     lastSample = null;
     etaSeconds = null;
-    const r = await fetch(`${base}/api/orchestrator/priority`, {
+    const r = await fetch(`${base}/api/scheduler/priority`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ priority: p }),

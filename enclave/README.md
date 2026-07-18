@@ -78,7 +78,7 @@ through covert channels. That's a later, harder threat model.
 
 ## Components
 
-- **orchestrator** — owns user intent and data handles; drives the
+- **harness** — owns user intent and data handles; drives the
   synthetic-debug → real-run loop; decides what (if anything) returns to remote.
 - **remote codegen client** — talks to the frontier model (Claude API); sends
   spec + sanitized schema + synthetic samples; receives code + a capability
@@ -102,7 +102,7 @@ src/egress.mojo                       EgressGuard — outbound confidentiality c
 src/vaultcfg.mojo                     millfolio vault paths (manifest bin, -I set, index dir)
 src/transport.mojo                    Local/Remote clients (remote gated by EgressGuard)
 src/sandbox.mojo + src/broker.mojo    containment runner + capability allowlist
-src/orchestrator.mojo                 core loop: aliased manifest → codegen → loopback run
+src/harness.mojo                 core loop: aliased manifest → codegen → loopback run
 src/enclave.mojo + src/server.mojo   composition root: CLI vault harness + HTTP server
 web/                                  enclave for the web — local React chat UI
 ```
