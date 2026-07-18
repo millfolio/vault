@@ -1,4 +1,4 @@
-"""Orchestrator — enclave's core loop (pi's `pi-agent-core` equivalent).
+"""Harness — enclave's core loop (pi's `pi-agent-core` equivalent).
 
 VAULT-ONLY. Wires the layers into the privacy flow (README.md):
 
@@ -140,7 +140,7 @@ def _tags_context(tags: String) raises -> String:
     )
 
 
-struct Orchestrator(Movable):
+struct Harness(Movable):
     var local: LocalClient
     var remote: RemoteClient
     var sandbox: Sandbox

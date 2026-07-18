@@ -45,7 +45,7 @@ from flare.runtime._thread import ThreadHandle, _null_ptr
 from std.sys import argv
 
 from settings import load_config
-from wiring import build_vault_orchestrator
+from wiring import build_vault_harness
 from runqueue import runq_reset
 
 # The work orchestrator's runtime (Phase 3 slice): the scheduler loop + its job
@@ -371,9 +371,9 @@ def main() raises:
     # /chat to run_vault_task.
     var vault_dir = resolve_vault_dir()
     print("millfolio server — VAULT mode — vault dir: " + vault_dir)
-    var orch = build_vault_orchestrator(cfg, vault_dir)
+    var harness = build_vault_harness(cfg, vault_dir)
 
-    var st = MillfolioState(orch^, vault_dir^)
+    var st = MillfolioState(harness^, vault_dir^)
     var sp = alloc[MillfolioState](1)
     sp.init_pointee_move(st^)
     var api = Api(sp)

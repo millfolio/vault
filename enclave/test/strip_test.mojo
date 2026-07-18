@@ -5,7 +5,7 @@ final reply text must contain ONLY the real answer, with every internal sentinel
 line — RESULT included — removed. `pixi run test-strip`.
 """
 
-from orchestrator import (
+from harness import (
     _strip_progress,
     PROGRESS_SENTINEL,
     STAT_SENTINEL,

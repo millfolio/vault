@@ -41,7 +41,7 @@ from json import loads, Value
 from osutil import _is_demo, _epoch_s
 from httputil import unauthorized, _cors
 from settings import load_config
-from wiring import build_vault_orchestrator
+from wiring import build_vault_harness
 from vaultcfg import vault_dir as resolve_vault_dir
 from auth import _apply_persisted_apikey
 from events import json_escape
@@ -888,8 +888,8 @@ def handle_millwright_assist(req: Request) raises -> Response:
     try:
         var cfg = load_config()
         _apply_persisted_apikey(cfg)
-        var orch = build_vault_orchestrator(cfg, resolve_vault_dir())
-        reply = orch.viewgen_edit(instruction, spec_text, _widget_catalog())
+        var harness = build_vault_harness(cfg, resolve_vault_dir())
+        reply = harness.viewgen_edit(instruction, spec_text, _widget_catalog())
     except e:
         return _cors(bad_request('{"error":' + json_escape(String(e)) + "}"))
     var new_spec: String

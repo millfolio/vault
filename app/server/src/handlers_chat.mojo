@@ -30,8 +30,8 @@ from std.ffi import external_call
 from std.time import perf_counter_ns
 
 from settings import load_config
-from wiring import build_vault_orchestrator
-from orchestrator import (
+from wiring import build_vault_harness
+from harness import (
     PROGRESS_SENTINEL,
     STAT_SENTINEL,
     LOCAL_SENTINEL,
@@ -158,7 +158,7 @@ def handle_chat(
     var reply: String
     try:
         # VAULT-ONLY: always the private-vault codegen loop over the vault dir.
-        reply = s.orch.run_vault_task(msg, s.vault_dir.copy())
+        reply = s.harness.run_vault_task(msg, s.vault_dir.copy())
     except e:
         reply = String("error: ") + String(e)
     return _cors(ok_json('{"reply":' + json_escape(reply) + "}"))
@@ -465,7 +465,7 @@ def on_connect(mut conn: WsConnection) raises:
         # pasted into the Settings field takes effect on this very next question.
         _apply_persisted_apikey(cfg)
         var vault_dir = resolve_vault_dir()
-        var orch = build_vault_orchestrator(cfg, vault_dir)
+        var harness = build_vault_harness(cfg, vault_dir)
 
         # Run-stats accumulator — api call counts (codegen-phase + the vault tools the
         # generated program calls) and the model's prefill/gen tokens. Declared here so
@@ -496,7 +496,7 @@ def on_connect(mut conn: WsConnection) raises:
                 status("manifest", "Aliasing vault manifest", "running")
             )
             var _t = perf_counter_ns()
-            var manifest = orch.vault_manifest(vault_dir)
+            var manifest = harness.vault_manifest(vault_dir)
             _bump(api_names, api_count, api_ms, "alias", 1, _ms_since(_t))
             # The frontier-safe view also carries the category tag NAMES + scope notes
             # (so the model filters `.tags`); never the keyword RULES (real merchant
@@ -570,9 +570,9 @@ def on_connect(mut conn: WsConnection) raises:
             if getenv("MILLFOLIO_STREAM_CODEGEN", "") != "":
                 # Stream the program — update the "codegen" line live with its size.
                 var sink = WsSink(Int(UnsafePointer(to=conn)))
-                code = orch.vault_codegen_stream(question, manifest, sink)
+                code = harness.vault_codegen_stream(question, manifest, sink)
             else:
-                code = orch.vault_codegen(question, manifest)
+                code = harness.vault_codegen(question, manifest)
             _bump(api_names, api_count, api_ms, "codegen", 1, _ms_since(_t))
             conn.send_text(
                 debug_event("codegen", "Generated program", code, "mojo")
@@ -673,7 +673,7 @@ def on_connect(mut conn: WsConnection) raises:
             status("compile", "Compiling the generated program", "running")
         )
         _t = perf_counter_ns()
-        var fixes = orch.vault_build(code)
+        var fixes = harness.vault_build(code)
         _bump(api_names, api_count, api_ms, "compile", 1, _ms_since(_t))
         if fixes > 0:
             _bump(api_names, api_count, api_ms, "fix", fixes, 0.0)
@@ -683,7 +683,7 @@ def on_connect(mut conn: WsConnection) raises:
         conn.send_text(
             status("execute", "Running it locally over your vault…", "running")
         )
-        var h = orch.vault_run_start(vault_dir)
+        var h = harness.vault_run_start(vault_dir)
         log("[run] poll start: pid=" + String(Int(h.pid)))
         var cur_label = String("Running it locally over your vault…")
         var src_file = String(
@@ -699,9 +699,9 @@ def on_connect(mut conn: WsConnection) raises:
         while running:
             # Reap FIRST, then poll — so the final poll (once the child has exited)
             # still drains every progress/stat line written just before it died.
-            var reap = orch.vault_run_reap(h)
+            var reap = harness.vault_run_reap(h)
             running = reap == -1  # -1 = still running
-            var lines = orch.vault_run_poll(h)
+            var lines = harness.vault_run_poll(h)
             if (
                 iters % 16 == 0
             ):  # ~every 2s: prove the loop's alive + where it's stuck
@@ -797,7 +797,7 @@ def on_connect(mut conn: WsConnection) raises:
                     # instant (a child wedged in a syscall dies when it returns), so
                     # poll a few times before giving up.
                     for _r in range(25):
-                        if orch.vault_run_reap(h) != -1:
+                        if harness.vault_run_reap(h) != -1:
                             break
                         _usleep(40_000)  # 40 ms
                 else:
@@ -849,7 +849,7 @@ def on_connect(mut conn: WsConnection) raises:
         # question must live in this tail — finish/read, the WS sends, or releasing
         # the queue slot. Bracket each step so the log shows exactly where it stalls.
         log("[run] finish: reading captured output")
-        var reply = orch.vault_run_finish(h)
+        var reply = harness.vault_run_finish(h)
         log("[run] finish: reply " + String(reply.byte_length()) + "B")
         if timed_out:
             conn.send_text(

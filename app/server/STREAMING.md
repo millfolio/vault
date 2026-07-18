@@ -69,11 +69,11 @@ trait EventSink:
 - Existing callers (the `millfolio ask` CLI, today's `/chat`) provide a **no-op
   sink** that drops events and auto-approves — so current behavior is unchanged.
 
-**Back-compat / call sites.** The sink should be attached to the `Orchestrator`
+**Back-compat / call sites.** The sink should be attached to the `Harness`
 (e.g. set after construction, default no-op) rather than added to
 `run_vault_task`'s signature, so the CLI and the current server compile
 untouched. Open question to confirm against the compiler: Mojo's ergonomics for
-storing a trait object as a struct field vs. making `Orchestrator` parametric on
+storing a trait object as a struct field vs. making `Harness` parametric on
 the sink type — settle this first when implementing, as it drives the diff shape.
 
 ## Increments
@@ -84,6 +84,6 @@ the sink type — settle this first when implementing, as it drives the diff sha
 3. **Server WS endpoint** — a WS `/chat` in `app/server` (model on
    `flare/examples/basic/ws_server.mojo`) that runs the vault task and streams a
    `status` + final `message` (no orchestrator changes yet). *(CI-validated)*
-4. **Orchestrator event sink** — add the `EventSink` hook + the no-op default;
+4. **Harness event sink** — add the `EventSink` hook + the no-op default;
    wire the WS handler's sink so mid-run `status`/`debug`/`approval` flow.
 5. **Cutover** — point the CLI at `millfolio-server`, retire headgate's server/web.

@@ -1,4 +1,4 @@
-# Work Orchestrator — design
+# Work Harness — design
 
 Status: **implemented** (Phases 0–4 landed; Phase 5 optional). This document describes
 where the app server's background work — **indexing** and **AI-tag backfill** — lands,
@@ -74,7 +74,7 @@ background job touches the engine at a time; interactive queries take precedence
                             │  peek / take
                             ▼
         ┌──────────────────────────────────────┐
-        │            Orchestrator loop          │
+        │            Harness loop          │
         │  reads queue + global config (pause,  │
         │  priority) → pick next / wait; ONE     │
         │  background job on the engine at a time│

@@ -361,7 +361,7 @@
   let idxRunning = $state(false);
   let idxCurrent = $state<number | null>(null);
   let idxTotal = $state<number | null>(null);
-  // Orchestrator work-queue summary for the status bar: what's RUNNING (kind) and
+  // Harness work-queue summary for the status bar: what's RUNNING (kind) and
   // how many items wait behind it — the compact form of the Operations tab, so
   // background refresh work (backfill/index/re-tag) is visible without opening it.
   let opsRunning = $state("");

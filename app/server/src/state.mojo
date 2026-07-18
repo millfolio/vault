@@ -10,7 +10,7 @@ independent leaf.
 Pure move out of server.mojo — behaviour is identical.
 """
 
-from orchestrator import Orchestrator
+from harness import Harness
 
 
 struct MillfolioState(Movable):
@@ -18,9 +18,9 @@ struct MillfolioState(Movable):
     (borrowed-self) handler through a pointer so `run_vault_task` can still take
     `mut self`. `/chat` always runs `run_vault_task` over `vault_dir`."""
 
-    var orch: Orchestrator
+    var harness: Harness
     var vault_dir: String
 
-    def __init__(out self, var orch: Orchestrator, var vault_dir: String):
-        self.orch = orch^
+    def __init__(out self, var harness: Harness, var vault_dir: String):
+        self.harness = harness^
         self.vault_dir = vault_dir^

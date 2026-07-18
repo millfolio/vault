@@ -22,8 +22,8 @@ from flare.prelude import *
 from flare.http import Handler
 
 from settings import load_config
-from wiring import build_vault_orchestrator
-from orchestrator import Orchestrator
+from wiring import build_vault_harness
+from harness import Harness
 from vaultcfg import vault_dir as resolve_vault_dir
 from json import loads
 
@@ -35,11 +35,11 @@ struct EnclaveState(Movable):
     (borrowed-self) handler through a pointer so `run_vault_task` can still take
     `mut self`. `/chat` always runs `run_vault_task` over `vault_dir`."""
 
-    var orch: Orchestrator
+    var harness: Harness
     var vault_dir: String
 
-    def __init__(out self, var orch: Orchestrator, var vault_dir: String):
-        self.orch = orch^
+    def __init__(out self, var harness: Harness, var vault_dir: String):
+        self.harness = harness^
         self.vault_dir = vault_dir^
 
 
@@ -151,7 +151,7 @@ struct Api(Copyable, Handler, Movable):
         var reply: String
         try:
             # VAULT-ONLY: always the private-vault codegen loop over the vault dir.
-            reply = s.orch.run_vault_task(msg, s.vault_dir.copy())
+            reply = s.harness.run_vault_task(msg, s.vault_dir.copy())
         except e:
             reply = String("error: ") + String(e)
         return _cors(ok_json('{"reply":' + _json_escape(reply) + "}"))
@@ -165,9 +165,9 @@ def main() raises:
     # /chat to run_vault_task.
     var vault_dir = resolve_vault_dir()
     print("enclave VAULT mode — vault dir: " + vault_dir)
-    var orch = build_vault_orchestrator(cfg, vault_dir)
+    var harness = build_vault_harness(cfg, vault_dir)
 
-    var st = EnclaveState(orch^, vault_dir^)
+    var st = EnclaveState(harness^, vault_dir^)
     var sp = alloc[EnclaveState](1)
     sp.init_pointee_move(st^)
     var api = Api(sp)

@@ -6,7 +6,7 @@ Layering (pi-shaped, PRIOR-ART.md):
 
     enclave.mojo        (this file — CLI)          server.mojo (HTTP, web)
               \\                                      /
-               wiring.mojo   build_vault_orchestrator(cfg, vault_dir)
+               wiring.mojo   build_vault_harness(cfg, vault_dir)
                                   |
     orchestrator.mojo    core loop: codegen -> compile-fix -> run (loopback)
         |        \\
@@ -29,7 +29,7 @@ from std.sys import argv
 from std.os import getenv
 
 from settings import load_config
-from wiring import build_vault_orchestrator
+from wiring import build_vault_harness
 
 
 def _vault_dir(var arg: String) raises -> String:
@@ -51,8 +51,8 @@ def _run_vault(question: String, var vault_dir: String) raises:
     """`enclave vault "<question>" [dir]` — the vault codegen loop."""
     var cfg = load_config()
     var dir = _vault_dir(vault_dir^)
-    var orch = build_vault_orchestrator(cfg, dir)
-    print(orch.run_vault_task(question, dir.copy()))
+    var harness = build_vault_harness(cfg, dir)
+    print(harness.run_vault_task(question, dir.copy()))
 
 
 def _run_program(program_path: String, var vault_dir: String) raises:
@@ -65,11 +65,11 @@ def _run_program(program_path: String, var vault_dir: String) raises:
     """
     var cfg = load_config()
     var dir = _vault_dir(vault_dir^)
-    var orch = build_vault_orchestrator(cfg, dir)
+    var harness = build_vault_harness(cfg, dir)
     var program: String
     with open(program_path, "r") as f:
         program = f.read()
-    print(orch.run_vault_program(program, dir.copy()))
+    print(harness.run_vault_program(program, dir.copy()))
 
 
 def _run_codegen(
@@ -84,14 +84,14 @@ def _run_codegen(
     """
     var cfg = load_config()
     var dir = _vault_dir(vault_dir^)
-    var orch = build_vault_orchestrator(cfg, dir)
+    var harness = build_vault_harness(cfg, dir)
     var manifest: String
     if manifest_path != "":
         with open(manifest_path, "r") as f:
             manifest = f.read()
     else:
-        manifest = orch.vault_manifest(dir)
-    print(orch.vault_codegen(question, manifest))
+        manifest = harness.vault_manifest(dir)
+    print(harness.vault_codegen(question, manifest))
 
 
 def main() raises:

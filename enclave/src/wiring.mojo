@@ -13,7 +13,7 @@ from security import EgressGuard, ensure_canary, vault_fingerprints
 from transport import LocalClient, RemoteClient
 from security import Sandbox, SandboxPolicy
 from security import CapabilityBroker
-from orchestrator import Orchestrator
+from harness import Harness
 from vaultcfg import vault_index_dir
 
 
@@ -30,9 +30,9 @@ def scratch_dir() -> String:
     return getenv("HOME", "") + "/.config/enclave/scratch"
 
 
-def build_vault_orchestrator(
+def build_vault_harness(
     cfg: Config, vault_dir: String
-) raises -> Orchestrator:
+) raises -> Harness:
     """Wire the orchestrator for the VAULT path (run_vault_task):
 
     - the sandbox policy is in "loopback" network mode with the vault dir as the
@@ -77,6 +77,6 @@ def build_vault_orchestrator(
     var broker = CapabilityBroker(allowed^)
 
     var budget = Budget(cfg.remote_token_budget)
-    return Orchestrator(
+    return Harness(
         local^, remote^, sandbox^, broker^, budget^, cfg.use_local_summary
     )

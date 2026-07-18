@@ -62,7 +62,7 @@ program is produced as the blocking path.
 Implemented + compiles (enclave + app server). Closures are gone in this nightly, so
 the callback is a `DeltaSink` **trait** (transport.mojo): `_anthropic_stream[S: DeltaSink]`
 is now INCREMENTAL (byte-level line extraction, UTF-8-safe) and calls `sink.on_delta(text)`
-per delta; `RemoteClient.codegen_stream[S]` + `Orchestrator.vault_codegen_stream[S]` thread
+per delta; `RemoteClient.codegen_stream[S]` + `Harness.vault_codegen_stream[S]` thread
 it through. The app server's `WsSink` (holds the WS conn by address — valid for the
 synchronous call) updates the ONE "codegen" status line in place with the growing program
 size ("Writing the program… (1234 chars)"); the frontend already updates status by stepId,
