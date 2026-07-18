@@ -65,11 +65,21 @@ struct Cell(Copyable, Movable):
     var kind: String
     var raw: Float64  # money amount / count (as Float64); 0.0 for date/text
     var text: String  # money() string / String(n) / iso date / plain text
+    var entity: String  # "" | "merchant" | "tag" | "month" — deep-link kind (tables)
 
     def __init__(out self, kind: String, raw: Float64, text: String):
         self.kind = kind
         self.raw = raw
         self.text = text
+        self.entity = String("")
+
+    def __init__(
+        out self, kind: String, raw: Float64, text: String, entity: String
+    ):
+        self.kind = kind
+        self.raw = raw
+        self.text = text
+        self.entity = entity
 
     @implicit
     def __init__(out self, s: String):
@@ -78,6 +88,7 @@ struct Cell(Copyable, Movable):
         self.kind = String("text")
         self.raw = 0.0
         self.text = s
+        self.entity = String("")
 
 
 def money_val(x: Float64) raises -> Cell:
@@ -85,6 +96,15 @@ def money_val(x: Float64) raises -> Cell:
     (the typed-money invariant). Use this for every dollar amount in the spec.
     """
     return Cell(String("money"), x, money(x))
+
+
+def merchant(name: String) -> Cell:
+    """A merchant TEXT cell that DEEP-LINKS. A table column built from these becomes
+    a clickable filter into the Vault view (`/vault?merchant=…`) — regardless of the
+    column's header ("Bill", "Payee", "Vendor", …). The link rides the VALUE, not the
+    header name, so use this for any column of merchant / payee / biller / store names.
+    """
+    return Cell(String("text"), 0.0, name, String("merchant"))
 
 
 def count(n: Int) -> Cell:
@@ -234,7 +254,35 @@ def _block_json(b: Block) raises -> String:
             if i > 0:
                 o += ","
             o += _jstr(b.headers[i])
-        o += '],"rows":['
+        o += "]"
+        # Per-column deep-link entity, derived from the cells (first non-empty
+        # `entity` in each column). Emitted ONLY when at least one column links, so a
+        # table with no entity cells serializes byte-for-byte as before.
+        var ncol = len(b.headers)
+        var col_ent = List[String]()
+        for _ in range(ncol):
+            col_ent.append(String(""))
+        var any_ent = False
+        for r in range(len(b.rows)):
+            for c in range(len(b.rows[r])):
+                if (
+                    c < ncol
+                    and col_ent[c].byte_length() == 0
+                    and b.rows[r][c].entity.byte_length() > 0
+                ):
+                    col_ent[c] = b.rows[r][c].entity
+                    any_ent = True
+        if any_ent:
+            o += ',"entities":['
+            for j in range(ncol):
+                if j > 0:
+                    o += ","
+                if col_ent[j].byte_length() > 0:
+                    o += _jstr(col_ent[j])
+                else:
+                    o += "null"
+            o += "]"
+        o += ',"rows":['
         for r in range(len(b.rows)):
             if r > 0:
                 o += ","

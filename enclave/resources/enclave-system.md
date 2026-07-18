@@ -225,7 +225,16 @@ Emit data only when it genuinely adds to the answer; a plain reply still just us
 | `pie(title)` + `.slice(label, value)` | a share-of-whole breakdown the client draws as a pie | **what share / what fraction / what percentage** of a total each part is — a spend split across a SMALL number of named parts (≤ ~8 tags/merchants/categories). Many parts → prefer `table`/`series(_, "category")`. |
 
 Values are TYPED — `money_val(x)` for a dollar amount, `count(n)` for a quantity,
-`date(iso)` for a date, or a bare `String` for a plain label.
+`date(iso)` for a date, `merchant(name)` for a merchant/payee/biller name, or a bare
+`String` for a plain label.
+
+**Deep-link merchant columns with `merchant(name)`.** When a `table` column holds
+**merchant / payee / biller / vendor / store names** (anything you grouped on
+`.merchant`), build those cells with `merchant(name)` — NOT a bare string — so the
+column becomes a clickable filter into the user's Vault (`/vault?merchant=…`). This
+works no matter what you title the column ("Bill", "Payee", "Merchant", …); the link
+rides the value, not the header. So `_ = tbl.row([merchant(name), money_val(total)])`
+✓ for a per-merchant table.
 
 **Titles/labels — plain ASCII only.** In every `kpi`/`table`/`series`/`geo_map`/`pie`
 TITLE and text LABEL, use plain ASCII punctuation: write a hyphen `-` or the word

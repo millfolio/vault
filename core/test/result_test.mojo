@@ -53,6 +53,27 @@ def main() raises:
     hint("line")
     var b = result_json()
 
+    # Deep-link entities: a table built from bare strings emits NO `entities` (the
+    # column links only via the header-name fallback client-side).
+    ok = _expect(
+        "bare-string table emits no entities", not _has(b, '"entities"'), ok
+    )
+    # A `merchant()` cell tags its column so it deep-links regardless of the header.
+    var tm = table(["Bill", "Total"])
+    _ = tm.row([merchant("City Power & Light"), money_val(841.20)])
+    _ = tm.row([merchant("Northwind Auto Insurance"), money_val(712.50)])
+    var bm = result_json()
+    ok = _expect(
+        "merchant() column emits per-column entities",
+        _has(bm, '"entities":["merchant",null]'),
+        ok,
+    )
+    ok = _expect(
+        "merchant cell is a plain text value (entity is out-of-band)",
+        _has(bm, '{"type":"text","value":"City Power & Light"}'),
+        ok,
+    )
+
     # typed-money invariant: raw Float64 + the exact money() string, tagged.
     ok = _expect(
         "money is typed {type,raw,text}",
