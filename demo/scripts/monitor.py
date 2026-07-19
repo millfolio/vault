@@ -59,15 +59,14 @@ def load_env():
         "ENGINE_FLOOR_TOKS": "2.0",
         "ENGINE_PROBE_TOKENS": "16",
         "ENGINE_TIMEOUT_S": "45",
+        "ENGINE_STARTUP_GRACE_S": "150",
         "WS_TIMEOUT_S": "12",
         "HTTP_TIMEOUT_S": "10",
         "FAILS_BEFORE_HEAL": "2",
         "HEAL_COOLDOWN_S": "900",
         "ALERT_REMINDER_S": "1800",
         "DEMO_DAEMON": "system/app.millfolio.demo",
-        "ENGINE_AGENT": "app.millfolio.demo-engine",
         "HEAL_DEMO": "1",
-        "HEAL_ENGINE": "1",
     }
     try:
         with open(ENV_FILE) as f:
@@ -232,18 +231,8 @@ def heal_demo_daemon(cfg):
     return False, "kickstart %s failed: %s" % (daemon, (r.stderr or r.stdout).strip()[:100])
 
 
-def heal_engine(cfg):
-    uid = os.getuid()
-    target = "gui/%d/%s" % (uid, cfg["ENGINE_AGENT"])
-    r = subprocess.run(["launchctl", "kickstart", "-k", target],
-                       capture_output=True, text=True, timeout=30)
-    if r.returncode == 0:
-        return True, "kickstarted %s" % target
-    err = (r.stderr or r.stdout).strip()
-    if "Domain does not support" in err or "125" in err:
-        return False, ("engine auto-heal unavailable in this context (not gui domain). "
-                       "Run from bgent console: launchctl kickstart -k %s — or reboot." % target)
-    return False, "kickstart %s failed: %s" % (target, err[:100])
+# (No engine heal: the decode wedge survives a process restart — only a reboot clears
+# it — and warmup is handled by the startup grace. A wedge is detected + alerted only.)
 
 
 # ── state ─────────────────────────────────────────────────────────────────────
@@ -273,7 +262,10 @@ def discord(cfg, content):
         return
     try:
         data = json.dumps({"content": content[:1900]}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        # A User-Agent is REQUIRED: Discord (behind Cloudflare) 403-blocks urllib's
+        # default "Python-urllib/x.y" UA, so without this every alert silently fails.
+        req = urllib.request.Request(url, data=data, headers={
+            "Content-Type": "application/json", "User-Agent": "demo-monitor/1"})
         urllib.request.urlopen(req, timeout=10).read()
     except Exception as e:
         log("  Discord post failed: %s" % (str(e)[:100]))
@@ -291,14 +283,32 @@ def main():
                                          float(cfg["HTTP_TIMEOUT_S"]), "turnstile_sitekey")
     server_ok, sstatus, _ = http_get(cfg["LOCAL_APP"].rstrip("/") + "/health", float(cfg["HTTP_TIMEOUT_S"]))
     ws_ok, wsdetail = ws_roundtrip(cfg["LOCAL_APP"], float(cfg["WS_TIMEOUT_S"]))
-    eng_ok, eng_toks, eng_detail = engine_decode(cfg)
+
+    # Engine: check readiness (/v1/models) BEFORE the decode probe, so a normal warmup
+    # (503 / connection-refused while weights load) isn't mistaken for a wedge. Ready +
+    # slow decode = WEDGED (needs a reboot). Not-ready within the startup grace = warming
+    # (transient, not a fail). Not-ready past the grace = down.
+    eng_models_ok, emstatus, _ = http_get(cfg["ENGINE_URL"].rstrip("/") + "/v1/models",
+                                          float(cfg["HTTP_TIMEOUT_S"]))
+    if eng_models_ok:
+        st.pop("engine_unready_since", None)
+        dec_ok, eng_toks, eng_detail = engine_decode(cfg)
+        engine_state = "healthy" if dec_ok else "wedged"
+    else:
+        us = st.get("engine_unready_since") or now
+        st["engine_unready_since"] = us
+        eng_toks = 0.0
+        waited = int(now - us)
+        eng_detail = "models %s (not ready, %ds)" % (emstatus, waited)
+        engine_state = "warming" if waited < float(cfg["ENGINE_STARTUP_GRACE_S"]) else "down"
+    eng_ok = engine_state in ("healthy", "warming")
 
     checks = {"tunnel": tunnel_ok, "server": server_ok, "ws": ws_ok, "engine": eng_ok}
     fails = [k for k, v in checks.items() if not v]
     healthy = not fails
 
-    log("check: tunnel=%s server=%s ws=%s engine=%s(%.2f tok/s) %s" % (
-        tunnel_ok, server_ok, ws_ok, eng_ok, eng_toks,
+    log("check: tunnel=%s server=%s ws=%s engine=%s[%s](%.2f tok/s) %s" % (
+        tunnel_ok, server_ok, ws_ok, eng_ok, engine_state, eng_toks,
         "" if healthy else "FAILS=" + ",".join(fails)))
     if not ws_ok:
         log("  ws detail: " + str(wsdetail))
@@ -307,27 +317,26 @@ def main():
     if not tunnel_ok:
         log("  tunnel detail: status=%s %s" % (tstatus, str(tbody)[:100]))
 
-    # update streaks; reset the engine heal-episode counter once the engine recovers
+    # update streaks
     for k, v in checks.items():
         streak[k] = 0 if v else streak.get(k, 0) + 1
-    if checks["engine"]:
-        st["engine_heal_episode"] = 0
 
     # ── heal (after N consecutive fails, cooldown-gated; role-gated per host) ──
-    # HEAL_DEMO / HEAL_ENGINE let a two-user demo split responsibility: the engine
-    # runs as one user (gui-domain kickstart), the demo daemon heals via a scoped sudo
-    # rule under another — so each monitor only attempts the heal it actually can do.
+    # DEMO DAEMON only: a restart clears an app-server crash/hang. The ENGINE is NEVER
+    # auto-kickstarted — a kickstart doesn't help either engine failure mode: warmup
+    # needs patience (handled by the startup grace above), and the decode wedge survives
+    # a process restart (observed 2026-07-18) → only a REBOOT clears it. So a wedge is
+    # DETECTED + alerted ("REBOOT REQUIRED"), never bounced. HEAL_DEMO gates the daemon
+    # heal so a two-user demo can put it on the user that holds the scoped sudo rule.
     n = int(cfg["FAILS_BEFORE_HEAL"])
     cooldown = float(cfg["HEAL_COOLDOWN_S"])
     do_demo = cfg.get("HEAL_DEMO", "1") == "1"
-    do_engine = cfg.get("HEAL_ENGINE", "1") == "1"
     heal_notes = []
-    engine_reboot_needed = False
+    engine_reboot_needed = (engine_state == "wedged")
 
     def can_heal(svc):
         return now - last_heal.get(svc, 0) >= cooldown
 
-    # server/ws → demo daemon (a restart normally clears an app-server crash/hang)
     if do_demo and (streak.get("server", 0) >= n or streak.get("ws", 0) >= n):
         if can_heal("demo"):
             hok, hmsg = heal_demo_daemon(cfg)
@@ -337,23 +346,9 @@ def main():
         else:
             heal_notes.append(("demo daemon", None, "in cooldown"))
 
-    # engine wedge → kickstart ONCE per episode. The decode wedge survives a process
-    # restart (observed), so if it's still wedged after that one kickstart, stop bouncing
-    # the engine and escalate: a REBOOT is required. (episode resets when it recovers.)
-    if do_engine and streak.get("engine", 0) >= n:
-        ep = st.get("engine_heal_episode", 0)
-        if ep == 0 and can_heal("engine"):
-            hok, hmsg = heal_engine(cfg)
-            last_heal["engine"] = now
-            st["engine_heal_episode"] = 1
-            heal_notes.append(("engine", hok, hmsg))
-            log("  HEAL engine: %s — %s" % ("ok" if hok else "FAIL", hmsg))
-        elif ep >= 1:
-            engine_reboot_needed = True
-            heal_notes.append(("engine", False,
-                "kickstarted once this episode and decode is STILL wedged — a process "
-                "restart does not clear this wedge, a REBOOT is required"))
-            log("  ENGINE still wedged after a kickstart → REBOOT REQUIRED (no re-kick)")
+    if engine_reboot_needed:
+        log("  ENGINE WEDGED (models OK, decode %.2f tok/s) → REBOOT REQUIRED (a "
+            "process restart does not clear this wedge)" % eng_toks)
 
     # ── alert (transition or reminder) ──
     prev = st.get("status", "unknown")
@@ -369,14 +364,15 @@ def main():
 
     if transitioned or reminder_due:
         if healthy:
-            downfor = int(now - st.get("down_since", now))
-            msg = "✅ demo.millfolio.app RECOVERED (was down ~%ds). All checks green." % downfor
+            ds = st.get("down_since") or 0
+            downfor = ("was down ~%ds" % int(now - ds)) if ds else "recovered"
+            msg = "✅ demo.millfolio.app RECOVERED (%s). All checks green." % downfor
         else:
             lines = ["🔴 demo.millfolio.app DEGRADED — failing: %s" % ", ".join(fails)]
             if engine_reboot_needed:
-                lines.append("⚠️ REBOOT REQUIRED — engine decode wedge survived a restart.")
-            if "engine" in fails:
-                lines.append("• engine decode %.2f tok/s (floor %s) — %s" % (eng_toks, cfg["ENGINE_FLOOR_TOKS"], eng_detail))
+                lines.append("⚠️ ENGINE WEDGED → REBOOT REQUIRED (decode %.2f tok/s; a process restart won't clear it)." % eng_toks)
+            elif "engine" in fails:
+                lines.append("• engine down/unreachable — %s" % eng_detail)
             if "ws" in fails:
                 lines.append("• ws round-trip: %s" % wsdetail)
             if "server" in fails:
