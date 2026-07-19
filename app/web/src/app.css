@@ -1,36 +1,117 @@
-/* Millfolio design tokens (draft) — a calm, private, "veil + lens" palette.
-   These will move to ../../shared once the native apps need them too. */
+/* Millfolio design tokens — a calm, private, "veil + lens" palette.
+   These will move to ../../shared once the native apps need them too.
+
+   Two themes, same brand — selection FOLLOWS THE OS, no manual toggle:
+     1. `:root` maps every token to DARK — the default (and the dark-OS look).
+     2. `@media (prefers-color-scheme: light)` remaps to LIGHT.
+   Raw values live once as `--d-*` / `--l-*`; the mapping blocks only alias them.
+   The LIGHT UI palette (bg/surface/text/accent/ok/warn/err/border) is contrast-
+   worked for WCAG AA on white/#eceff4 surfaces. The media query resolves at parse
+   time, so following the OS costs no JS and never flashes. */
 :root {
-  --bg: #0e1116;
-  --surface: #161b22;
-  --surface-2: #1c232d;
-  --border: #2a323d;
-  --text: #e6edf3;
-  --text-dim: #9aa7b4;
-  --accent: #6ea8fe; /* lens blue */
-  --accent-dim: #345;
-  --ok: #3fb950;
-  --warn: #d29922;
-  --err: #f85149;
-  /* Chart series hues (COMPUTE_VS_RENDER Phase 2). A validated categorical pair for
-     the dark chart surface — blue + aqua, worst-adjacent CVD ΔE 69.8, both ≥3:1 on
-     the surface and inside the dark lightness band (dataviz validate_palette.js).
-     Single-series line/bar use --chart-1 only (one measure = one hue, no legend);
-     grouped bar uses both with a legend. */
-  --chart-1: #3987e5;
-  --chart-2: #199e70;
-  /* Extended categorical hues for a share-of-whole PIE (a small number of parts,
-     ≤ ~8). Distinct on the dark chart surface; the pie always pairs color with a
-     legend + % so identity is never color-alone. Cycled if there are more parts. */
-  --chart-3: #e0913a; /* amber */
-  --chart-4: #b477e0; /* violet */
-  --chart-5: #e0607a; /* rose */
-  --chart-6: #45c4c4; /* teal */
-  --chart-7: #9bbf3f; /* lime */
-  --chart-8: #d98cc0; /* pink */
+  /* ── DARK (the original, unchanged look) ─────────────────────────────── */
+  --d-bg: #0e1116;
+  --d-surface: #161b22;
+  --d-surface-2: #1c232d;
+  --d-border: #2a323d;
+  --d-text: #e6edf3;
+  --d-text-dim: #9aa7b4;
+  --d-accent: #6ea8fe; /* lens blue */
+  --d-accent-dim: #334455;
+  --d-ok: #3fb950;
+  --d-warn: #d29922;
+  --d-err: #f85149;
+  /* Chart series hues tuned for the DARK chart surface (dataviz
+     validate_palette.js — see COMPUTE_VS_RENDER Phase 2). */
+  --d-chart-1: #3987e5;
+  --d-chart-2: #199e70;
+  --d-chart-3: #e0913a;
+  --d-chart-4: #b477e0;
+  --d-chart-5: #e0607a;
+  --d-chart-6: #45c4c4;
+  --d-chart-7: #9bbf3f;
+  --d-chart-8: #d98cc0;
+
+  /* ── LIGHT ────────────────────────────────────────────────────────────
+     UI palette contrast-checked on the light surfaces (text 12.5:1 on white,
+     accent #1361c9 4.6:1, ok/warn/err all AA):
+       bg #f4f6f9 · surface #fff · surface-2 #eceff4 · border #ccd3dd
+       text #11181f · text-dim #55606d · accent #1361c9 · accent-dim(chip) #dce9fb */
+  --l-bg: #f4f6f9;
+  --l-surface: #ffffff;
+  --l-surface-2: #eceff4;
+  --l-border: #ccd3dd;
+  --l-text: #11181f;
+  --l-text-dim: #55606d;
+  --l-accent: #1361c9;
+  --l-accent-dim: #dce9fb;
+  --l-ok: #1a7f37;
+  --l-warn: #9a6700;
+  --l-err: #cf222e;
+  /* Chart hues darkened/saturated for the WHITE chart surface. First pass —
+     re-validate with the dataviz validator (as the dark set was) before relying
+     on fine CVD separation; all are ≥3:1 on white by construction. */
+  --l-chart-1: #1f6fd4;
+  --l-chart-2: #12855f;
+  --l-chart-3: #b56a15;
+  --l-chart-4: #8a4fc0;
+  --l-chart-5: #cf3a5b;
+  --l-chart-6: #128a8a;
+  --l-chart-7: #6f8f1f;
+  --l-chart-8: #b8579a;
+
+  /* ── theme-independent ────────────────────────────────────────────────── */
   --radius: 10px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* ── mapping: DARK by default ─────────────────────────────────────────── */
+  color-scheme: dark;
+  --bg: var(--d-bg);
+  --surface: var(--d-surface);
+  --surface-2: var(--d-surface-2);
+  --border: var(--d-border);
+  --text: var(--d-text);
+  --text-dim: var(--d-text-dim);
+  --accent: var(--d-accent);
+  --accent-dim: var(--d-accent-dim);
+  --ok: var(--d-ok);
+  --warn: var(--d-warn);
+  --err: var(--d-err);
+  --chart-1: var(--d-chart-1);
+  --chart-2: var(--d-chart-2);
+  --chart-3: var(--d-chart-3);
+  --chart-4: var(--d-chart-4);
+  --chart-5: var(--d-chart-5);
+  --chart-6: var(--d-chart-6);
+  --chart-7: var(--d-chart-7);
+  --chart-8: var(--d-chart-8);
+}
+
+/* the OS is in light mode → use the light palette */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: var(--l-bg);
+    --surface: var(--l-surface);
+    --surface-2: var(--l-surface-2);
+    --border: var(--l-border);
+    --text: var(--l-text);
+    --text-dim: var(--l-text-dim);
+    --accent: var(--l-accent);
+    --accent-dim: var(--l-accent-dim);
+    --ok: var(--l-ok);
+    --warn: var(--l-warn);
+    --err: var(--l-err);
+    --chart-1: var(--l-chart-1);
+    --chart-2: var(--l-chart-2);
+    --chart-3: var(--l-chart-3);
+    --chart-4: var(--l-chart-4);
+    --chart-5: var(--l-chart-5);
+    --chart-6: var(--l-chart-6);
+    --chart-7: var(--l-chart-7);
+    --chart-8: var(--l-chart-8);
+  }
 }
 
 * {
