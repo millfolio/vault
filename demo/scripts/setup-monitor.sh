@@ -3,13 +3,17 @@
 # setup-monitor.sh — install the demo health monitor (monitor.py) on the demo host.
 #
 # Two install modes:
-#   (default, SSH-friendly) a per-user CRON entry every 5 min. Checks + alerts +
-#     auto-heals the demo APP-SERVER (the scoped `sudo -n launchctl kickstart
-#     system/app.millfolio.demo` works from cron). It CANNOT kickstart the engine
-#     (a gui-domain agent) — an engine wedge is detected + alerted, not auto-healed.
-#   --gui  a gui LaunchAgent (StartInterval 300). Must be run from the bgent CONSOLE
-#     (Screen Sharing / desktop), NOT plain SSH — same as setup-demo-engine.sh. This
-#     one CAN also kickstart the engine agent, so engine wedges auto-heal too.
+#   (default, SSH-friendly) a per-user CRON entry every 5 min. Also installs the
+#     twice-daily access digest (08:00 + 14:00).
+#   --gui  a gui LaunchAgent (StartInterval 300), for the account that stays logged
+#     in. Must be run from the CONSOLE (Screen Sharing / desktop), NOT plain SSH —
+#     same as setup-demo-engine.sh.
+#
+# Either way the ENGINE is detect-and-alert ONLY — never auto-restarted. A kickstart
+# helps neither failure mode: warmup just needs time, and the decode wedge survives a
+# process restart (only a reboot clears it), so a wedge escalates to a REBOOT-REQUIRED
+# alert. The only auto-heal is the demo APP-SERVER, via the scoped
+# `sudo -n launchctl kickstart system/app.millfolio.demo` rule (gate with HEAL_DEMO).
 #
 # Idempotent. Writes the config template to ~/.config/millfolio/demo-monitor.env if
 # absent (fill in the Discord webhook there). Runs one probe at the end.
@@ -31,11 +35,12 @@ LABEL="app.millfolio.demo-monitor"
 LA="$HOME/Library/LaunchAgents"
 PLIST="$LA/$LABEL.plist"
 CRON_TAG="# millfolio-demo-monitor"
+REPORT_TAG="# millfolio-demo-access-report"
 PY="$(command -v python3)"
 
 [[ -f "$MON" ]] || { echo "error: monitor.py not found at $MON"; exit 1; }
 
-uninstall_cron() { (crontab -l 2>/dev/null | grep -v "$CRON_TAG") | crontab - 2>/dev/null || true; }
+uninstall_cron() { (crontab -l 2>/dev/null | grep -v "$CRON_TAG" | grep -v "$REPORT_TAG") | crontab - 2>/dev/null || true; }
 uninstall_gui()  { launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true; rm -f "$PLIST"; }
 
 if [[ "$MODE" == "uninstall" ]]; then
@@ -60,8 +65,17 @@ if [[ "$MODE" == "cron" ]]; then
   (crontab -l 2>/dev/null; echo "$LINE") | crontab -
   echo "==> installed CRON entry (every 5 min):"
   echo "    $LINE"
-  echo "    NOTE: engine wedges are ALERTED but not auto-healed in cron mode."
-  echo "    For engine auto-heal too, run from the bgent console:  bash $0 --gui"
+  # twice-daily access digest (separate from the health alerts) — only on the host
+  # that holds the access log; no-ops quietly unless DISCORD_REPORT_WEBHOOK_URL is set.
+  if [[ -f "$DIR/demo-access-report.sh" ]]; then
+    (crontab -l 2>/dev/null | grep -v "$REPORT_TAG") | crontab -
+    RLINE="0 8,14 * * * /bin/bash $DIR/demo-access-report.sh >/dev/null 2>&1 $REPORT_TAG"
+    (crontab -l 2>/dev/null; echo "$RLINE") | crontab -
+    echo "==> installed ACCESS DIGEST cron (08:00 + 14:00):"
+    echo "    $RLINE"
+    echo "    (set DISCORD_REPORT_WEBHOOK_URL in the config to enable it)"
+  fi
+  echo "    NOTE: the engine is alert-only (a wedge needs a REBOOT, not a restart)."
 else
   mkdir -p "$LA"
   cat > "$PLIST" <<PLIST
@@ -81,7 +95,7 @@ PLIST
   if launchctl print "gui/$UID_NUM" >/dev/null 2>&1; then
     launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
     if launchctl bootstrap "gui/$UID_NUM" "$PLIST"; then
-      echo "==> loaded gui LaunchAgent (every 5 min) — full auto-heal (demo + engine)."
+      echo "==> loaded gui LaunchAgent (every 5 min)."
     else
       echo "==> WROTE but could not load (bootstrap failed). Are you on the console?"
     fi
