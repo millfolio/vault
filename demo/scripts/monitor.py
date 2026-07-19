@@ -66,6 +66,8 @@ def load_env():
         "ALERT_REMINDER_S": "1800",
         "DEMO_DAEMON": "system/app.millfolio.demo",
         "ENGINE_AGENT": "app.millfolio.demo-engine",
+        "HEAL_DEMO": "1",
+        "HEAL_ENGINE": "1",
     }
     try:
         with open(ENV_FILE) as f:
@@ -305,20 +307,28 @@ def main():
     if not tunnel_ok:
         log("  tunnel detail: status=%s %s" % (tstatus, str(tbody)[:100]))
 
-    # update streaks
+    # update streaks; reset the engine heal-episode counter once the engine recovers
     for k, v in checks.items():
         streak[k] = 0 if v else streak.get(k, 0) + 1
+    if checks["engine"]:
+        st["engine_heal_episode"] = 0
 
-    # ── heal (after N consecutive fails, cooldown-gated) ──
+    # ── heal (after N consecutive fails, cooldown-gated; role-gated per host) ──
+    # HEAL_DEMO / HEAL_ENGINE let a two-user demo split responsibility: the engine
+    # runs as one user (gui-domain kickstart), the demo daemon heals via a scoped sudo
+    # rule under another — so each monitor only attempts the heal it actually can do.
     n = int(cfg["FAILS_BEFORE_HEAL"])
     cooldown = float(cfg["HEAL_COOLDOWN_S"])
+    do_demo = cfg.get("HEAL_DEMO", "1") == "1"
+    do_engine = cfg.get("HEAL_ENGINE", "1") == "1"
     heal_notes = []
+    engine_reboot_needed = False
 
     def can_heal(svc):
         return now - last_heal.get(svc, 0) >= cooldown
 
-    # server/ws → demo daemon
-    if (streak.get("server", 0) >= n or streak.get("ws", 0) >= n):
+    # server/ws → demo daemon (a restart normally clears an app-server crash/hang)
+    if do_demo and (streak.get("server", 0) >= n or streak.get("ws", 0) >= n):
         if can_heal("demo"):
             hok, hmsg = heal_demo_daemon(cfg)
             last_heal["demo"] = now
@@ -326,15 +336,24 @@ def main():
             log("  HEAL demo: %s — %s" % ("ok" if hok else "FAIL", hmsg))
         else:
             heal_notes.append(("demo daemon", None, "in cooldown"))
-    # engine wedge/down → engine agent
-    if streak.get("engine", 0) >= n:
-        if can_heal("engine"):
+
+    # engine wedge → kickstart ONCE per episode. The decode wedge survives a process
+    # restart (observed), so if it's still wedged after that one kickstart, stop bouncing
+    # the engine and escalate: a REBOOT is required. (episode resets when it recovers.)
+    if do_engine and streak.get("engine", 0) >= n:
+        ep = st.get("engine_heal_episode", 0)
+        if ep == 0 and can_heal("engine"):
             hok, hmsg = heal_engine(cfg)
             last_heal["engine"] = now
+            st["engine_heal_episode"] = 1
             heal_notes.append(("engine", hok, hmsg))
             log("  HEAL engine: %s — %s" % ("ok" if hok else "FAIL", hmsg))
-        else:
-            heal_notes.append(("engine", None, "in cooldown"))
+        elif ep >= 1:
+            engine_reboot_needed = True
+            heal_notes.append(("engine", False,
+                "kickstarted once this episode and decode is STILL wedged — a process "
+                "restart does not clear this wedge, a REBOOT is required"))
+            log("  ENGINE still wedged after a kickstart → REBOOT REQUIRED (no re-kick)")
 
     # ── alert (transition or reminder) ──
     prev = st.get("status", "unknown")
@@ -354,6 +373,8 @@ def main():
             msg = "✅ demo.millfolio.app RECOVERED (was down ~%ds). All checks green." % downfor
         else:
             lines = ["🔴 demo.millfolio.app DEGRADED — failing: %s" % ", ".join(fails)]
+            if engine_reboot_needed:
+                lines.append("⚠️ REBOOT REQUIRED — engine decode wedge survived a restart.")
             if "engine" in fails:
                 lines.append("• engine decode %.2f tok/s (floor %s) — %s" % (eng_toks, cfg["ENGINE_FLOOR_TOKS"], eng_detail))
             if "ws" in fails:
