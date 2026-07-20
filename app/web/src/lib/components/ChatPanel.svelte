@@ -640,11 +640,28 @@
             {/if}
           </div>
           {#if it.buildState === "building" || it.buildState === "ready"}
-            <div class="tbbar" role="progressbar" aria-valuemin="0" aria-valuemax={it.total || 0} aria-valuenow={it.done || 0}>
-              <span class="tbfill" style="width:{it.total ? Math.round(((it.done || 0) / it.total) * 100) : 0}%"></span>
+            <!-- A tag that's already fully backfilled returns total=0/done on the
+                 first window (nothing pending), so "ready" pins the bar to 100%
+                 rather than leaving it empty at "starting…". -->
+            {@const pct =
+              it.buildState === "ready"
+                ? 100
+                : it.total
+                  ? Math.round(((it.done || 0) / it.total) * 100)
+                  : 0}
+            <div class="tbbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct}>
+              <span class="tbfill" style="width:{pct}%"></span>
             </div>
             <div class="tbmeta">
-              {#if it.total}{it.done || 0} / {it.total} transactions · {it.positives || 0} matched{:else}starting…{/if}
+              {#if it.buildState === "ready"}
+                {it.total
+                  ? `${it.total} transactions · ${it.positives || 0} matched`
+                  : "already up to date — nothing left to classify"}
+              {:else if it.total}
+                {it.done || 0} / {it.total} transactions · {it.positives || 0} matched
+              {:else}
+                starting…
+              {/if}
             </div>
           {:else if it.detail}
             <div class="tbmeta">{it.detail}</div>
