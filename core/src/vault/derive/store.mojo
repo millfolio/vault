@@ -790,6 +790,159 @@ def ml_backfill(base_url: String) raises -> Int:
         raise e^
 
 
+def _range_json(
+    tag: String,
+    total: Int,
+    offset: Int,
+    examined: Int,
+    positives: Int,
+    next_offset: Int,
+    done: Bool,
+) -> String:
+    """The `ml_classify_range` reply. Tags are safe lowercase identifiers, so the
+    name needs no JSON escaping."""
+    var out = String('{"tag":"') + tag + '","total":' + String(total)
+    out += ',"offset":' + String(offset)
+    out += ',"examined":' + String(examined)
+    out += ',"positives":' + String(positives)
+    out += ',"nextOffset":' + String(next_offset)
+    out += ',"done":'
+    if done:
+        out += "true"
+    else:
+        out += "false"
+    out += ',"busy":false}'
+    return out^
+
+
+def _classify_range_locked(
+    base_url: String, tag: String, offset: Int, limit: Int
+) raises -> String:
+    var reg = load_registry()
+    var rows = load_txn_rows()
+    var markers = load_ledger()
+    var max_gen = max_added_gen(rows)
+
+    var ri = -1
+    for i in range(len(reg.rules)):
+        if reg.rules[i].is_ml() and reg.rules[i].tag == tag:
+            ri = i
+            break
+    if ri < 0:
+        raise Error("no such AI tag: " + tag)
+    ref r = reg.rules[ri]
+
+    var cur = qhash(r.ml_prompt)
+    var mdg = marker_done_gen(markers, r.tag, cur)
+    var gens = _pending_gens(rows, mdg)
+    if len(gens) == 0:
+        # Nothing pending — mirror the drain and record an absent marker so the
+        # readiness gate reflects reality.
+        if mdg == GEN_ABSENT:
+            upsert_marker(markers, r.tag, cur, max_gen)
+            save_ledger(markers)
+        return _range_json(tag, 0, offset, 0, 0, 0, True)
+
+    # Walk the OLDEST pending generation in stable row order. Enumerating ALL of
+    # its rows (not just the untagged ones) is what makes `offset` stable across
+    # calls: the set of untagged rows shrinks as positives land, but this list
+    # does not.
+    var g = gens[0]
+    var gidx = List[Int]()
+    for t in range(len(rows)):
+        if rows[t].added_gen == g:
+            gidx.append(t)
+    var total = len(gidx)
+
+    var start = offset
+    if start < 0:
+        start = 0
+    if start > total:
+        start = total
+    var end = total
+    if limit > 0 and start + limit < total:
+        end = start + limit
+
+    # Within the window, only rows that still need the model. Same direction gate
+    # as the drain (never classify a credit for an expense rule).
+    var idxs = List[Int]()
+    var descs = List[String]()
+    for k in range(start, end):
+        var t = gidx[k]
+        if not contains(rows[t].tags, r.tag) and tag_allows_direction(
+            r.tag, rows[t].direction
+        ):
+            idxs.append(t)
+            descs.append(rows[t].desc.copy())
+
+    var positives = 0
+    if len(descs) > 0:
+        var dc = classify_batch_dedup(base_url, r.ml_prompt, descs)
+        record_backfill_dedup(dc.seen, dc.unique, dc.unique_norm)
+        for k in range(len(idxs)):
+            if k < len(dc.verdicts) and dc.verdicts[k]:
+                var row = rows[idxs[k]].copy()
+                row.tags.append(r.tag.copy())
+                rows[idxs[k]] = row^
+                positives += 1
+        write_txn_rows(rows)
+
+    var examined = end - start
+    var next_offset = end
+    var done = False
+    if end >= total:
+        # The whole generation is classified → and only NOW may the watermark
+        # move. Stopping before this point leaves the ledger untouched by design.
+        upsert_marker(markers, r.tag, cur, g)
+        save_ledger(markers)
+        next_offset = 0  # a later generation (if any) restarts at 0
+        if len(_pending_gens(rows, g)) == 0:
+            done = True
+    return _range_json(
+        tag, total, start, examined, positives, next_offset, done
+    )
+
+
+def ml_classify_range(
+    base_url: String, tag: String, offset: Int, limit: Int
+) raises -> String:
+    """Classify a BOUNDED WINDOW of one ML tag's pending rows — the foreground
+    "build this tag now" path the ask flow drives while the user waits.
+
+    Why this exists next to `ml_backfill_slice`: the ledger watermark can only
+    express WHOLE generations (see `_pending_gens`), and a vault indexed in one
+    pass is a SINGLE generation — so a generation-bounded slice classifies the
+    entire vault in one uninterruptible call, with no progress and nowhere to
+    cancel. This walks the pending generation in stable row order instead, so a
+    caller can loop with a moving `offset`, render real progress, and stop
+    between windows.
+
+    The marker advances ONLY when a generation is fully examined, so abandoning
+    the loop midway leaves the ledger untouched: the tag stays un-ready and the
+    normal background worker finishes it later. Rows that already gained the tag
+    keep it (positives are cached), so nothing is redone.
+
+    Deliberately does NOT honor `is_paused()` — the pause exists to keep the
+    background worker out of a question's way, but this IS the user's question,
+    started by an explicit "build it now".
+
+    Returns `{tag,total,offset,examined,positives,nextOffset,done,busy}`. `done`
+    is true only when NO pending rows remain for this tag across all
+    generations; `nextOffset` resets to 0 when the window rolls onto a later one.
+    `busy` means another writer held the lock — retry the same offset."""
+    if not try_lock():
+        var b = String('{"busy":true,"done":false,"nextOffset":')
+        b += String(offset) + "}"
+        return b^
+    try:
+        var out = _classify_range_locked(base_url, tag, offset, limit)
+        unlock()
+        return out^
+    except e:
+        unlock()
+        raise e^
+
+
 def ml_backfill_slice(base_url: String) raises -> Int:
     """One bounded generation-batch of backfill — the app-server's
     between-questions worker. Non-blocking try-lock (skip if the CLI holds it) and

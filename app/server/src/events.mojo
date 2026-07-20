@@ -82,6 +82,27 @@ def tag_proposal_event(name: String, value: String, kind: String) -> String:
     )
 
 
+def tag_build_event(name: String, prompt: String) -> String:
+    """Ask the client to BUILD the just-proposed AI tag before we answer — the
+    ask flow then parks on `conn.recv()` until it replies `tag-ready` or
+    `skip-tag`.
+
+    The client owns the loop (create the tag, then drive
+    POST /api/tags/classify-range with a moving offset) for two reasons: the WS
+    connection has only a BLOCKING `recv()`, so a server-side loop could never
+    hear a Skip; and the scheduler deliberately yields to an active query, so a
+    server-side wait on the background worker would deadlock by politeness. The
+    row count for the progress bar comes back on the first classify-range reply.
+    """
+    return (
+        '{"type":"tag-build","name":'
+        + json_escape(name)
+        + ',"prompt":'
+        + json_escape(prompt)
+        + "}"
+    )
+
+
 def debug_event(
     step: String, title: String, body: String, language: String
 ) -> String:

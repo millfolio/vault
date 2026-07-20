@@ -20,6 +20,19 @@
     | { kind: "debug"; id: string; title: string; body: string; language?: string }
     | { kind: "tags"; id: string; tags: string }
     | { kind: "tag-proposal"; id: string; name: string; ml?: boolean; keywords?: string; prompt?: string }
+    // The server is holding the answer while we build this AI tag. We own the
+    // loop (create + drive /api/tags/classify-range) and reply tag-ready/skip-tag.
+    | {
+        kind: "tag-build";
+        id: string;
+        name: string;
+        prompt: string;
+        total: number; // rows to classify (0 until the first window replies)
+        done: number; // rows examined so far
+        positives: number;
+        buildState: "building" | "ready" | "skipped" | "error";
+        detail?: string;
+      }
     | {
         kind: "approval";
         id: string;
@@ -881,6 +894,23 @@
             prompt: e.prompt ?? "",
           });
         break;
+      case "tag-build": {
+        // The server is holding the answer while we build this tag. Start
+        // immediately (the good path) and offer Skip — see buildTag().
+        const tbId = uid();
+        items.push({
+          kind: "tag-build",
+          id: tbId,
+          name: e.name,
+          prompt: e.prompt,
+          total: 0,
+          done: 0,
+          positives: 0,
+          buildState: "building",
+        });
+        void buildTag(tbId, e.name, e.prompt);
+        break;
+      }
       case "debug":
         items.push({ kind: "debug", id: uid(), title: e.title, body: e.body, language: e.language });
         break;
@@ -939,6 +969,77 @@
   function reject(id: string, stepId: string) {
     resolve(id, "rejected");
     session?.reject(stepId, "rejected by user");
+  }
+
+  // ── Foreground AI-tag build (the `tag-build` gate) ──────────────────────────
+  // The server is parked on recv() until we answer. We create the tag, then walk
+  // /api/tags/classify-range in bounded windows — that endpoint is row-bounded
+  // (unlike /api/backfill/run, which does a whole generation = the entire vault
+  // when it was indexed in one pass), so there's real progress and a place to
+  // Skip between windows.
+  //
+  // Skip abandons the WAIT, not the tag: the marker only advances on a fully
+  // examined generation, so a half-built tag simply stays un-ready and the
+  // background worker finishes it for next time. Rows already tagged keep it.
+  const TAG_BUILD_WINDOW = 50;
+  let tagBuildSkipped = false;
+
+  function patchTagBuild(id: string, patch: Record<string, unknown>) {
+    const i = items.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const cur = items[i];
+    if (cur.kind === "tag-build") items[i] = { ...cur, ...patch };
+  }
+
+  async function buildTag(id: string, name: string, prompt: string) {
+    tagBuildSkipped = false;
+    try {
+      // Create it first — an AI rule matches 0 rows until it's classified.
+      const created = await fetch("/api/tags/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, prompt }),
+      });
+      if (!created.ok) throw new Error(`couldn't create the tag (${created.status})`);
+
+      let offset = 0;
+      let positives = 0;
+      for (;;) {
+        if (tagBuildSkipped) return; // skipTagBuild() already answered the gate
+        const resp = await fetch("/api/tags/classify-range", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag: name, offset, limit: TAG_BUILD_WINDOW }),
+        });
+        const j = await resp.json();
+        if (j.error) throw new Error(j.error);
+        if (j.busy) {
+          // Another writer holds the lock — retry the same window shortly.
+          await new Promise((s) => setTimeout(s, 400));
+          continue;
+        }
+        positives += j.positives ?? 0;
+        patchTagBuild(id, {
+          total: j.total || 0,
+          done: j.done ? j.total || 0 : (j.offset ?? 0) + (j.examined ?? 0),
+          positives,
+        });
+        if (j.done) break;
+        offset = j.nextOffset;
+      }
+      patchTagBuild(id, { buildState: "ready" });
+      session?.tagReady(name); // → server regenerates the program to use the tag
+    } catch (err) {
+      // Never strand the question: fall back to the inline path.
+      patchTagBuild(id, { buildState: "error", detail: String(err) });
+      session?.skipTag(name);
+    }
+  }
+
+  function skipTagBuild(id: string, name: string) {
+    tagBuildSkipped = true;
+    patchTagBuild(id, { buildState: "skipped" });
+    session?.skipTag(name);
   }
 </script>
 
@@ -1091,7 +1192,7 @@
   {/if}
   <div class="single">
     {#if view === "chat"}
-      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />
+      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} onskiptag={skipTagBuild} />
     {:else if view === "board"}
       <!-- Millwright: the versioned dashboard of pinned answers (trusted chrome). -->
       {#key page.params.tab}
@@ -1113,7 +1214,7 @@
       <!-- Demo only — the standalone Stats page (the demo has no Operations tab). -->
       <StatsPanel />
     {:else}
-      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} />
+      <ChatPanel {items} {busy} demo={isDemo} onsend={send} onrun={runAgain} onapprove={approve} onreject={reject} onskiptag={skipTagBuild} />
     {/if}
   </div>
   <footer class="statusbar">

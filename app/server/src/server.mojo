@@ -277,6 +277,10 @@ struct Api(Copyable, Handler, Movable):
             return handlers_tags.handle_tags_preview_ai(req)
         if path == "/api/tags/add":
             return handlers_tags.handle_tags_add(req)
+        # Foreground, row-bounded classify — the ask flow's "build this tag now"
+        # loop (short + interruptible, unlike the generation-bounded /backfill/run).
+        if path == "/api/tags/classify-range":
+            return handlers_tags.handle_tag_classify_range(req)
         if path == "/api/tags/missing-defaults":
             return handlers_tags.handle_tags_missing_defaults()
         if path == "/api/tags/add-defaults":

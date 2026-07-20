@@ -91,6 +91,14 @@ class WsSession implements Session {
   reject(stepId: string, reason?: string) {
     this.put({ type: "reject", stepId, reason });
   }
+  // Answers to a `tag-build` gate; the server is parked on recv() until one of
+  // these arrives (see protocol.ts).
+  tagReady(name: string) {
+    this.put({ type: "tag-ready", name });
+  }
+  skipTag(name: string) {
+    this.put({ type: "skip-tag", name });
+  }
 
   private write(m: ClientMessage) {
     this.ws.send(JSON.stringify(m));

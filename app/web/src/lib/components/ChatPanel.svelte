@@ -7,14 +7,19 @@
   // rendered in place — status/debug small, approval at regular font. Mirrors the
   // ChatItem union in routes/+page.svelte.
   interface Item {
-    kind: "user" | "assistant" | "status" | "debug" | "approval" | "tags" | "tag-proposal";
+    kind: "user" | "assistant" | "status" | "debug" | "approval" | "tags" | "tag-proposal" | "tag-build";
     id: string;
     text?: string;
     tags?: string;         // tags: comma-joined category tags the program filtered on
-    name?: string;         // tag-proposal: suggested tag name
+    name?: string;         // tag-proposal / tag-build: the tag name
     keywords?: string;     // tag-proposal: suggested keywords (comma-joined)
     ml?: boolean;          // tag-proposal: true = AI rule (prompt), false = keyword
-    prompt?: string;       // tag-proposal (AI): the yes/no question to classify with
+    prompt?: string;       // tag-proposal (AI) / tag-build: the yes/no question
+    // tag-build: the foreground build the ask flow waits on (see +page.svelte).
+    total?: number;        // rows to classify (0 until the first window replies)
+    done?: number;         // rows examined so far
+    positives?: number;    // rows that matched
+    buildState?: "building" | "ready" | "skipped" | "error";
     stepId?: string;
     label?: string;
     state?: StepState;
@@ -36,6 +41,7 @@
     onrun,
     onapprove,
     onreject,
+    onskiptag,
   }: {
     items: Item[];
     busy: boolean;
@@ -44,6 +50,8 @@
     onrun: (program: string, question: string) => void;
     onapprove: (id: string, stepId: string) => void;
     onreject: (id: string, stepId: string) => void;
+    /** Abandon the WAIT on a foreground tag build (the tag keeps backfilling). */
+    onskiptag?: (id: string, name: string) => void;
   } = $props();
 
   // The curated demo questions — the ONLY ones the replay cache can answer. The
@@ -615,6 +623,33 @@
           <span class="tlabel">filtered by tag</span>
           {#each (it.tags ?? "").split(",") as t}<a class="chip" href="/tags" title="See this tag's rule in the Tags tab">{t}</a>{/each}
         </div>
+      {:else if it.kind === "tag-build"}
+        <!-- The answer is on hold while this tag is built. Building starts
+             immediately (the good path); Skip abandons the WAIT, not the tag —
+             it keeps backfilling in the background for next time. -->
+        <div class="tagbuild" title="Building this tag now means the answer comes from a fast, exact filter instead of classifying every transaction inline">
+          <div class="tbhead">
+            <span class="tblabel">
+              {#if it.buildState === "building"}⏳ Building <strong>{it.name}</strong>…
+              {:else if it.buildState === "ready"}✓ Built <strong>{it.name}</strong> — rewriting the program to use it
+              {:else if it.buildState === "skipped"}⏭ Skipped — answering with inline classification
+              {:else}⚠ Couldn't build <strong>{it.name}</strong> — answering inline{/if}
+            </span>
+            {#if it.buildState === "building"}
+              <button class="tbskip" onclick={() => onskiptag?.(it.id, it.name ?? "")}>Skip</button>
+            {/if}
+          </div>
+          {#if it.buildState === "building" || it.buildState === "ready"}
+            <div class="tbbar" role="progressbar" aria-valuemin="0" aria-valuemax={it.total || 0} aria-valuenow={it.done || 0}>
+              <span class="tbfill" style="width:{it.total ? Math.round(((it.done || 0) / it.total) * 100) : 0}%"></span>
+            </div>
+            <div class="tbmeta">
+              {#if it.total}{it.done || 0} / {it.total} transactions · {it.positives || 0} matched{:else}starting…{/if}
+            </div>
+          {:else if it.detail}
+            <div class="tbmeta">{it.detail}</div>
+          {/if}
+        </div>
       {:else if it.kind === "tag-proposal"}
         <div class="proposal" title="Save this as a category tag so the next such question is a fast, exact filter — no model call">
           <div class="ptext">
@@ -1174,6 +1209,54 @@
   }
 
   /* tag-proposal — a dashed callout offering to save a model-suggested tag */
+  /* The foreground tag build the answer is waiting on. Solid border (not dashed
+     like a proposal) — this is work in flight, not an offer. */
+  .tagbuild {
+    margin: 4px 0;
+    padding: 8px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-dim, rgba(255, 122, 28, 0.08));
+  }
+  .tagbuild .tbhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .tagbuild .tblabel {
+    min-width: 0;
+  }
+  .tagbuild .tbskip {
+    flex: none;
+    padding: 2px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-dim);
+  }
+  .tagbuild .tbskip:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  .tagbuild .tbbar {
+    height: 6px;
+    margin: 8px 0 4px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .tagbuild .tbfill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.25s ease;
+  }
+  .tagbuild .tbmeta {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
   .proposal {
     display: flex;
     align-items: center;

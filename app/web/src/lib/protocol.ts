@@ -16,7 +16,15 @@ export type ClientMessage =
   // the stats/history record). Streams the same events an "ask" produces.
   | { type: "run"; id: string; program: string; text: string }
   | { type: "approve"; stepId: string }
-  | { type: "reject"; stepId: string; reason?: string };
+  | { type: "reject"; stepId: string; reason?: string }
+  // Replies to a `tag-build` gate. The server parks on recv() while the CLIENT
+  // creates the tag and drives /api/tags/classify-range to completion:
+  //   "tag-ready" → fully backfilled; the server REGENERATES the program so it
+  //                 filters on the new tag instead of classifying inline.
+  //   "skip-tag"  → answer now with the original program. The half-built tag is
+  //                 kept and finishes in the background for next time.
+  | { type: "tag-ready"; name: string }
+  | { type: "skip-tag"; name: string };
 
 export interface StatusEvent {
   type: "status";
@@ -143,6 +151,18 @@ export interface TagProposalEvent {
   prompt?: string;   // AI rule: the yes/no question to classify with
 }
 
+/** The server is holding the answer while this AI tag is built. The client owns
+ *  the loop (create it, then drive POST /api/tags/classify-range with a moving
+ *  offset) and replies `tag-ready` or `skip-tag`. Two reasons the client drives
+ *  it: the WS connection has only a BLOCKING recv() server-side (so a Skip could
+ *  never be heard mid-build), and the scheduler yields to an active query (so
+ *  waiting on the background worker would deadlock). */
+export interface TagBuildEvent {
+  type: "tag-build";
+  name: string;
+  prompt: string; // the yes/no question rows are classified with
+}
+
 export type ServerEvent =
   | StatusEvent
   | ApprovalRequestEvent
@@ -150,12 +170,32 @@ export type ServerEvent =
   | MessageEvent
   | TagsEvent
   | TagProposalEvent
+  | TagBuildEvent
   | ErrorEvent;
+
+/** One window of a foreground tag build — the reply from
+ *  POST /api/tags/classify-range. `done` is true only when NO pending rows
+ *  remain; `nextOffset` resets to 0 when rolling onto a later generation.
+ *  `busy` means another writer held the lock — retry the same offset. */
+export interface ClassifyRangeReply {
+  tag: string;
+  total: number;
+  offset: number;
+  examined: number;
+  positives: number;
+  nextOffset: number;
+  done: boolean;
+  busy: boolean;
+  error?: string;
+}
 
 /** A live session: receives server events, can answer approval gates. */
 export interface Session {
   approve(stepId: string): void;
   reject(stepId: string, reason?: string): void;
+  /** Answer a `tag-build` gate. */
+  tagReady(name: string): void;
+  skipTag(name: string): void;
 }
 
 export interface MillfolioClient {

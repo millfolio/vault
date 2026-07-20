@@ -34,6 +34,9 @@ class MockSession implements Session {
     this.gate?.(false, reason);
     this.gate = undefined;
   }
+  // The mock never emits a `tag-build` gate, so these are inert.
+  tagReady(_name: string) {}
+  skipTag(_name: string) {}
 
   private wait(ms: number) {
     return new Promise<void>((r) => setTimeout(r, ms));
@@ -96,6 +99,8 @@ class MockRunSession implements Session {
   }
   approve(_stepId: string) {}
   reject(_stepId: string, _reason?: string) {}
+  tagReady(_name: string) {}
+  skipTag(_name: string) {}
   private wait(ms: number) {
     return new Promise<void>((r) => setTimeout(r, ms));
   }

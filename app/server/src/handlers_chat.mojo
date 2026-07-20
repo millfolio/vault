@@ -58,6 +58,7 @@ from events import (
     status,
     tags_event,
     tag_proposal_event,
+    tag_build_event,
     debug_event,
     approval,
     message,
@@ -590,6 +591,60 @@ def on_connect(mut conn: WsConnection) raises:
             var prop = _tag_proposal_in_program(code)
             if len(prop) == 3:
                 conn.send_text(tag_proposal_event(prop[0], prop[1], prop[2]))
+                # For an AI (yes/no) proposal, offer to BUILD it before answering.
+                # The program we just generated classifies inline, row by row —
+                # which on a real vault is slow enough to time out. If the user
+                # lets it build, the tag becomes a fast `.tags` filter instead.
+                #
+                # The CLIENT drives the build (create + loop
+                # /api/tags/classify-range) and reports back; we simply park here,
+                # exactly like the approval gate below. See `tag_build_event`.
+                if prop[2] == "ml":
+                    conn.send_text(tag_build_event(prop[0], prop[1]))
+                    var tb = conn.recv()
+                    if tb.opcode == WsOpcode.CLOSE:
+                        conn.close(WsCloseCode.NORMAL)
+                        return
+                    if field(tb.text_payload(), "type") == "tag-ready":
+                        # The tag is now fully backfilled, so it passes the
+                        # readiness gate in `codegen_tags_describe()` and is in
+                        # the tag list this second codegen sees. Regenerate so the
+                        # program FILTERS on the tag instead of classifying inline.
+                        conn.send_text(
+                            status(
+                                "codegen",
+                                "Rewriting the program to use the new tag",
+                                "running",
+                            )
+                        )
+                        _t = perf_counter_ns()
+                        code = harness.vault_codegen(question, manifest)
+                        _bump(
+                            api_names,
+                            api_count,
+                            api_ms,
+                            "codegen",
+                            1,
+                            _ms_since(_t),
+                        )
+                        conn.send_text(
+                            debug_event(
+                                "codegen", "Generated program", code, "mojo"
+                            )
+                        )
+                        conn.send_text(
+                            status(
+                                "codegen",
+                                "Rewriting the program to use the new tag",
+                                "done",
+                            )
+                        )
+                        var used2 = _tags_in_program(code)
+                        if used2.byte_length() > 0:
+                            conn.send_text(tags_event(used2))
+                    # anything else (incl. "skip-tag") → answer with the original,
+                    # inline-classifying program; the half-built tag keeps
+                    # backfilling in the background for next time.
             pre_ms = _ms_since(
                 t_total0
             )  # manifest + codegen, before the approval pause

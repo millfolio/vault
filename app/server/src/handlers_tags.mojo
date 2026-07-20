@@ -32,6 +32,7 @@ from vault.derive.store import (
     preview_categories,
     backfill_status_json,
     ml_backfill_slice,
+    ml_classify_range,
     set_pause,
     set_priority,
     preview_ml_json,
@@ -128,6 +129,46 @@ def handle_backfill_run() raises -> Response:
             + "}"
         )
     )
+
+
+def handle_tag_classify_range(req: Request) raises -> Response:
+    """POST /api/tags/classify-range {"tag":…,"offset":N,"limit":M} → classify ONE
+    bounded WINDOW of that AI tag's pending rows, then return progress
+    (`{tag,total,offset,examined,positives,nextOffset,done,busy}`).
+
+    The foreground "build this tag now" path the ask flow drives while the user
+    waits: the client loops with `nextOffset` until `done`, rendering a progress
+    bar and offering Skip between windows. Unlike /api/backfill/run — bounded to
+    a whole GENERATION, i.e. the entire vault when it was indexed in one pass —
+    this is bounded by ROW COUNT, so every call is short and interruptible."""
+    var tag: String
+    var offset: Int
+    var limit: Int
+    try:
+        var j = loads(req.text())
+        tag = String(j["tag"].string_value())
+        offset = Int(j["offset"].int_value())
+        limit = Int(j["limit"].int_value())
+    except:
+        return _cors(bad_request('{"error":"expected {tag, offset, limit}"}'))
+    if limit <= 0:
+        limit = 50
+    try:
+        return _cors(
+            ok_json(ml_classify_range(_engine_url(), tag, offset, limit))
+        )
+    except e:
+        # Engine down / model not serving — report it without killing the flow so
+        # the client can surface "couldn't build" and fall back to inline.
+        print("  classify-range failed: ", String(e), sep="")
+        return _cors(
+            ok_json(
+                '{"error":"classify failed","done":false,"busy":true'
+                + ',"nextOffset":'
+                + String(offset)
+                + "}"
+            )
+        )
 
 
 def handle_backfill_pause(req: Request) raises -> Response:
