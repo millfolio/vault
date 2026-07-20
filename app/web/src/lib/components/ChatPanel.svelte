@@ -630,7 +630,7 @@
         <div class="tagbuild" title="Building this tag now means the answer comes from a fast, exact filter instead of classifying every transaction inline">
           <div class="tbhead">
             <span class="tblabel">
-              {#if it.buildState === "building"}⏳ Building <strong>{it.name}</strong>…
+              {#if it.buildState === "building"}⏳ Building AI tag <strong>{it.name}</strong> in batches to answer your question
               {:else if it.buildState === "ready"}✓ Built <strong>{it.name}</strong> — rewriting the program to use it
               {:else if it.buildState === "skipped"}⏭ Skipped — answering with inline classification
               {:else}⚠ Couldn't build <strong>{it.name}</strong> — answering inline{/if}

@@ -208,7 +208,7 @@ public final class Bootstrapper: ObservableObject {
     private var hfHome: URL { support.appendingPathComponent("hf", isDirectory: true) }
     /// inference-server checkout inside the unpacked engine zip.
     private var backendDir: URL { engineRoot.appendingPathComponent("inference-server", isDirectory: true) }
-    private var serverBin: URL { backendDir.appendingPathComponent("build/server") }
+    private var serverBin: URL { backendDir.appendingPathComponent("build/millfolio-inference") }
     /// The native-Mojo HF weights downloader, built at install time and RUN AT
     /// RUNTIME by the app server (not the installer). Its absolute path is handed to
     /// the app-server LaunchAgent as MILLFOLIO_DOWNLOAD_BIN.
@@ -502,7 +502,7 @@ public final class Bootstrapper: ObservableObject {
 
         set("Building engine (first run, ~1 min)…")
         try buildBinary(python: python, source: "src/server.mojo",
-                        args: ["-I", "../jinja2.mojo/src", "-I", "../flare"], out: "build/server")
+                        args: ["-I", "../jinja2.mojo/src", "-I", "../flare"], out: "build/millfolio-inference")
         signServerIdentity()
 
         // Build the native-Mojo weights downloader — NOT to download here, but so the
@@ -942,7 +942,8 @@ public final class Bootstrapper: ObservableObject {
         try run(mojo, ["build", source] + args + ["-o", out], cwd: backendDir, env: mojoEnv(python: python))
     }
 
-    /// `mojo build` ad-hoc "linker-signs" the server with the identifier "server".
+    /// `mojo build` ad-hoc "linker-signs" the binary with its own file name as the
+    /// identifier ("millfolio-inference").
     /// macOS's "<name> can run in the background" notification + Login Items entry
     /// for the LaunchAgent take that signing identifier as the name, so re-sign it
     /// (still ad-hoc) as "millfolio". Best-effort — purely cosmetic, so a failure

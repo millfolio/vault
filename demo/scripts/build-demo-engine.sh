@@ -21,14 +21,14 @@ LIB="$ENGINE_SRC/.pixi/envs/default/lib"
 
 echo "==> building inference server (pixi: flare-tls + server)"
 ( cd "$ENGINE_SRC" && pixi run flare-tls >/dev/null && \
-  pixi run -- mojo build src/server.mojo -I ../jinja2.mojo/src -I ../flare -o build/server ) \
+  pixi run -- mojo build src/server.mojo -I ../jinja2.mojo/src -I ../flare -o build/millfolio-inference ) \
   || { echo "error: build failed"; exit 1; }
 
 echo "==> staging standalone → $DEST"
 mkdir -p "$DEST/build"
-rm -rf "$DEST/assets" "$DEST/server" "$DEST/build" "$DEST"/*.dylib 2>/dev/null || true
+rm -rf "$DEST/assets" "$DEST/millfolio-demo-inference" "$DEST/server" "$DEST/build" "$DEST"/*.dylib 2>/dev/null || true
 mkdir -p "$DEST/build"
-cp "$ENGINE_SRC/build/server" "$DEST/server"
+cp "$ENGINE_SRC/build/millfolio-inference" "$DEST/millfolio-demo-inference"
 cp -R "$ENGINE_SRC/assets" "$DEST/assets"
 # flare-TLS + its OpenSSL are dlopen'd at runtime via the RELATIVE path
 # build/libflare_tls.so (cwd = $DEST), so they go in $DEST/build/, not $DEST/.

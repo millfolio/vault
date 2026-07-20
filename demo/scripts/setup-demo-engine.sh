@@ -24,7 +24,7 @@ LA="$HOME/Library/LaunchAgents"
 # build-demo-engine.sh (relocatable, independent of the dev tree).
 ENGINE_BIN="${ENGINE_BIN:-}"
 if [[ -z "$ENGINE_BIN" ]]; then
-  c="$HOME/Library/Application Support/Millfolio/demo-engine/server"
+  c="$HOME/Library/Application Support/Millfolio/demo-engine/millfolio-demo-inference"
   [[ -x "$c" ]] && ENGINE_BIN="$c"
 fi
 [[ -n "$ENGINE_BIN" && -x "$ENGINE_BIN" ]] || { echo "error: standalone engine not found — build it first:  bash scripts/build-demo-engine.sh   (or pass ENGINE_BIN=/path/to/server)"; exit 1; }
