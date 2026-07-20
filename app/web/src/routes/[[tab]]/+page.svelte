@@ -993,6 +993,7 @@
 
   async function buildTag(id: string, name: string, prompt: string) {
     tagBuildSkipped = false;
+    let paused = false;
     try {
       // Create it first — an AI rule matches 0 rows until it's classified.
       const created = await fetch("/api/tags/add", {
@@ -1001,6 +1002,23 @@
         body: JSON.stringify({ name, prompt }),
       });
       if (!created.ok) throw new Error(`couldn't create the tag (${created.status})`);
+
+      // PAUSE the between-questions worker for the duration. It takes the SAME
+      // writer lock, and its slice is a whole GENERATION (the entire vault when
+      // indexed in one pass) — so it would hold the lock for the whole build and
+      // every window here would come back `busy`, leaving the bar at 0 with no
+      // progress. ml_classify_range deliberately ignores the pause, so we still
+      // run; the finally below always lifts it.
+      try {
+        await fetch("/api/backfill/pause", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ seconds: 900 }),
+        });
+        paused = true;
+      } catch {
+        // best-effort — a contended build still works, just slower to show progress
+      }
 
       let offset = 0;
       let positives = 0;
@@ -1014,10 +1032,13 @@
         const j = await resp.json();
         if (j.error) throw new Error(j.error);
         if (j.busy) {
-          // Another writer holds the lock — retry the same window shortly.
+          // Another writer holds the lock — say so instead of sitting silently on
+          // "starting…", then retry the same window.
+          patchTagBuild(id, { detail: "waiting for the background worker…" });
           await new Promise((s) => setTimeout(s, 400));
           continue;
         }
+        patchTagBuild(id, { detail: undefined });
         positives += j.positives ?? 0;
         patchTagBuild(id, {
           total: j.total || 0,
@@ -1033,6 +1054,14 @@
       // Never strand the question: fall back to the inline path.
       patchTagBuild(id, { buildState: "error", detail: String(err) });
       session?.skipTag(name);
+    } finally {
+      if (paused) {
+        try {
+          await fetch("/api/backfill/resume", { method: "POST" });
+        } catch {
+          // the pause auto-expires anyway (set_pause is deadline-based)
+        }
+      }
     }
   }
 

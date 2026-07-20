@@ -1,6 +1,7 @@
 <script lang="ts">
   // Vault view — the indexable files in your vault dir + LanceDB index stats,
   // from the local server's GET /api/vault. Read-only; refreshable.
+  import { page } from "$app/state";
   import { onMount } from "svelte";
   import { untrack } from "svelte";
   import SubTabs from "./SubTabs.svelte";
@@ -323,7 +324,15 @@
     entityFilters = out;
     if (out.length) showRecords(); // land directly on the filtered records
   }
-  readEntityFilters();
+  // Re-read on EVERY navigation, not just at init. Clicking a tag while already
+  // on /vault (the Tags sub-tab) changes only the query string — `page.params.tab`
+  // stays "vault", so this component is never re-created and a one-time read left
+  // the filter unapplied (the click appeared to do nothing). Deep links from the
+  // Board worked only because those switch the view and remount us.
+  $effect(() => {
+    page.url.search; // track the query string
+    readEntityFilters();
+  });
   // Tag-strip click → filter the records in place (same mechanism as the
   // Board deep links; replaces any previous tag filter and updates the URL so
   // the view stays shareable).

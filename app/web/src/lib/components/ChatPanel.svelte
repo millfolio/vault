@@ -657,6 +657,8 @@
                 {it.total
                   ? `${it.total} transactions · ${it.positives || 0} matched`
                   : "already up to date — nothing left to classify"}
+              {:else if it.detail}
+                {it.detail}
               {:else if it.total}
                 {it.done || 0} / {it.total} transactions · {it.positives || 0} matched
               {:else}
