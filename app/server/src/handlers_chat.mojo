@@ -590,7 +590,14 @@ def on_connect(mut conn: WsConnection) raises:
             # filter, not an inline classify). A comment in the program; never runs.
             var prop = _tag_proposal_in_program(code)
             if len(prop) == 3:
-                conn.send_text(tag_proposal_event(prop[0], prop[1], prop[2]))
+                # A KEYWORD proposal is instant (no classification, no backfill),
+                # so it stays a passive "save this?" callout. An AI proposal is
+                # handled by the build gate below INSTEAD — sending both would
+                # show a "Create & backfill" button for a tag already building.
+                if prop[2] != "ml":
+                    conn.send_text(
+                        tag_proposal_event(prop[0], prop[1], prop[2])
+                    )
                 # For an AI (yes/no) proposal, offer to BUILD it before answering.
                 # The program we just generated classifies inline, row by row —
                 # which on a real vault is slow enough to time out. If the user
