@@ -312,12 +312,14 @@
   // same index-time cleaned brand programs group by), matched exactly (case-
   // insensitive) — substring matching would show a different set of rows than
   // the number the user clicked.
-  let entityFilters = $state<{ kind: "merchant" | "tag" | "month"; value: string }[]>([]);
+  // `desc` (from a result-table description link) is a plain substring match on the
+  // transaction description — the others match the normalized aggregate exactly.
+  let entityFilters = $state<{ kind: "merchant" | "tag" | "month" | "desc"; value: string }[]>([]);
   function readEntityFilters() {
     if (typeof window === "undefined") return;
     const p = new URLSearchParams(window.location.search);
-    const out: { kind: "merchant" | "tag" | "month"; value: string }[] = [];
-    for (const kind of ["merchant", "tag", "month"] as const) {
+    const out: { kind: "merchant" | "tag" | "month" | "desc"; value: string }[] = [];
+    for (const kind of ["merchant", "tag", "month", "desc"] as const) {
       const v = p.get(kind);
       if (v) out.push({ kind, value: v });
     }
@@ -378,6 +380,12 @@
         }
       } else if (f.kind === "tag") {
         out = out.filter((t) => t.tags.some((x) => x.toLowerCase() === v));
+      } else if (f.kind === "desc") {
+        // A description link from a result table: substring on the raw description
+        // (or cleaned merchant), so clicking a row's description lands on it.
+        out = out.filter(
+          (t) => t.desc.toLowerCase().includes(v) || (t.merchant || "").toLowerCase().includes(v),
+        );
       } else {
         out = out.filter((t) => txnMonth(t) === v);
       }

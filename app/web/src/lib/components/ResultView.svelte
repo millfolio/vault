@@ -18,6 +18,7 @@
   import GroupedBarChart from "$lib/components/charts/GroupedBarChart.svelte";
   import MapChart from "$lib/components/charts/MapChart.svelte";
   import PieChart from "$lib/components/charts/PieChart.svelte";
+  import ResultTable from "$lib/components/ResultTable.svelte";
 
   let { result }: { result: ResultSpec } = $props();
 
@@ -127,12 +128,6 @@
     });
   }
 
-  /** Board table cell → the filtered Vault view (client-side nav; the value is
-   *  the NORMALIZED entity string the aggregation used, matched exactly server-side). */
-  function entityHref(kind: EntityKind, cell: ResultValue): string {
-    return `/vault?${kind}=${encodeURIComponent(cellText(cell))}`;
-  }
-
   /** Entity kind for a CATEGORY chart axis: the spec's explicit `x.entity` wins,
    *  else infer from the block TITLE so charts saved before the field existed
    *  become clickable without regeneration. Conservative — only the known words. */
@@ -161,9 +156,6 @@
     if (v.type === "money" || v.type === "count") return v.text;
     return v.value;
   }
-  function isNumeric(v: ResultValue): boolean {
-    return v?.type === "money" || v?.type === "count";
-  }
 </script>
 
 {#if units.length > 0}
@@ -175,27 +167,7 @@
           <span class="kpi-value">{cellText(u.value)}</span>
         </div>
       {:else if u.t === "table"}
-        <div class="tbl-wrap">
-          <table class="tbl">
-            <thead>
-              <tr>{#each u.headers as h}<th>{h}</th>{/each}</tr>
-            </thead>
-            <tbody>
-              {#each u.rows as row}
-                <tr>
-                  {#each row as cell, ci}<td class:num={isNumeric(cell)}
-                    >{#if u.entities[ci] && cell.type === "text"}<a
-                        class="entity-link"
-                        href={entityHref(u.entities[ci], cell)}
-                        title="Show these records in the Vault"
-                        >{cellText(cell)}</a
-                      >{:else}{cellText(cell)}{/if}</td
-                  >{/each}
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+        <ResultTable headers={u.headers} rows={u.rows} entities={u.entities} />
       {:else if u.t === "group"}
         <GroupedBarChart title={u.title} xcats={u.xcats} series={u.series} />
       {:else if u.t === "map"}
@@ -241,45 +213,5 @@
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
-  /* table */
-  .tbl-wrap {
-    overflow-x: auto;
-    max-width: 100%;
-    border-radius: var(--radius);
-    border: 1px solid var(--border, rgba(127, 127, 127, 0.18));
-  }
-  .tbl {
-    border-collapse: collapse;
-    width: 100%;
-    font-size: 13px;
-  }
-  .tbl th,
-  .tbl td {
-    padding: 6px 10px;
-    text-align: left;
-    border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.14));
-    white-space: nowrap;
-  }
-  .tbl th {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-dim);
-    font-weight: 600;
-  }
-  .tbl tbody tr:last-child td {
-    border-bottom: none;
-  }
-  .entity-link {
-    color: inherit;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
-  }
-  .entity-link:hover {
-    color: var(--accent, #7aa2f7);
-  }
-  .tbl td.num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
+  /* table rendering (+ filters, footer total, deep-links) lives in ResultTable */
 </style>
