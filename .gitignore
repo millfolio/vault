@@ -1,5 +1,6 @@
 /build/
 /dist/
+privacy-box/web/dist/
 /.pixi/
 /.build/
 .astro/
