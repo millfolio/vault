@@ -55,8 +55,8 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     var p = alloc[c_char](n + 1)
     var sp = s.unsafe_ptr()  # UnsafePointer[UInt8]
     for i in range(n):
-        (p + i).init_pointee_copy(c_char(Int(sp[i])))
-    (p + n).init_pointee_copy(c_char(0))
+        (p.unsafe_offset(i)).unsafe_write(c_char(Int(sp[unsafe_offset=i])))
+    (p.unsafe_offset(n)).unsafe_write(c_char(0))
     return p
 
 
@@ -84,7 +84,9 @@ def _cstr_to_string(p: UnsafePointer[c_char, MutUntrackedOrigin]) -> String:
     """Materialize a NUL-terminated C string into an owned Mojo `String`."""
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(unsafe_from_ptr=p.bitcast[Int8]())
+            unsafe_from_utf8=CStringSlice(
+                unsafe_from_ptr=p.unsafe_bitcast[Int8]()
+            )
         )
     )
 
@@ -151,8 +153,8 @@ def _child_envp() -> (
     var env = _raw_environ()
     var kept = List[String]()
     var i = 0
-    while Int(env[i]) != 0:
-        var entry = _cstr_to_string(env[i])
+    while Int(env[unsafe_offset=i]) != 0:
+        var entry = _cstr_to_string(env[unsafe_offset=i])
         var parts = entry.split("=")
         if _env_forward(String(parts[0])):
             kept.append(entry)
@@ -160,8 +162,8 @@ def _child_envp() -> (
     var n = len(kept)
     var out = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
     for j in range(n):
-        (out + j).init_pointee_copy(_cstr(kept[j]))
-    (out + n).init_pointee_copy(_NULL_CHARP)
+        (out.unsafe_offset(j)).unsafe_write(_cstr(kept[j]))
+    (out.unsafe_offset(n)).unsafe_write(_NULL_CHARP)
     return out
 
 
@@ -173,10 +175,10 @@ def _free_envp(
     """Free a `_child_envp` array: each owned C string, then the array itself.
     """
     var i = 0
-    while Int(envp[i]) != 0:
-        envp[i].free()
+    while Int(envp[unsafe_offset=i]) != 0:
+        envp[unsafe_offset=i].unsafe_free()
         i += 1
-    envp.free()
+    envp.unsafe_free()
 
 
 def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
@@ -198,23 +200,23 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
     # Build NULL-terminated char** argv. Each entry is an owned C string.
     var cargv = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
     for i in range(n):
-        (cargv + i).init_pointee_copy(_cstr(argv[i]))
-    (cargv + n).init_pointee_copy(_NULL_CHARP)
+        (cargv.unsafe_offset(i)).unsafe_write(_cstr(argv[i]))
+    (cargv.unsafe_offset(n)).unsafe_write(_NULL_CHARP)
 
     # file_actions: macOS posix_spawn_file_actions_t is a single opaque pointer
     # (8 bytes); over-allocate to 64 bytes for forward safety. Open the capture
     # file as fd 1 (stdout), then dup2 fd 1 -> fd 2 so stderr shares it.
     var fa = stack_allocation[64, UInt8]()
     for i in range(64):
-        fa[i] = 0
+        fa[unsafe_offset=i] = 0
     var path_c = _cstr(out_path)
 
     var rc = external_call["posix_spawn_file_actions_init", c_int](
-        fa.bitcast[NoneType]()
+        fa.unsafe_bitcast[NoneType]()
     )
     if rc == 0:
         rc = external_call["posix_spawn_file_actions_addopen", c_int](
-            fa.bitcast[NoneType](),
+            fa.unsafe_bitcast[NoneType](),
             c_int(1),
             path_c,
             _O_WRONLY | _O_CREAT | _O_TRUNC,
@@ -222,7 +224,7 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
         )
     if rc == 0:
         rc = external_call["posix_spawn_file_actions_adddup2", c_int](
-            fa.bitcast[NoneType](), c_int(1), c_int(2)
+            fa.unsafe_bitcast[NoneType](), c_int(1), c_int(2)
         )
 
     # Allowlisted child env (NOT the raw parent environ — no ANTHROPIC_API_KEY /
@@ -232,36 +234,38 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
     var exit_code = -1
     if rc == 0:
         var pid_slot = stack_allocation[1, c_int]()
-        pid_slot[0] = 0
+        pid_slot[unsafe_offset=0] = 0
         # argv[0] is absolute -> plain posix_spawn (no PATH search). envp is the
         # allowlisted child env (compile() needs PATH/CONDA_PREFIX/MODULAR_HOME).
         var src = external_call["posix_spawn", c_int](
-            pid_slot.bitcast[NoneType](),
-            cargv[0],  # path == argv[0] (absolute)
-            fa.bitcast[NoneType](),
+            pid_slot.unsafe_bitcast[NoneType](),
+            cargv[unsafe_offset=0],  # path == argv[0] (absolute)
+            fa.unsafe_bitcast[NoneType](),
             _NULL_VOIDP,  # attrp
             cargv,
             cenvp,
         )
         if src == 0:
             var status_slot = stack_allocation[1, c_int]()
-            status_slot[0] = 0
+            status_slot[unsafe_offset=0] = 0
             _ = external_call["waitpid", c_int](
-                pid_slot[0], status_slot.bitcast[NoneType](), c_int(0)
+                pid_slot[unsafe_offset=0],
+                status_slot.unsafe_bitcast[NoneType](),
+                c_int(0),
             )
-            exit_code = (Int(status_slot[0]) >> 8) & 0xFF
+            exit_code = (Int(status_slot[unsafe_offset=0]) >> 8) & 0xFF
         else:
             rc = src
 
     # Tear down C resources unconditionally.
     _free_envp(cenvp)
     _ = external_call["posix_spawn_file_actions_destroy", c_int](
-        fa.bitcast[NoneType]()
+        fa.unsafe_bitcast[NoneType]()
     )
-    path_c.free()
+    path_c.unsafe_free()
     for i in range(n):
-        cargv[i].free()
-    cargv.free()
+        cargv[unsafe_offset=i].unsafe_free()
+    cargv.unsafe_free()
 
     if rc != 0:
         raise Error("posix_spawn failed (rc=" + String(rc) + ")")
@@ -286,20 +290,20 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
 
     var cargv = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
     for i in range(n):
-        (cargv + i).init_pointee_copy(_cstr(argv[i]))
-    (cargv + n).init_pointee_copy(_NULL_CHARP)
+        (cargv.unsafe_offset(i)).unsafe_write(_cstr(argv[i]))
+    (cargv.unsafe_offset(n)).unsafe_write(_NULL_CHARP)
 
     var fa = stack_allocation[64, UInt8]()
     for i in range(64):
-        fa[i] = 0
+        fa[unsafe_offset=i] = 0
     var path_c = _cstr(out_path)
 
     var rc = external_call["posix_spawn_file_actions_init", c_int](
-        fa.bitcast[NoneType]()
+        fa.unsafe_bitcast[NoneType]()
     )
     if rc == 0:
         rc = external_call["posix_spawn_file_actions_addopen", c_int](
-            fa.bitcast[NoneType](),
+            fa.unsafe_bitcast[NoneType](),
             c_int(1),
             path_c,
             _O_WRONLY | _O_CREAT | _O_TRUNC,
@@ -307,7 +311,7 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
         )
     if rc == 0:
         rc = external_call["posix_spawn_file_actions_adddup2", c_int](
-            fa.bitcast[NoneType](), c_int(1), c_int(2)
+            fa.unsafe_bitcast[NoneType](), c_int(1), c_int(2)
         )
 
     # Allowlisted child env (NOT the raw parent environ — no ANTHROPIC_API_KEY /
@@ -317,18 +321,18 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
     var pid: c_int = -1
     if rc == 0:
         var pid_slot = stack_allocation[1, c_int]()
-        pid_slot[0] = 0
+        pid_slot[unsafe_offset=0] = 0
         var src = external_call["posix_spawn", c_int](
-            pid_slot.bitcast[NoneType](),
-            cargv[0],  # path == argv[0] (absolute)
-            fa.bitcast[NoneType](),
+            pid_slot.unsafe_bitcast[NoneType](),
+            cargv[unsafe_offset=0],  # path == argv[0] (absolute)
+            fa.unsafe_bitcast[NoneType](),
             _NULL_VOIDP,  # attrp
             cargv,
             cenvp,
         )
         if src == 0:
             pid = pid_slot[
-                0
+                unsafe_offset=0
             ]  # capture the PID; DON'T waitpid — the caller reaps
         else:
             rc = src
@@ -336,12 +340,12 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
     # Tear down C resources — the child holds its own copy of argv/env now.
     _free_envp(cenvp)
     _ = external_call["posix_spawn_file_actions_destroy", c_int](
-        fa.bitcast[NoneType]()
+        fa.unsafe_bitcast[NoneType]()
     )
-    path_c.free()
+    path_c.unsafe_free()
     for i in range(n):
-        cargv[i].free()
-    cargv.free()
+        cargv[unsafe_offset=i].unsafe_free()
+    cargv.unsafe_free()
 
     if rc != 0:
         raise Error("posix_spawn (async) failed (rc=" + String(rc) + ")")
@@ -356,15 +360,15 @@ def _reap_nohang(pid: c_int) -> Int:
     otherwise the child's exit code `(status>>8)&0xFF` — matching `_spawn_capture`.
     """
     var status_slot = stack_allocation[1, c_int]()
-    status_slot[0] = 0
+    status_slot[unsafe_offset=0] = 0
     var r = external_call["waitpid", c_int](
-        pid, status_slot.bitcast[NoneType](), _WNOHANG
+        pid, status_slot.unsafe_bitcast[NoneType](), _WNOHANG
     )
     if Int(r) == 0:
         return -1  # still running
     if Int(r) < 0:
         return -2  # error
-    return (Int(status_slot[0]) >> 8) & 0xFF
+    return (Int(status_slot[unsafe_offset=0]) >> 8) & 0xFF
 
 
 def _canonical(var path: String) raises -> String:

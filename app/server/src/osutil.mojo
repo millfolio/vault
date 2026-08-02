@@ -83,8 +83,8 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     var p = alloc[c_char](n + 1)
     var sp = s.unsafe_ptr()
     for i in range(n):
-        (p + i).init_pointee_copy(c_char(Int(sp[i])))
-    (p + n).init_pointee_copy(c_char(0))
+        (p.unsafe_offset(i)).unsafe_write(c_char(Int(sp[unsafe_offset=i])))
+    (p.unsafe_offset(n)).unsafe_write(c_char(0))
     return p
 
 
@@ -95,7 +95,7 @@ def _chmod(path: String, mode: Int):
     transactions), so we tighten them to owner-only after creation."""
     var cp = _cstr(path)
     _ = external_call["chmod", c_int](cp, c_int(mode))
-    cp.free()
+    cp.unsafe_free()
 
 
 def _is_demo() raises -> Bool:

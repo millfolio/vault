@@ -37,8 +37,8 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     var p = alloc[c_char](n + 1)
     var sp = s.unsafe_ptr()
     for i in range(n):
-        (p + i).init_pointee_copy(c_char(Int(sp[i])))
-    (p + n).init_pointee_copy(c_char(0))
+        (p.unsafe_offset(i)).unsafe_write(c_char(Int(sp[unsafe_offset=i])))
+    (p.unsafe_offset(n)).unsafe_write(c_char(0))
     return p
 
 
@@ -47,7 +47,7 @@ def _lock() -> Int32:
     var fd = external_call["open", Int32](
         cpath, Int32(_O_RDWR | _O_CREAT), Int32(0o600)
     )
-    cpath.free()
+    cpath.unsafe_free()
     if fd >= Int32(0):
         _ = external_call["flock", Int32](fd, Int32(_LOCK_EX))
     return fd

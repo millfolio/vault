@@ -379,7 +379,7 @@ def main() raises:
 
     var st = MillfolioState(harness^, vault_dir^)
     var sp = alloc[MillfolioState](1)
-    sp.init_pointee_move(st^)
+    sp.unsafe_write(st^)
     var api = Api(sp)
 
     var port = _port()

@@ -44,7 +44,7 @@ def _restart_app_server_soon():
     )
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)
-    cc.free()
+    cc.unsafe_free()
 
 
 def handle_vaults_list() raises -> Response:

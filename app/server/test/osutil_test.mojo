@@ -1,4 +1,4 @@
-"""osutil_test — unit tests for the foundational path/env/string helpers (osutil.mojo).
+"""Osutil_test — unit tests for the foundational path/env/string helpers (osutil.mojo).
 
 Builds + runs as a plain Mojo program (stdlib only): `pixi run test-osutil`.
 Covers the pure string/int utilities (`_atoi`, `_tsv_unescape`, `_lower_ascii`,
@@ -78,13 +78,13 @@ def main() raises:
     expect_eq(_kind_for_name("noext"), "", "no extension → skip")
 
     # ── _sort_names: ascending, in place, duplicates preserved ───────────────────
-    var names = ["cherry", "apple", "banana"]
+    var names: List[String] = ["cherry", "apple", "banana"]
     _sort_names(names)
     expect_eq(names[0], "apple", "sorted[0]")
     expect_eq(names[1], "banana", "sorted[1]")
     expect_eq(names[2], "cherry", "sorted[2]")
 
-    var already = ["a", "b", "c"]
+    var already: List[String] = ["a", "b", "c"]
     _sort_names(already)
     expect(
         already[0] == "a" and already[1] == "b" and already[2] == "c",
@@ -92,7 +92,7 @@ def main() raises:
     )
 
     # Stable: equal keys keep their relative order & count (insertion sort).
-    var dups = ["b", "a", "a", "c"]
+    var dups: List[String] = ["b", "a", "a", "c"]
     _sort_names(dups)
     expect(
         dups[0] == "a" and dups[1] == "a" and dups[2] == "b" and dups[3] == "c",

@@ -1,4 +1,4 @@
-"""auth_test — unit tests for the secrets/tokens + in-app API-key store (auth.mojo).
+"""Auth_test — unit tests for the secrets/tokens + in-app API-key store (auth.mojo).
 
 Builds + runs as a plain Mojo program: `pixi run test-auth` (which points
 MILLFOLIO_DATA_DIR at a throwaway temp dir so all file I/O is hermetic, and rm's

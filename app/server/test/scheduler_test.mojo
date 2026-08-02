@@ -54,7 +54,7 @@ def main() raises:
     var fails = 0
 
     # ── index_run_plan ─────────────────────────────────────────────────────────
-    var files = [String("/v/a.csv"), String("/v/b.pdf")]
+    var files: List[String] = [String("/v/a.csv"), String("/v/b.pdf")]
     var plan = index_run_plan("/v", files)
     fails += expect(len(plan) == 4, "plan = prepare + 2 files + finalize")
     fails += expect(

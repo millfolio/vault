@@ -111,7 +111,7 @@ def _sha_str(s: String) -> String:
     var b = List[UInt8]()
     var p = s.unsafe_ptr()
     for i in range(s.byte_length()):
-        b.append(p[i])
+        b.append(p[unsafe_offset=i])
     return sha256_hex(b)
 
 

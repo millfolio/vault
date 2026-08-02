@@ -1,4 +1,4 @@
-"""httputil_test — unit tests for the HTTP response builders + host allow-list
+"""Httputil_test — unit tests for the HTTP response builders + host allow-list
 (httputil.mojo).
 
 Builds + runs as a plain Mojo program (flare only, no enclave): `pixi run

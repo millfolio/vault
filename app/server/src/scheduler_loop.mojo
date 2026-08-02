@@ -184,7 +184,7 @@ def _run_index_child(subcmd: String, tail_args: List[String]) -> Bool:
         return False
     var cc = _cstr(cmd)
     var rc = external_call["system", Int32](cc)  # BLOCKS (no trailing &)
-    cc.free()
+    cc.unsafe_free()
     return Int(rc) == 0
 
 
@@ -451,19 +451,19 @@ def _self_exe_path() -> String:
     comptime CAP = 4096
     var buf = alloc[UInt8](CAP)
     var sizep = alloc[UInt32](1)
-    sizep[0] = UInt32(CAP)
+    sizep[unsafe_offset=0] = UInt32(CAP)
     var rc = external_call["_NSGetExecutablePath", Int32](buf, sizep)
-    sizep.free()
+    sizep.unsafe_free()
     var out = String("")
     if Int(rc) == 0:
         var n = 0
-        while n < CAP and buf[n] != 0:
+        while n < CAP and buf[unsafe_offset=n] != 0:
             n += 1
         var bytes = List[UInt8]()
         for i in range(n):
-            bytes.append(buf[i])
+            bytes.append(buf[unsafe_offset=i])
         out = String(StringSlice(unsafe_from_utf8=Span(bytes)))
-    buf.free()
+    buf.unsafe_free()
     return out^
 
 
@@ -509,7 +509,7 @@ def _demo_fetch_and_unpack() raises -> Bool:
     _ = external_call["system", Int32](
         cc
     )  # BLOCKS in the loop thread (off-reactor)
-    cc.free()
+    cc.unsafe_free()
     # A written, non-empty zip means the child fetch succeeded (it writes nothing on a
     # non-200/exception; a 0-byte file — empty 200 or a mid-write failure — is a miss).
     if not exists(_demo_zip_path()) or Int(getsize(_demo_zip_path())) <= 0:
@@ -528,7 +528,7 @@ def _demo_fetch_and_unpack() raises -> Bool:
     )
     var ucc = _cstr(ucmd)
     _ = external_call["system", Int32](ucc)  # BLOCKS (no trailing &)
-    ucc.free()
+    ucc.unsafe_free()
     return _demo_present()
 
 
@@ -708,8 +708,8 @@ def _finalize_index_op():
     var op = _cstr(_pending_op_path())
     var cl = _cstr(claimed)
     var rc = external_call["rename", c_int](op, cl)
-    op.free()
-    cl.free()
+    op.unsafe_free()
+    cl.unsafe_free()
     if Int(rc) != 0:
         return  # another caller already claimed it (or it vanished)
     var kind = String("index")
@@ -793,7 +793,8 @@ def _norm_roots(paths: List[String]) raises -> List[String]:
     for i in range(len(paths)):
         var r = String(paths[i])
         while r.byte_length() > 1 and r.endswith("/"):
-            r = String(r[byte = : r.byte_length() - 1])
+            var r_trimmed = String(r[byte = : r.byte_length() - 1])
+            r = r_trimmed^
         out.append(r^)
     return out^
 

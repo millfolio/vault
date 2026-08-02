@@ -1,4 +1,4 @@
-"""apikey_test — unit tests for the pure API-key helpers (apikey.mojo).
+"""Apikey_test — unit tests for the pure API-key helpers (apikey.mojo).
 
 Builds + runs as a plain Mojo program (no flare/enclave): `pixi run
 test-apikey`. Asserts the validation gate, the last-4 masking (the hint NEVER

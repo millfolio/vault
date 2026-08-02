@@ -44,7 +44,7 @@ def _sample_int(cmd: String, out_path: String) -> Int:
     failure (spawn, read, or no digits) so callers can hide the indicator."""
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)
-    cc.free()
+    cc.unsafe_free()
     try:
         var s: String
         with open(out_path, "r") as f:

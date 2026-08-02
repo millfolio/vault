@@ -53,13 +53,19 @@ def _first_int(line: String) -> Int:
     var p = line.unsafe_ptr()
     var i = 0
     var n = line.byte_length()
-    while i < n and not (Int(p[i]) >= 48 and Int(p[i]) <= 57):
+    while i < n and not (
+        Int(p[unsafe_offset=i]) >= 48 and Int(p[unsafe_offset=i]) <= 57
+    ):
         i += 1
     if i >= n:
         return -1
     var v = 0
-    while i < n and Int(p[i]) >= 48 and Int(p[i]) <= 57:
-        v = v * 10 + (Int(p[i]) - 48)
+    while (
+        i < n
+        and Int(p[unsafe_offset=i]) >= 48
+        and Int(p[unsafe_offset=i]) <= 57
+    ):
+        v = v * 10 + (Int(p[unsafe_offset=i]) - 48)
         i += 1
     return v
 

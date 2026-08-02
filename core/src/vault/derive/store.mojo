@@ -1122,7 +1122,7 @@ def _sanitize_tag(s: String) -> String:
     var out = String("")
     var p = s.unsafe_ptr()
     for i in range(s.byte_length()):
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         # , = : ( ) tab newline cr
         if (
             c == 44
@@ -1372,7 +1372,7 @@ def _norm_pw(s: String) -> String:
     var out = String("")
     var p = t.unsafe_ptr()
     for i in range(t.byte_length()):
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         if c == 32:  # space → hyphen
             out += "-"
         elif c >= 65 and c <= 90:  # A-Z → a-z

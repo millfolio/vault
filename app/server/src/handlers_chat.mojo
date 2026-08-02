@@ -215,7 +215,7 @@ def _dur(ms: Float64) -> String:
     return _secs1(ms)
 
 
-def _ms_since(t0: UInt) -> Float64:
+def _ms_since(t0: Int) -> Float64:
     """Milliseconds elapsed since a perf_counter_ns() timestamp."""
     return Float64(perf_counter_ns() - t0) / 1.0e6
 

@@ -272,8 +272,8 @@ def _finalize_demo_op():
     var op = _cstr(_demo_op_path())
     var cl = _cstr(claimed)
     var rc = external_call["rename", c_int](op, cl)
-    op.free()
-    cl.free()
+    op.unsafe_free()
+    cl.unsafe_free()
     if Int(rc) != 0:
         return  # another caller already claimed it (or it vanished)
     var started = Int64(0)

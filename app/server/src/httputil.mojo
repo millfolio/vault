@@ -93,17 +93,20 @@ def _extract_host(raw: String) -> String:
     var s = raw
     var sch = s.find("://")
     if sch != -1:
-        s = String(s[byte = sch + 3 :])
+        var s_scheme = String(s[byte = sch + 3 :])
+        s = s_scheme^
     var slash = s.find("/")
     if slash != -1:
-        s = String(s[byte=:slash])
+        var s_path = String(s[byte=:slash])
+        s = s_path^
     if s.startswith("["):
         var rb = s.find("]")
         if rb != -1:
             return String(s[byte=1:rb])
     var colon = s.find(":")
     if colon != -1:
-        s = String(s[byte=:colon])
+        var s_port = String(s[byte=:colon])
+        s = s_port^
     return s^
 
 

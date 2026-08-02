@@ -195,7 +195,8 @@ def _slug_to_id(slug: String) -> String:
     (HF uses `--` between org and name; the name itself has no `--`)."""
     var s = slug
     if s.startswith("models--"):
-        s = String(s[byte=8:])
+        var s_stripped = String(s[byte=8:])
+        s = s_stripped^
     var i = s.find("--")
     if i == -1:
         return s^
@@ -432,7 +433,7 @@ def _du_bytes(path: String) -> Int:
     )
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)
-    cc.free()
+    cc.unsafe_free()
     try:
         var s: String
         with open(out_path, "r") as f:
@@ -583,7 +584,7 @@ def _start_download_detached(id: String) -> Bool:
     )
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)
-    cc.free()
+    cc.unsafe_free()
     return True
 
 
@@ -599,7 +600,7 @@ def _provision_fetch(id: String) -> Bool:
     _begin_download_state(id)
     var cc = _cstr(_dl_core_cmd(id))
     _ = external_call["system", Int32](cc)  # waits (no trailing &)
-    cc.free()
+    cc.unsafe_free()
     var ok = _model_downloaded(id)  # refs/main appears only on full success
     _kv_set(KV_DL_STATE, "done" if ok else "error")
     return ok
@@ -723,7 +724,7 @@ def _restart_engine():
     )
     var cc = _cstr(cmd)
     _ = external_call["system", Int32](cc)
-    cc.free()
+    cc.unsafe_free()
 
 
 def _engine_loaded_model() -> String:

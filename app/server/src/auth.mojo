@@ -152,8 +152,8 @@ def _write_apikey_file(key: String) raises:
     var s = _cstr(tmp)
     var d = _cstr(final)
     var rc = external_call["rename", c_int](s, d)
-    s.free()
-    d.free()
+    s.unsafe_free()
+    d.unsafe_free()
     if Int(rc) != 0:
         raise Error("could not persist API key")
 

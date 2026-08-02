@@ -1,4 +1,4 @@
-"""home_path_test — unit tests for the persisted-path portability helpers
+"""Home_path_test — unit tests for the persisted-path portability helpers
 (vault.storage `contract_home` / `expand_home`).
 
 Builds + runs as a plain Mojo program: `pixi run test-homepath`. Drives $HOME

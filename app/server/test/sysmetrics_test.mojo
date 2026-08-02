@@ -1,4 +1,4 @@
-"""sysmetrics_test — unit tests for the parse/fetch split (sysmetrics.mojo).
+"""Sysmetrics_test — unit tests for the parse/fetch split (sysmetrics.mojo).
 
 Builds + runs as a plain Mojo program: `pixi run test-sysmetrics`.
 Covers the pure parse half (`_parse_leading_int`), the fetch half
