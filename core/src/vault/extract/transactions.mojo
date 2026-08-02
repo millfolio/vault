@@ -258,11 +258,12 @@ def _strip_money_and_date(line: String, date: String) raises -> String:
     for m in range(len(moneys)):
         var bare = moneys[m]
         if bare.startswith("("):  # restore the digits-only form to blank it out
-            bare = String(
+            var bare_unquoted = String(
                 String(
                     unsafe_from_utf8=bare.as_bytes()[1 : bare.byte_length() - 1]
                 )
             )
+            bare = bare_unquoted^
         s = _replace(s, bare, String(" "))
     var parts = s.split()
     var out = String("")

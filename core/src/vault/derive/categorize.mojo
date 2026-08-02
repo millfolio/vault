@@ -27,7 +27,7 @@ def _lower(s: String) -> String:
     var out = String(capacity=s.byte_length() + 1)
     var p = s.unsafe_ptr()
     for i in range(s.byte_length()):
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         if c >= 65 and c <= 90:
             out += chr(c + 32)
         else:
@@ -533,7 +533,8 @@ def parse_rules(text: String) raises -> List[Rule]:
                 if k > 1:
                     prompt += ":"
                 prompt += String(parts[k])
-            prompt = String(prompt.strip())
+            var prompt_stripped = String(prompt.strip())
+            prompt = prompt_stripped^
             if prompt.byte_length() > 0:
                 out.append(
                     Rule(

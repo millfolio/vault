@@ -372,15 +372,17 @@ def _canonical(var path: String) raises -> String:
     MANDATORY — Seatbelt matches the real path, and /tmp -> /private/tmp on
     macOS (SPIKE.md). The path must exist."""
     var buf = stack_allocation[4096, UInt8]()
-    buf[0] = 0
+    buf[unsafe_offset=0] = 0
     _ = external_call["realpath", UnsafePointer[c_char, MutUntrackedOrigin]](
-        path.as_c_string_slice(), buf.bitcast[c_char]()
+        path.as_c_string_slice(), buf.unsafe_bitcast[c_char]()
     )
-    if Int(buf[0]) == 0:
+    if Int(buf[unsafe_offset=0]) == 0:
         raise Error("realpath failed (does it exist?): " + path)
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(unsafe_from_ptr=buf.bitcast[Int8]())
+            unsafe_from_utf8=CStringSlice(
+                unsafe_from_ptr=buf.unsafe_bitcast[Int8]()
+            )
         )
     )
 

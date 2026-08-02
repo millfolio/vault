@@ -40,7 +40,7 @@ def qhash(prompt: String) -> String:
     var b = List[UInt8]()
     var p = prompt.unsafe_ptr()
     for i in range(prompt.byte_length()):
-        b.append(p[i])
+        b.append(p[unsafe_offset=i])
     var hex = sha256_hex(b)
     var out = String("")
     var n = QHASH_LEN if QHASH_LEN <= hex.byte_length() else hex.byte_length()
@@ -119,14 +119,14 @@ def _parse_int(s: String) -> Tuple[Int, Bool]:
     var p = t.unsafe_ptr()
     var i = 0
     var neg = False
-    if Int(p[0]) == 45:  # '-'
+    if Int(p[unsafe_offset=0]) == 45:  # '-'
         neg = True
         i = 1
         if t.byte_length() == 1:
             return (0, False)
     var v = 0
     while i < t.byte_length():
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         if c < 48 or c > 57:
             return (0, False)
         v = v * 10 + (c - 48)

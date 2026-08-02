@@ -39,7 +39,7 @@ def _lower(s: String) -> String:
     var out = String(capacity=s.byte_length() + 1)
     var p = s.unsafe_ptr()
     for i in range(s.byte_length()):
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         if c >= 65 and c <= 90:
             out += chr(c + 32)
         else:
@@ -174,13 +174,13 @@ def _is_id_token(t: String) -> Bool:
     """
     if t.byte_length() == 0:
         return False
-    var c0 = Int(t.unsafe_ptr()[0])
+    var c0 = Int(t.unsafe_ptr()[unsafe_offset=0])
     if c0 == 35 or c0 == 42:  # '#' or '*'
         return True
     var digits = 0
     var p = t.unsafe_ptr()
     for i in range(t.byte_length()):
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         if c >= 48 and c <= 57:
             digits += 1
     return t.byte_length() >= 3 and digits * 2 >= t.byte_length()

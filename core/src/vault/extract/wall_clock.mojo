@@ -137,10 +137,10 @@ def _system_ymd() -> _YMD:
     _ = external_call["localtime_r", UnsafePointer[Int64, MutUntrackedOrigin]](
         epoch.unsafe_ptr(), tm.unsafe_ptr()
     )
-    var f = tm.unsafe_ptr().bitcast[Int32]()
-    var mday = Int(f[3])
-    var mon = Int(f[4]) + 1
-    var year = Int(f[5]) + 1900
+    var f = tm.unsafe_ptr().unsafe_bitcast[Int32]()
+    var mday = Int(f[unsafe_offset=3])
+    var mon = Int(f[unsafe_offset=4]) + 1
+    var year = Int(f[unsafe_offset=5]) + 1900
     return _YMD(year, mon, mday)
 
 

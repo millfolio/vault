@@ -1174,7 +1174,8 @@ def build_index(
     for r in range(len(roots)):
         var rr = String(roots[r])
         while rr.byte_length() > 1 and rr.endswith("/"):
-            rr = String(rr[byte = : rr.byte_length() - 1])
+            var rr_trimmed = String(rr[byte = : rr.byte_length() - 1])
+            rr = rr_trimmed^
         nroots.append(rr^)
     var base = common_base(nroots)
     var allpaths = collect_index_paths(nroots)

@@ -181,7 +181,7 @@ def sha256_hex(data: List[UInt8]) -> String:
         var v = digest[i]
         for shift in range(28, -4, -4):
             var nib = Int((v >> UInt32(shift)) & 0xF)
-            out += hexd[nib]
+            out += hexd[byte=nib]
     return out^
 
 

@@ -379,7 +379,7 @@ def _emit() raises:
     after every mutation; the server keeps the LAST (complete) line."""
     var line = String(RESULT_SENTINEL) + result_json() + "\n"
     var n = line.byte_length()
-    var ptr = line.unsafe_ptr().bitcast[c_char]()
+    var ptr = line.unsafe_ptr().unsafe_bitcast[c_char]()
     _ = external_call["write", Int](Int(1), ptr, Int(n))
 
 

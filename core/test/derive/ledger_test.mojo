@@ -42,7 +42,7 @@ def main() raises:
     )
     # Hex-only (lowercase 0-9a-f).
     for i in range(q.byte_length()):
-        var c = Int(q.unsafe_ptr()[i])
+        var c = Int(q.unsafe_ptr()[unsafe_offset=i])
         expect(
             (c >= 48 and c <= 57) or (c >= 97 and c <= 102),
             "qhash is lowercase hex",
@@ -76,7 +76,7 @@ def main() raises:
     )
 
     # ── count_pending over a set of insertion gens ──────────────────────────────
-    var gens = [0, 1, 2, 3, 4, 5]
+    var gens: List[Int] = [0, 1, 2, 3, 4, 5]
     expect(
         count_pending(gens, cur, 2, cur) == 3,
         "gens 3,4,5 pending past done_gen=2",
@@ -94,7 +94,7 @@ def main() raises:
     )
 
     # ── parse / serialize round-trip ────────────────────────────────────────────
-    var markers = [
+    var markers: List[RuleMarker] = [
         RuleMarker("gym", "9f3a1b2c", 412),
         RuleMarker("café", "1b7e0011", 412),
     ]
@@ -156,7 +156,7 @@ def main() raises:
     )
 
     # ── upsert_marker: insert, then overwrite (edited question resets gen) ───────
-    var m2 = [RuleMarker("gym", "9f3a1b2c", 100)]
+    var m2: List[RuleMarker] = [RuleMarker("gym", "9f3a1b2c", 100)]
     upsert_marker(m2, "travel", "cafef00d", 50)
     expect(len(m2) == 2 and m2[1].rule == "travel", "upsert appends a new rule")
     upsert_marker(m2, "gym", "9f3a1b2c", 250)  # same qhash, advance
