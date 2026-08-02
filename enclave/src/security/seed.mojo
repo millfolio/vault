@@ -122,7 +122,8 @@ def _clean_cell(cell: String) -> String:
     var v = String(cell.strip())
     if v.byte_length() >= 2 and v.startswith('"') and v.endswith('"'):
         v = String(String(v.removeprefix('"')).removesuffix('"'))
-        v = String(v.strip())
+        var v_stripped = String(v.strip())
+        v = v_stripped^
     return v^
 
 

@@ -230,7 +230,10 @@ def main() raises:
     expect(_rows_for(_load_txns(), "file_1") == 2, "b.csv (file_1) rows exist")
     expect(_chunks_for("file_1") > 0, "b.csv (file_1) chunks exist")
 
-    var survivors = [files[0], files[2]]  # a.csv, notes.md — b.csv removed
+    var survivors: List[String] = [
+        files[0],
+        files[2],
+    ]  # a.csv, notes.md — b.csv removed
     for i in range(len(survivors)):
         var r = index_one_file(survivors[i], base, FAKE_URL)
         expect(
