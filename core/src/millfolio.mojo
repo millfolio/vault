@@ -186,7 +186,7 @@ def main() raises:
             return
         var base = String(args[2])
         var res = index_one_file(String(args[3]), base, _embed_url())
-        print(String.write(res))
+        print(String(res))
     elif cmd == "index-finalize":
         # Finalize entrypoint: the end-of-run settle after per-file steps — prune
         # files no longer tracked, reconcile generations, retag, close the run.
