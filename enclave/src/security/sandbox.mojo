@@ -49,6 +49,25 @@ comptime _NULL_VOIDP = UnsafePointer[NoneType, MutUntrackedOrigin](
 )
 
 
+def _exit_code_from_status(status: Int) -> Int:
+    """Decode a `waitpid(2)` status into a caller-facing exit code, distinguishing
+    a NORMAL exit from a SIGNAL death (crash). The low 7 bits of `status` are the
+    terminating signal, 0 iff the child called `exit()`/returned from `main`
+    normally — only THEN do bits 8-15 hold the real exit code (`WEXITSTATUS`).
+    A crashing child (e.g. the Mojo compiler segfaulting on a bad codegen
+    program) sets the signal bits and typically leaves bits 8-15 at 0, so
+    `(status >> 8) & 0xFF` alone reads back as a false SUCCESS — the caller
+    then treats a nonexistent output binary as compiled, and the next stage
+    (`sandbox-exec`ing it) fails with a confusing `execvp() ... No such file or
+    directory` instead of a clean compile-failure error. 128+signal (the shell
+    convention) keeps this in the same "nonzero == failure" space every caller
+    already checks, without colliding with `_reap_nohang`'s -1/-2 sentinels."""
+    var sig = status & 0x7F
+    if sig != 0:
+        return 128 + sig
+    return (status >> 8) & 0xFF
+
+
 def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
     """malloc a NUL-terminated C copy of `s`. Caller owns it — `_free_cstr`."""
     var n = s.byte_length()
@@ -253,7 +272,9 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
                 status_slot.unsafe_bitcast[NoneType](),
                 c_int(0),
             )
-            exit_code = (Int(status_slot[unsafe_offset=0]) >> 8) & 0xFF
+            exit_code = _exit_code_from_status(
+                Int(status_slot[unsafe_offset=0])
+            )
         else:
             rc = src
 
@@ -357,7 +378,9 @@ def _reap_nohang(pid: c_int) -> Int:
     """Non-blocking `waitpid(pid, &status, WNOHANG)`. Returns:
     -1  the child is still running (waitpid returned 0),
     -2  waitpid errored (returned -1),
-    otherwise the child's exit code `(status>>8)&0xFF` — matching `_spawn_capture`.
+    otherwise the child's exit code via `_exit_code_from_status` — matching
+    `_spawn_capture` (128+signal on a crash, never the false-zero a raw
+    `(status>>8)&0xFF` would read back for a signal death).
     """
     var status_slot = stack_allocation[1, c_int]()
     status_slot[unsafe_offset=0] = 0
@@ -368,7 +391,7 @@ def _reap_nohang(pid: c_int) -> Int:
         return -1  # still running
     if Int(r) < 0:
         return -2  # error
-    return (Int(status_slot[unsafe_offset=0]) >> 8) & 0xFF
+    return _exit_code_from_status(Int(status_slot[unsafe_offset=0]))
 
 
 def _canonical(var path: String) raises -> String:

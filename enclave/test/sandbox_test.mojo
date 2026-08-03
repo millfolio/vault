@@ -17,6 +17,7 @@ from security.sandbox import (
     _canonical,
     _read,
     _write,
+    _exit_code_from_status,
 )
 
 # Resolved via resource_path under ENCLAVE_HOME (the test task sets it to the
@@ -137,6 +138,54 @@ def main() raises:
         + "] compile profile still grants the Mojo build cache write"
     )
     all_ok = all_ok and grants_cache
+
+    # ── _exit_code_from_status: a signal death must never read back as success ──
+    # Regression guard: a raw `(status>>8)&0xFF` reads a signal-killed child (e.g.
+    # the Mojo compiler segfaulting on a bad codegen program) as exit code 0 —
+    # `compile()` then thinks it succeeded, and the next stage `sandbox-exec`s a
+    # binary that was never written ("execvp() ... No such file or directory").
+    var normal_exit0 = _exit_code_from_status(0) == 0
+    print(
+        "["
+        + ("PASS" if normal_exit0 else "FAIL")
+        + "] normal exit(0): status=0 -> 0"
+    )
+    all_ok = all_ok and normal_exit0
+
+    var normal_exit1 = _exit_code_from_status(1 << 8) == 1
+    print(
+        "["
+        + ("PASS" if normal_exit1 else "FAIL")
+        + "] normal exit(1): status=0x0100 -> 1"
+    )
+    all_ok = all_ok and normal_exit1
+
+    comptime SIGSEGV = 11
+    var segv_status = SIGSEGV  # low 7 bits = signal, exit-code bits all 0
+    var segv_nonzero = _exit_code_from_status(segv_status) == 128 + SIGSEGV
+    print(
+        "["
+        + ("PASS" if segv_nonzero else "FAIL")
+        + "] SIGSEGV death: status="
+        + String(segv_status)
+        + " -> "
+        + String(128 + SIGSEGV)
+        + " (never 0)"
+    )
+    all_ok = all_ok and segv_nonzero
+
+    comptime SIGABRT = 6
+    var abrt_status = SIGABRT | 0x80  # core-dump flag (bit 7) set too
+    var abrt_nonzero = _exit_code_from_status(abrt_status) == 128 + SIGABRT
+    print(
+        "["
+        + ("PASS" if abrt_nonzero else "FAIL")
+        + "] SIGABRT death (core-dump flag set): status="
+        + String(abrt_status)
+        + " -> "
+        + String(128 + SIGABRT)
+    )
+    all_ok = all_ok and abrt_nonzero
 
     print()
     if all_ok:
