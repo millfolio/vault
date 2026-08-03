@@ -16,6 +16,7 @@ See run_vault_task for the full confidentiality argument.
 
 from std.ffi import external_call
 from std.os import getenv, setenv
+from std.time import perf_counter_ns
 from logging import log
 
 from security import Budget
@@ -100,6 +101,12 @@ comptime _NO_REMOTE_MSG = (
     "This question needs the frontier model to write its program, but no remote"
     " budget is available — set ANTHROPIC_API_KEY and retry."
 )
+
+
+def _ms_since(t0: Int) -> Int:
+    """Milliseconds elapsed since a `perf_counter_ns()` timestamp — for timing
+    the compile/fix phases in `vault_build`'s log lines."""
+    return (perf_counter_ns() - t0) // 1_000_000
 
 
 def _tags_context(tags: String) raises -> String:
@@ -371,11 +378,27 @@ struct Harness(Movable):
         feed back; a RUNTIME error could carry real content and is never sent
         upstream). Leaves the compiled binary in scratch; raises if it never
         compiles. Returns the number of fix attempts (frontier fix calls made) so
-        the caller can surface it in the run stats."""
+        the caller can surface it in the run stats.
+
+        Every phase is logged with a millisecond timestamp (`logging.log`) AND
+        its own elapsed time, so a slow/stuck build is diagnosable straight from
+        the log file — a single "compiling…" line followed by a multi-minute gap
+        (the shape of a compile that crashes, or a fix loop making several
+        remote round-trips) previously looked identical to a genuinely hung
+        process; now each attempt is its own timestamped, timed line."""
+        var t_build0 = perf_counter_ns()
         log("• compiling the generated program…")
         var work = code.copy()
         var includes = vault_include_paths()
+        var t0 = perf_counter_ns()
         var compiled = self.sandbox.compile(work, includes)
+        log(
+            "  compile: exit="
+            + String(compiled.exit_code)
+            + "  ("
+            + String(_ms_since(t0))
+            + "ms)"
+        )
 
         # A compiler CRASH (signal death — see _exit_code_from_status, always
         # >128) carries no actionable diagnostic: `compiled.output` is a raw
@@ -387,24 +410,73 @@ struct Harness(Movable):
         comptime MAX_CRASH_RETRIES = 2
         var crash_retry = 0
         while compiled.exit_code > 128 and crash_retry < MAX_CRASH_RETRIES:
-            log("• the Mojo compiler crashed — retrying the same build…")
-            compiled = self.sandbox.compile(work, includes)
             crash_retry += 1
+            log(
+                "• the Mojo compiler crashed — retrying the same build ("
+                + String(crash_retry)
+                + "/"
+                + String(MAX_CRASH_RETRIES)
+                + ")…"
+            )
+            t0 = perf_counter_ns()
+            compiled = self.sandbox.compile(work, includes)
+            log(
+                "  compile: exit="
+                + String(compiled.exit_code)
+                + "  ("
+                + String(_ms_since(t0))
+                + "ms)"
+            )
 
         var attempt = 0
         while compiled.exit_code != 0 and attempt < self.max_fix_attempts:
+            attempt += 1
+            log(
+                "• compile failed (exit="
+                + String(compiled.exit_code)
+                + ") — asking the model to fix it (attempt "
+                + String(attempt)
+                + "/"
+                + String(self.max_fix_attempts)
+                + ")…"
+            )
+            t0 = perf_counter_ns()
             work = self._fix(
                 work, compiled.output
             )  # budget-routed; guarded; aliased
+            log(
+                "  fix: got a revised program (" + String(_ms_since(t0)) + "ms)"
+            )
+            t0 = perf_counter_ns()
             compiled = self.sandbox.compile(work, includes)
-            attempt += 1
+            log(
+                "  compile: exit="
+                + String(compiled.exit_code)
+                + "  ("
+                + String(_ms_since(t0))
+                + "ms)"
+            )
         if compiled.exit_code != 0:
+            log(
+                "• vault_build FAILED after "
+                + String(_ms_since(t_build0))
+                + "ms total"
+            )
             raise Error(
                 "vault: generated program did not compile after "
                 + String(self.max_fix_attempts)
                 + " fix attempt(s). Last error:\n"
                 + compiled.output
             )
+        log(
+            "• vault_build OK after "
+            + String(_ms_since(t_build0))
+            + "ms total ("
+            + String(attempt)
+            + " fix attempt(s), "
+            + String(crash_retry)
+            + " crash retry/ies)"
+        )
         return attempt
 
     def vault_run(mut self, vault_dir: String) raises -> String:

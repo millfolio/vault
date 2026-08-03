@@ -29,6 +29,20 @@
 ;; The compiler needs broad reads (toolchain, stdlib, dyld cache).
 (allow file-read* file-map-executable)
 
+;; The compiler's async runtime queries IOKit for Apple Silicon's P-core/E-core
+;; topology (thread pool sizing) — WITHOUT this, the query is denied and the
+;; runtime doesn't handle that gracefully: it crashes (SIGTRAP, deep in
+;; libAsyncRTMojoBindings.dylib), which surfaced as `mojo build` reading back a
+;; false "success" before the exit-code fix (harness.mojo's
+;; _exit_code_from_status) and, after that fix, as a genuine repeated compile
+;; failure. Read-only hardware-topology queries, not filesystem/network access —
+;; doesn't touch the containment this profile actually exists to enforce
+;; (no network, narrow scratch/cache-only writes). Bisected empirically: of
+;; mach-lookup/mach-register/mach-priv-host-port/ipc-posix-shm/sysctl-read/
+;; sysctl-write/process-info*/signal/iokit-open, only this one is needed —
+;; every real compile (5/5 in a row) succeeds with just this grant.
+(allow iokit-open)
+
 ;; ── PRIMARY CONTAINMENT: no network at build time ────────────────────────────
 ;; Mojo comptime runs during `mojo build`; this stops it exfiltrating.
 (deny network*)
