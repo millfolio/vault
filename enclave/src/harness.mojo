@@ -376,6 +376,21 @@ struct Harness(Movable):
         var work = code.copy()
         var includes = vault_include_paths()
         var compiled = self.sandbox.compile(work, includes)
+
+        # A compiler CRASH (signal death — see _exit_code_from_status, always
+        # >128) carries no actionable diagnostic: `compiled.output` is a raw
+        # stack dump, not a compiler error the model could act on, and has been
+        # observed to be transient/flaky on this toolchain — a bare recompile of
+        # the SAME unmodified source often just succeeds. Retry locally first
+        # (no remote call, doesn't touch the fix budget) before ever spending a
+        # frontier call asking the model to "fix" unfixable crash noise.
+        comptime MAX_CRASH_RETRIES = 2
+        var crash_retry = 0
+        while compiled.exit_code > 128 and crash_retry < MAX_CRASH_RETRIES:
+            log("• the Mojo compiler crashed — retrying the same build…")
+            compiled = self.sandbox.compile(work, includes)
+            crash_retry += 1
+
         var attempt = 0
         while compiled.exit_code != 0 and attempt < self.max_fix_attempts:
             work = self._fix(
