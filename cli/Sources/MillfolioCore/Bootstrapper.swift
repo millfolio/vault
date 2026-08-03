@@ -83,6 +83,14 @@ public final class Bootstrapper: ObservableObject {
     private var mojoPythonURL: URL {
         URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.mojoVersion)-release.conda")!
     }
+    // `layout` (TileTensor/row_major — the engine's GPU kernels) moved out of mojo
+    // into MAX as of this nightly. `max-core` is the python-version-independent
+    // package that actually provides it (unlike the `max` package, which also pulls
+    // in a whole click/numpy/rich Python CLI this install never uses).
+    public static let maxCoreVersion = "26.5.0.dev2026080206"
+    private var maxCoreURL: URL {
+        URL(string: "\(Self.condaChannel)/osx-arm64/max-core-\(Self.maxCoreVersion)-release.conda")!
+    }
     // ── enclave (privacy harness) ─────────────────────────────────────────────
     // enclave builds on the SAME unified Mojo toolchain as the server + vault —
     // every repo pins one nightly now, so it shares the single `mojoPrefix` toolchain
@@ -95,6 +103,7 @@ public final class Bootstrapper: ObservableObject {
     private var enclaveMojoPythonURL: URL {
         URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.enclaveMojoVersion)-release.conda")!
     }
+    private var enclaveMaxCoreURL: URL { maxCoreURL }
     /// Unified toolchain: enclave shares the single `mojoPrefix` install (the
     /// staleness check dedupes, so the toolchain is downloaded once for all components).
     private var enclaveMojoPrefix: URL { mojoPrefix }
@@ -118,6 +127,7 @@ public final class Bootstrapper: ObservableObject {
     private var millfolioMojoPythonURL: URL {
         URL(string: "\(Self.condaChannel)/noarch/mojo-python-\(Self.enclaveMojoVersion)-release.conda")!
     }
+    private var millfolioMaxCoreURL: URL { maxCoreURL }
     /// Unified toolchain: the vault build shares the single `mojoPrefix` install too.
     private var millfolioMojoPrefix: URL { mojoPrefix }
     private var millfolioRoot: URL { bundleRoot.appendingPathComponent("millfolio", isDirectory: true) }
@@ -345,6 +355,12 @@ public final class Bootstrapper: ObservableObject {
     private func mojoToolchainStale(_ prefix: URL, _ version: String) -> Bool {
         guard FileManager.default.isExecutableFile(
             atPath: prefix.appendingPathComponent("bin/mojo").path) else { return true }
+        // `layout` (from max-core) is a separate package from the compiler itself —
+        // an install from before max-core was added here has a version-matching
+        // compiler but no `layout`, so check for it explicitly (not just the version
+        // marker) so an already-affected install self-heals on the next run.
+        guard FileManager.default.fileExists(
+            atPath: prefix.appendingPathComponent("lib/mojo/layout.mojoc").path) else { return true }
         let have = (try? String(contentsOf: prefix.appendingPathComponent(".mojo-version"),
                                  encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -479,7 +495,7 @@ public final class Bootstrapper: ObservableObject {
         logHeader("Install server")
 
         if mojoToolchainStale(mojoPrefix, Self.mojoVersion) {
-            set("Downloading Mojo compiler for engine (~70 MB)…")
+            set("Downloading Mojo toolchain for engine (~135 MB)…")
             try? fm.removeItem(at: mojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: mojoPrefix, withIntermediateDirectories: true)
             let compiler = try await downloadCondaVerified(mojoCompilerURL, name: "mojo-compiler.conda")
@@ -487,6 +503,8 @@ public final class Bootstrapper: ObservableObject {
             try extractConda(compiler, into: mojoPrefix)
             let py = try await downloadCondaVerified(mojoPythonURL, name: "mojo-python.conda")
             try extractConda(py, into: mojoPrefix)
+            let maxCore = try await downloadCondaVerified(maxCoreURL, name: "max-core.conda")
+            try extractConda(maxCore, into: mojoPrefix)
             recordMojoVersion(mojoPrefix, Self.mojoVersion)
         }
         try relocateMojoPrefix(mojoPrefix)   // rewrite modular.cfg's baked placeholder prefix
@@ -993,7 +1011,7 @@ public final class Bootstrapper: ObservableObject {
 
         // 1. Mojo toolchain (enclave's nightly — distinct from the engine's).
         if mojoToolchainStale(enclaveMojoPrefix, Self.enclaveMojoVersion) {
-            set("Downloading Mojo compiler for enclave (~70 MB)…")
+            set("Downloading Mojo toolchain for enclave (~135 MB)…")
             try? fm.removeItem(at: enclaveMojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: enclaveMojoPrefix, withIntermediateDirectories: true)
             let compiler = try await downloadCondaVerified(enclaveMojoCompilerURL, name: "enclave-mojo-compiler.conda")
@@ -1001,6 +1019,8 @@ public final class Bootstrapper: ObservableObject {
             try extractConda(compiler, into: enclaveMojoPrefix)
             let py = try await downloadCondaVerified(enclaveMojoPythonURL, name: "enclave-mojo-python.conda")
             try extractConda(py, into: enclaveMojoPrefix)
+            let maxCore = try await downloadCondaVerified(enclaveMaxCoreURL, name: "enclave-max-core.conda")
+            try extractConda(maxCore, into: enclaveMojoPrefix)
             recordMojoVersion(enclaveMojoPrefix, Self.enclaveMojoVersion)
         }
         try relocateMojoPrefix(enclaveMojoPrefix)
@@ -1154,7 +1174,7 @@ public final class Bootstrapper: ObservableObject {
 
         // 1. Mojo toolchain (same nightly as enclave).
         if mojoToolchainStale(millfolioMojoPrefix, Self.enclaveMojoVersion) {
-            set("Downloading Mojo compiler for millfolio (~70 MB)…")
+            set("Downloading Mojo toolchain for millfolio (~135 MB)…")
             try? fm.removeItem(at: millfolioMojoPrefix)   // clear any stale nightly
             try fm.createDirectory(at: millfolioMojoPrefix, withIntermediateDirectories: true)
             let compiler = try await downloadCondaVerified(millfolioMojoCompilerURL, name: "millfolio-mojo-compiler.conda")
@@ -1162,6 +1182,8 @@ public final class Bootstrapper: ObservableObject {
             try extractConda(compiler, into: millfolioMojoPrefix)
             let py = try await downloadCondaVerified(millfolioMojoPythonURL, name: "millfolio-mojo-python.conda")
             try extractConda(py, into: millfolioMojoPrefix)
+            let maxCore = try await downloadCondaVerified(millfolioMaxCoreURL, name: "millfolio-max-core.conda")
+            try extractConda(maxCore, into: millfolioMojoPrefix)
             recordMojoVersion(millfolioMojoPrefix, Self.enclaveMojoVersion)
         }
         try relocateMojoPrefix(millfolioMojoPrefix)
