@@ -118,9 +118,7 @@ def _civil_from_days(z0: Int) -> _YMD:
 def _epoch_s() -> Int64:
     """Unix epoch seconds — `time(2)` with a NULL arg (a pure syscall, no fs/net).
     """
-    var null = UnsafePointer[NoneType, MutUntrackedOrigin](
-        unsafe_from_address=Int(0)
-    )
+    var null = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=Int(0))
     return external_call["time", Int64](null)
 
 
@@ -134,7 +132,7 @@ def _system_ymd() -> _YMD:
     var tm = InlineArray[Int64, 8](
         fill=Int64(0)
     )  # 64 bytes >= sizeof(struct tm)
-    _ = external_call["localtime_r", UnsafePointer[Int64, MutUntrackedOrigin]](
+    _ = external_call["localtime_r", Pointer[Int64, MutUntrackedOrigin]](
         epoch.unsafe_ptr(), tm.unsafe_ptr()
     )
     var f = tm.unsafe_ptr().unsafe_bitcast[Int32]()

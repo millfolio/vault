@@ -17,7 +17,7 @@ indexed-paths.json) rely on:
 """
 from std.os import getenv
 from std.ffi import external_call, c_int
-from std.memory import alloc
+from std.memory.alloc import unsafe_alloc
 from vault.storage import (
     FileDocStore,
     default_categories_store,
@@ -41,16 +41,16 @@ def _mode_of(path: String) -> Int:
     """The st_mode permission bits of `path` via libc stat(2), or -1 on error. Uses the
     macOS `stat` layout (st_mode is a uint16 at byte offset 4 in `struct stat`).
     """
-    var buf = alloc[UInt8](256)
+    var buf = unsafe_alloc[UInt8](256)
     for i in range(256):
-        buf[i] = 0
+        buf[unsafe_offset=i] = 0
     var rc = external_call["stat", c_int](path.unsafe_ptr(), buf)
     var mode = -1
     if Int(rc) == 0:
-        var lo = Int(buf[4])
-        var hi = Int(buf[5])
+        var lo = Int(buf[unsafe_offset=4])
+        var hi = Int(buf[unsafe_offset=5])
         mode = ((hi << 8) | lo) & 0o777
-    buf.free()
+    buf.unsafe_free()
     return mode
 
 

@@ -11,7 +11,9 @@ from it with no risk of an import cycle. It holds the process-wide knobs
 Pure moves out of server.mojo — behaviour is identical.
 """
 
-from std.memory import alloc, UnsafePointer
+from std.memory.alloc import unsafe_alloc
+
+from std.memory import UnsafePointer
 from std.os import getenv
 from std.ffi import external_call, c_char, c_int
 
@@ -77,10 +79,10 @@ def _config_dir() -> String:
     return getenv("HOME", ".") + "/Library/Application Support/Millfolio/data"
 
 
-def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
+def _cstr(s: String) -> Pointer[c_char, MutUntrackedOrigin]:
     """NUL-terminated C string for `external_call` (caller `.free()`s it)."""
     var n = s.byte_length()
-    var p = alloc[c_char](n + 1)
+    var p = unsafe_alloc[c_char](n + 1)
     var sp = s.unsafe_ptr()
     for i in range(n):
         (p.unsafe_offset(i)).unsafe_write(c_char(Int(sp[unsafe_offset=i])))
@@ -112,9 +114,7 @@ def _epoch_s() -> Int64:
     """Unix epoch seconds, right now — time(2) with a NULL arg. For stats timestamps
     (perf_counter_ns is monotonic, not wall-clock, so it can't date a record).
     """
-    var null = UnsafePointer[NoneType, MutUntrackedOrigin](
-        unsafe_from_address=Int(0)
-    )
+    var null = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=Int(0))
     return external_call["time", Int64](null)
 
 

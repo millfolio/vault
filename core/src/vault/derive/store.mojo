@@ -463,9 +463,7 @@ def unlock():
 
 def _epoch_s() -> Int64:
     """Unix epoch seconds (time(2) with a NULL arg) — for the pause deadline."""
-    var null = UnsafePointer[NoneType, MutUntrackedOrigin](
-        unsafe_from_address=Int(0)
-    )
+    var null = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=Int(0))
     return external_call["time", Int64](null)
 
 

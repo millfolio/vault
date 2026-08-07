@@ -170,9 +170,9 @@ struct Buf(Movable):
         self.text = String("")
         self.blocks = List[Block]()
 
-    def __init__(out self, *, deinit take: Self):
-        self.text = take.text^
-        self.blocks = take.blocks^
+    def __init__(out self, *, deinit move: Self):
+        self.text = move.text^
+        self.blocks = move.blocks^
 
 
 def _init_buf() -> Buf:
@@ -185,7 +185,7 @@ def _init_buf() -> Buf:
 comptime _BUF = _Global["millfolio_result_v1", _init_buf]
 
 
-def _bufptr() raises -> UnsafePointer[Buf, MutUntrackedOrigin]:
+def _bufptr() raises -> Pointer[Buf, MutUntrackedOrigin]:
     return _BUF.get_or_create_ptr()
 
 

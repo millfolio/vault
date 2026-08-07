@@ -1247,7 +1247,7 @@ def _field_to_tags(s: String) raises -> List[String]:
 
 
 def txn_rows_to_tsv(rows: List[TxnRow]) raises -> String:
-    """alias <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc <TAB>
+    """`alias` <TAB> date <TAB> amount <TAB> direction <TAB> escaped_desc <TAB>
     comma-joined-tags <TAB> added_gen <TAB> year <TAB> escaped_merchant <TAB>
     country <TAB> state <TAB> escaped_city <TAB> zip, one per line. Trailing columns
     are append-only for backward compatibility: rows written before `tags`/

@@ -39,7 +39,7 @@ comptime EMBED_DIM = 1024
 
 
 def handle_vault(
-    st: UnsafePointer[MillfolioState, MutUntrackedOrigin]
+    st: Pointer[MillfolioState, MutUntrackedOrigin]
 ) raises -> Response:
     """The vault view: the INDEXED files + index stats, read from the engine's
     manifest.tsv (written by `mill index`). Reflects what was actually indexed

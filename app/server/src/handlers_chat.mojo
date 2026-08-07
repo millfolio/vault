@@ -146,7 +146,7 @@ def _tag_proposal_in_program(code: String) raises -> List[String]:
 
 
 def handle_chat(
-    st: UnsafePointer[MillfolioState, MutUntrackedOrigin], req: Request
+    st: Pointer[MillfolioState, MutUntrackedOrigin], req: Request
 ) raises -> Response:
     """POST /chat — one-shot: run the private-vault codegen loop over the served
     vault dir and return the answer. Needs the long-lived harness off
@@ -376,7 +376,7 @@ struct WsSink(DeltaSink, Movable):
         self.chars += text.byte_length()
         if self.chars - self.last >= 200:
             self.last = self.chars
-            var conn = UnsafePointer[WsConnection, MutUntrackedOrigin](
+            var conn = Pointer[WsConnection, MutUntrackedOrigin](
                 unsafe_from_address=self.conn_addr
             )
             conn[].send_text(
@@ -570,7 +570,7 @@ def on_connect(mut conn: WsConnection) raises:
             _t = perf_counter_ns()
             if getenv("MILLFOLIO_STREAM_CODEGEN", "") != "":
                 # Stream the program — update the "codegen" line live with its size.
-                var sink = WsSink(Int(UnsafePointer(to=conn)))
+                var sink = WsSink(Int(Pointer(to=conn)))
                 code = harness.vault_codegen_stream(question, manifest, sink)
             else:
                 code = harness.vault_codegen(question, manifest)
@@ -734,7 +734,7 @@ def on_connect(mut conn: WsConnection) raises:
         conn.send_text(
             status("compile", "Compiling the generated program", "running")
         )
-        _t = perf_counter_ns()
+        var _t = perf_counter_ns()
         var fixes = harness.vault_build(code)
         _bump(api_names, api_count, api_ms, "compile", 1, _ms_since(_t))
         if fixes > 0:

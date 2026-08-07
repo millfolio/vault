@@ -11,7 +11,7 @@ itself is read/written by PATH with Mojo file I/O (libc pread/pwrite did not per
 reliably here). Unit-tested by `test/runqueue_test.mojo`.
 """
 from std.ffi import external_call, c_char
-from std.memory import alloc
+from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from flare.prelude import *  # MutUntrackedOrigin
 
@@ -32,9 +32,9 @@ def runq_path() -> String:
     )
 
 
-def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
+def _cstr(s: String) -> Pointer[c_char, MutUntrackedOrigin]:
     var n = s.byte_length()
-    var p = alloc[c_char](n + 1)
+    var p = unsafe_alloc[c_char](n + 1)
     var sp = s.unsafe_ptr()
     for i in range(n):
         (p.unsafe_offset(i)).unsafe_write(c_char(Int(sp[unsafe_offset=i])))
@@ -44,7 +44,7 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
 
 def _lock() -> Int32:
     var cpath = _cstr(runq_path() + ".lock")
-    var fd = external_call["open", Int32](
+    var fd = external_call["open", Int32, num_fixed_args=2](
         cpath, Int32(_O_RDWR | _O_CREAT), Int32(0o600)
     )
     cpath.unsafe_free()

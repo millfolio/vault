@@ -72,7 +72,7 @@ the swap point is `default_queue_store()` below (and, for a runtime config flag,
 needs a Mojo `libsqlite3` FFI binding that doesn't exist yet — out of scope here.
 """
 from std.ffi import external_call, c_char, c_int
-from std.memory import alloc
+from std.memory.alloc import unsafe_alloc
 from std.os import getenv, remove
 from std.os.path import exists
 from flare.prelude import *  # MutUntrackedOrigin
@@ -171,9 +171,9 @@ def work_queue_path() -> String:
 # ── libc lock/rename plumbing (pure — take their paths as args) ────────────────
 
 
-def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
+def _cstr(s: String) -> Pointer[c_char, MutUntrackedOrigin]:
     var n = s.byte_length()
-    var p = alloc[c_char](n + 1)
+    var p = unsafe_alloc[c_char](n + 1)
     var sp = s.unsafe_ptr()
     for i in range(n):
         (p.unsafe_offset(i)).unsafe_write(c_char(Int(sp[unsafe_offset=i])))
@@ -193,7 +193,7 @@ def _chmod(path: String, mode: Int):
 
 def _lock_path(lock_path: String) -> Int32:
     var cpath = _cstr(lock_path)
-    var fd = external_call["open", Int32](
+    var fd = external_call["open", Int32, num_fixed_args=2](
         cpath, Int32(_O_RDWR | _O_CREAT), Int32(0o600)
     )
     cpath.unsafe_free()
@@ -593,7 +593,7 @@ def default_queue_store() -> FileQueueStore:
 
 
 def operations_log_path() -> String:
-    """operations.jsonl — completed index/reindex/backfill runs. `MILLFOLIO_OPS_FILE`
+    """`operations.jsonl` — completed index/reindex/backfill runs. `MILLFOLIO_OPS_FILE`
     overrides; else beside the other logs under the data dir."""
     return String(
         getenv(
@@ -603,7 +603,7 @@ def operations_log_path() -> String:
 
 
 def stats_log_path() -> String:
-    """stats.jsonl — per-question usage records. `MILLFOLIO_STATS_FILE` overrides.
+    """`stats.jsonl` — per-question usage records. `MILLFOLIO_STATS_FILE` overrides.
     """
     return String(
         getenv("MILLFOLIO_STATS_FILE", _storage_config_dir() + "/stats.jsonl")
@@ -611,7 +611,7 @@ def stats_log_path() -> String:
 
 
 def asks_log_path() -> String:
-    """asks.jsonl — full per-ask history (question + generated program + answer).
+    """`asks.jsonl` — full per-ask history (question + generated program + answer).
     `MILLFOLIO_ASKS_FILE` overrides."""
     return String(
         getenv("MILLFOLIO_ASKS_FILE", _storage_config_dir() + "/asks.jsonl")
@@ -619,7 +619,7 @@ def asks_log_path() -> String:
 
 
 def millwright_log_path() -> String:
-    """millwright.jsonl — the dashboard-spec VERSION CHAIN (append-only; one
+    """`millwright.jsonl` — the dashboard-spec VERSION CHAIN (append-only; one
     immutable version per line: hash, parent, ts, author, message, spec). List /
     diff / revert read this log; the ACTIVE version is the `KV_MILLWRIGHT_ACTIVE`
     marker, so reverting never rewrites history. `MILLFOLIO_MILLWRIGHT_FILE`

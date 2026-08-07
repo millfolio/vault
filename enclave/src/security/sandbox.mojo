@@ -25,6 +25,7 @@ Implementation notes / honest TODOs:
 
 from std.ffi import external_call, c_int, c_char, CStringSlice
 from std.memory import UnsafePointer, stack_allocation
+from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from logging import log
 from vaultcfg import resource_path, vault_index_dir
@@ -41,10 +42,10 @@ comptime _OUT_MODE: c_int = 0o644  # rw-r--r-- for the capture file
 comptime _WNOHANG: c_int = 1  # waitpid(2) flag — return immediately if no child has exited (macOS)
 
 # A NULL `char*` / `void*` — argv terminator, attrp, etc.
-comptime _NULL_CHARP = UnsafePointer[c_char, MutUntrackedOrigin](
+comptime _NULL_CHARP = Pointer[c_char, MutUntrackedOrigin](
     unsafe_from_address=Int(0)
 )
-comptime _NULL_VOIDP = UnsafePointer[NoneType, MutUntrackedOrigin](
+comptime _NULL_VOIDP = Pointer[NoneType, MutUntrackedOrigin](
     unsafe_from_address=Int(0)
 )
 
@@ -68,10 +69,10 @@ def _exit_code_from_status(status: Int) -> Int:
     return (status >> 8) & 0xFF
 
 
-def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
+def _cstr(s: String) -> Pointer[c_char, MutUntrackedOrigin]:
     """malloc a NUL-terminated C copy of `s`. Caller owns it — `_free_cstr`."""
     var n = s.byte_length()
-    var p = alloc[c_char](n + 1)
+    var p = unsafe_alloc[c_char](n + 1)
     var sp = s.unsafe_ptr()  # UnsafePointer[UInt8]
     for i in range(n):
         (p.unsafe_offset(i)).unsafe_write(c_char(Int(sp[unsafe_offset=i])))
@@ -80,7 +81,7 @@ def _cstr(s: String) -> UnsafePointer[c_char, MutUntrackedOrigin]:
 
 
 def _raw_environ() -> (
-    UnsafePointer[UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
+    Pointer[Pointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
 ):
     """The live process `environ` (`char**`). On macOS the global isn't directly
     linkable, so go through `_NSGetEnviron()` which returns `char***`; deref once.
@@ -89,17 +90,15 @@ def _raw_environ() -> (
     below, never the raw parent environ."""
     var pp = external_call[
         "_NSGetEnviron",
-        UnsafePointer[
-            UnsafePointer[
-                UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin
-            ],
+        Pointer[
+            Pointer[Pointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin],
             MutUntrackedOrigin,
         ],
     ]()
     return pp[]
 
 
-def _cstr_to_string(p: UnsafePointer[c_char, MutUntrackedOrigin]) -> String:
+def _cstr_to_string(p: Pointer[c_char, MutUntrackedOrigin]) -> String:
     """Materialize a NUL-terminated C string into an owned Mojo `String`."""
     return String(
         StringSlice(
@@ -161,7 +160,7 @@ def _env_forward(key: String) -> Bool:
 
 
 def _child_envp() -> (
-    UnsafePointer[UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
+    Pointer[Pointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
 ):
     """Build the minimal, allowlisted `char**` envp handed to the sandboxed
     compile + run children. Iterates the live parent environ and copies ONLY the
@@ -179,7 +178,7 @@ def _child_envp() -> (
             kept.append(entry)
         i += 1
     var n = len(kept)
-    var out = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
+    var out = unsafe_alloc[Pointer[c_char, MutUntrackedOrigin]](n + 1)
     for j in range(n):
         (out.unsafe_offset(j)).unsafe_write(_cstr(kept[j]))
     (out.unsafe_offset(n)).unsafe_write(_NULL_CHARP)
@@ -187,9 +186,7 @@ def _child_envp() -> (
 
 
 def _free_envp(
-    envp: UnsafePointer[
-        UnsafePointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin
-    ]
+    envp: Pointer[Pointer[c_char, MutUntrackedOrigin], MutUntrackedOrigin]
 ):
     """Free a `_child_envp` array: each owned C string, then the array itself.
     """
@@ -217,7 +214,7 @@ def _spawn_capture(argv: List[String], out_path: String) raises -> Int:
         raise Error("_spawn_capture: empty argv")
 
     # Build NULL-terminated char** argv. Each entry is an owned C string.
-    var cargv = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
+    var cargv = unsafe_alloc[Pointer[c_char, MutUntrackedOrigin]](n + 1)
     for i in range(n):
         (cargv.unsafe_offset(i)).unsafe_write(_cstr(argv[i]))
     (cargv.unsafe_offset(n)).unsafe_write(_NULL_CHARP)
@@ -309,7 +306,7 @@ def _spawn_async(argv: List[String], out_path: String) raises -> c_int:
     if n == 0:
         raise Error("_spawn_async: empty argv")
 
-    var cargv = alloc[UnsafePointer[c_char, MutUntrackedOrigin]](n + 1)
+    var cargv = unsafe_alloc[Pointer[c_char, MutUntrackedOrigin]](n + 1)
     for i in range(n):
         (cargv.unsafe_offset(i)).unsafe_write(_cstr(argv[i]))
     (cargv.unsafe_offset(n)).unsafe_write(_NULL_CHARP)
@@ -400,7 +397,7 @@ def _canonical(var path: String) raises -> String:
     macOS (SPIKE.md). The path must exist."""
     var buf = stack_allocation[4096, UInt8]()
     buf[unsafe_offset=0] = 0
-    _ = external_call["realpath", UnsafePointer[c_char, MutUntrackedOrigin]](
+    _ = external_call["realpath", Pointer[c_char, MutUntrackedOrigin]](
         path.as_c_string_slice(), buf.unsafe_bitcast[c_char]()
     )
     if Int(buf[unsafe_offset=0]) == 0:

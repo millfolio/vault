@@ -22,7 +22,9 @@ runqueue, vault.storage, vault.derive.*, vault.index.manifest, osutil, store,
 events, logging, json) — never server.mojo.
 """
 
-from std.memory import alloc, UnsafePointer
+from std.memory.alloc import unsafe_alloc
+
+from std.memory import UnsafePointer
 from std.os import getenv, remove
 from std.os.path import isfile, isdir, exists, getsize
 from std.ffi import external_call, c_char, c_int
@@ -449,8 +451,8 @@ def _self_exe_path() -> String:
     separate PROCESS, so the demo-zip download's flare client runs off the serving
     reactor. Empty on failure (the caller treats that as a download error)."""
     comptime CAP = 4096
-    var buf = alloc[UInt8](CAP)
-    var sizep = alloc[UInt32](1)
+    var buf = unsafe_alloc[UInt8](CAP)
+    var sizep = unsafe_alloc[UInt32](1)
     sizep[unsafe_offset=0] = UInt32(CAP)
     var rc = external_call["_NSGetExecutablePath", Int32](buf, sizep)
     sizep.unsafe_free()

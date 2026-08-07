@@ -34,7 +34,9 @@ live in their `handlers_*` module.
     pixi run build   # -> build/millfolio-server, listens on 127.0.0.1:10000
 """
 
-from std.memory import alloc, UnsafePointer
+from std.memory.alloc import unsafe_alloc
+
+from std.memory import UnsafePointer
 from std.os import getenv, makedirs
 
 
@@ -94,7 +96,7 @@ from httputil import (
 
 @fieldwise_init
 struct Api(Copyable, Handler, Movable):
-    var st: UnsafePointer[MillfolioState, MutUntrackedOrigin]
+    var st: Pointer[MillfolioState, MutUntrackedOrigin]
 
     def serve(self, req: Request) raises -> Response:
         """Anti-CSRF / anti-DNS-rebinding gate in front of `_route`.
@@ -378,7 +380,7 @@ def main() raises:
     var harness = build_vault_harness(cfg, vault_dir)
 
     var st = MillfolioState(harness^, vault_dir^)
-    var sp = alloc[MillfolioState](1)
+    var sp = unsafe_alloc[MillfolioState](1)
     sp.unsafe_write(st^)
     var api = Api(sp)
 

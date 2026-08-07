@@ -1,4 +1,4 @@
-"""all_transactions() / spending() — the whole-vault transaction helpers, driven
+"""`all_transactions()` / `spending()` — the whole-vault transaction helpers, driven
 end-to-end over a hermetically-built index. `pixi run test-spending`.
 
 Guards the two tool-surface helpers a generated program uses instead of

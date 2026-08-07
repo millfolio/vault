@@ -624,7 +624,7 @@ def progress(msg: String):
     AFTER every raw progress write, so the answer still comes last."""
     var line = String(PROGRESS_SENTINEL) + msg + "\n"
     var n = line.byte_length()
-    var p = line.unsafe_ptr().bitcast[c_char]()
+    var p = line.unsafe_ptr().unsafe_bitcast[c_char]()
     _ = external_call["write", Int](Int(1), p, Int(n))
 
 
@@ -642,7 +642,7 @@ def _log_local(sent: String, got: String) raises:
     line += _replace_all(_replace_all(got, "\n", "\\n"), "\r", " ")
     line += "\n"
     var n = line.byte_length()
-    var p = line.unsafe_ptr().bitcast[c_char]()
+    var p = line.unsafe_ptr().unsafe_bitcast[c_char]()
     _ = external_call["write", Int](Int(1), p, Int(n))
 
 

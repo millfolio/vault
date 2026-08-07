@@ -17,12 +17,12 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")/.." && pwd)"   # vault/
 BS="$DIR/cli/Sources/MillfolioCore/Bootstrapper.swift"
 
-pin="$(grep -oE '1\.0\.0b3\.dev[0-9]+' "$DIR/pixi.toml" | head -1)"
+pin="$(grep -oE 'mojo = "==[^"]+' "$DIR/pixi.toml" | sed 's/mojo = "==//' | head -1)"
 [ -n "$pin" ] || { echo "check-mojo-version: no mojo pin found in $DIR/pixi.toml" >&2; exit 1; }
 
 fail=0
 for name in mojoVersion enclaveMojoVersion; do
-    v="$(grep -oE "${name} = \"1\.0\.0b3\.dev[0-9]+" "$BS" | grep -oE '1\.0\.0b3\.dev[0-9]+' | head -1)"
+    v="$(grep -oE "${name} = \"[^\"]+" "$BS" | sed "s/${name} = \"//" | head -1)"
     if [ "$v" != "$pin" ]; then
         echo "✗ Bootstrapper.$name = '${v:-<missing>}' but pixi.toml pins '$pin'." >&2
         echo "  Update the CLI constant to match — a version-locked vault.mojoc" >&2

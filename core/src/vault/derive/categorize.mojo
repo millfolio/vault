@@ -129,7 +129,7 @@ def filter_tags_by_direction(
 
 @fieldwise_init
 struct Rule(Copyable, Movable):
-    """One tag and how it's assigned. A rule is ONE of two kinds:
+    """One tag and how it's assigned. A rule is ONE of two kinds.
 
     - **deterministic** (the common, cheap, pure case): ``keywords`` /
       ``excludes`` matched as case-insensitive SUBSTRINGS of the description; it
@@ -459,7 +459,7 @@ def _valid_tag_name(name: String) -> Bool:
 
 def parse_rules(text: String) raises -> List[Rule]:
     """Parse user category rules from the config-file format. One rule per
-    non-comment line, in ONE of two forms:
+    non-comment line, in ONE of two forms.
 
         <tag> = <keyword>, <keyword>, ...   (deterministic — substring match)
         <tag> : <yes/no question>           (ML — on-device model at index time)
