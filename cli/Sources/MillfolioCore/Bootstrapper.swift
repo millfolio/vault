@@ -59,12 +59,12 @@ public final class Bootstrapper: ObservableObject {
     public var isBusy: Bool { if case .running = phase { return true }; return false }
 
     // ── pinned manifest (keep in sync with inference-server/pixi.lock) ─────────────
-    public static let mojoVersion = "1.0.0rc3"
+    public static let mojoVersion = "1.0.0"
     /// The `max-core` conda package (lib/mojo/max.mojoc + layout.mojoc): as of the
     /// Mojo 1.0 cycle, std.gpu.{compute,host,memory,sync} live in the `max` Mojo
     /// package, so compiling the engine/bundle sources needs it next to the compiler.
     /// Keep in lockstep with `mojoVersion` (rc/dev cuts pair 1:1 with a max-core cut).
-    public static let maxCoreVersion = "26.5.0rc3"
+    public static let maxCoreVersion = "26.5.0"
     public static let condaChannel = "https://conda.modular.com/max-nightly"
     /// Default model served by the server. The 3B is int4-friendly and the
     /// quality target; its tokenizer.json is read directly by the engine.
@@ -96,7 +96,7 @@ public final class Bootstrapper: ObservableObject {
     // every repo pins one nightly now, so it shares the single `mojoPrefix` toolchain
     // (no separate download). It's a one-shot CLI (not a daemon), so "start" opens a
     // ready-to-use Terminal rather than launching a server.
-    public static let enclaveMojoVersion = "1.0.0rc3"
+    public static let enclaveMojoVersion = "1.0.0"
     private var enclaveMojoCompilerURL: URL {
         URL(string: "\(Self.condaChannel)/osx-arm64/mojo-compiler-\(Self.enclaveMojoVersion)-release.conda")!
     }

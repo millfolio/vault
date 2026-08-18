@@ -9,10 +9,10 @@ channels = [
 platforms = ["osx-arm64"]
 
 [dependencies]
-mojo = "==1.0.0rc3"
+mojo = "==1.0.0"
 # The `max` Mojo package (std.gpu moved there in 1.0); needed to compile the
 # json sibling sources (json/gpu imports max.gpu). Keep in lockstep with mojo.
-max = "==26.5.0rc3"
+max = "==26.5.0"
 # FFI runtime deps shared by both binaries (flare TLS/HTTP, zlib FlateDecode for
 # PDFs, brotli for Content-Encoding). The shims are built into $CONDA_PREFIX/lib
 # by the `ffi` task below.
