@@ -19,7 +19,8 @@ jobs:
     runs-on: macos-14
     steps:
       # Lay the repos out as siblings, matching the dev layout the package script
-      # and the `-I ../flare -I ../json -I ../jinja2.mojo/src` build assume.
+      # and the `-I ../flare -I ../json` build assume (jinja2 stays checked out
+      # for source vendoring into the enclave bundle).
       - uses: actions/checkout@v6
         with:
           path: enclave

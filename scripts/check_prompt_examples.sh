@@ -13,10 +13,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"   # vault/
 PROMPT="$ROOT/enclave/resources/enclave-system.md"
 MOJO="${MOJO:-mojo}"
 # The SAME include set the vault binary builds with (core/src + the sibling libs).
+# Tin packages (lancedb, pdf, zlib, csv, docx) resolve from the pixi env.
 INC=(-I "$ROOT/core/src"
-     -I "$ROOT/../flare" -I "$ROOT/../json" -I "$ROOT/../lancedb.mojo/src"
-     -I "$ROOT/../pdftotext.mojo/src" -I "$ROOT/../zlib.mojo/src"
-     -I "$ROOT/../csv.mojo/src" -I "$ROOT/../docx.mojo/src")
+     -I "$ROOT/../flare" -I "$ROOT/../json")
 
 [ -f "$PROMPT" ] || { echo "prompt not found: $PROMPT" >&2; exit 1; }
 # The examples import `from vault import *`, whose transitive deps live in the SIBLING

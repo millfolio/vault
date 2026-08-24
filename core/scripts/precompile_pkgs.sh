@@ -20,59 +20,41 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"          # vault/core
 FLARE="${FLARE:-$ROOT/../../flare}"
 JSON="${JSON:-$ROOT/../../json}"
-LANCEDB="${LANCEDB:-$ROOT/../../lancedb.mojo}"
-PDFTOTEXT="${PDFTOTEXT:-$ROOT/../../pdftotext.mojo}"
-ZLIB="${ZLIB:-$ROOT/../../zlib.mojo}"
-CSV="${CSV:-$ROOT/../../csv.mojo}"
-DOCX="${DOCX:-$ROOT/../../docx.mojo}"
 OUT="${1:-$ROOT/build/pkgs}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac
 
 MOJO="${MOJO:-mojo}"
 
 rm -rf "$OUT"; mkdir -p "$OUT"
-ASM="$(mktemp -d)"; trap 'rm -rf "$ASM"' EXIT
 
-# Give a loose single-file lib module ("$2".mojo at "$1") a package shape named
-# by its import name ("$2"): a dir <name>/ with __init__.mojo re-exporting the
-# module as a submodule. Keeps the lib REPOS as-is — we assemble the package dir
-# here at package time.
-make_pkg_dir() {  # <src-module-file> <import-name>
-    local src="$1" name="$2"
-    local d="$ASM/$name"
-    mkdir -p "$d"
-    cp "$src" "$d/$name.mojo"
-    printf 'from %s.%s import *\n' "$name" "$name" > "$d/__init__.mojo"
+# The tin libs (zlib, csv, lancedb, pdf, docx) are pixi source dependencies
+# now: the env already holds their compiled packages under
+# $CONDA_PREFIX/lib/mojo, built from the registry-pinned git revs. Ship those
+# — no source assembly, and the set matches what the workspace builds against.
+echo "==> copying tin packages from the pixi env" >&2
+ENV_PKGS="${CONDA_PREFIX:?run via pixi}/lib/mojo"
+copy_tin() {  # <import-name>
+    local name="$1"
+    if [[ -f "$ENV_PKGS/$name.mojoc" ]]; then
+        cp "$ENV_PKGS/$name.mojoc" "$OUT/$name.mojoc"
+    else
+        cp "$ENV_PKGS/$name.mojopkg" "$OUT/$name.mojoc"
+    fi
 }
+copy_tin zlib
+copy_tin csv
+copy_tin lancedb
+copy_tin pdf
+copy_tin docx
 
-echo "==> assembling loose-lib package dirs" >&2
-make_pkg_dir "$ZLIB/src/zlib.mojo"          zlib
-make_pkg_dir "$CSV/src/csv.mojo"            csv
-make_pkg_dir "$LANCEDB/src/lancedb.mojo"    lancedb
-make_pkg_dir "$PDFTOTEXT/src/pdf.mojo"      pdf
-make_pkg_dir "$DOCX/src/docx.mojo"          docx
-
-# `mojo precompile` compiles EVERY file in a package dir (unlike `mojo build`,
-# which only pulls the submodules actually imported). The sibling lib REPOS are
-# precompiled AS-IS: this script patches, trims, or deletes NOTHING. The
-# package-shaped libs (json, flare) compile straight from their sibling checkouts
-# under the pinned nightly — json ships its full backend including the GPU path
-# (Apple Metal / CUDA), and flare's reflective `Extracted[H].serve` precompiles
-# cleanly. The loose single-file libs above were given a package SHAPE by
-# make_pkg_dir (a read-only wrapper dir), which never touches the sibling source.
 echo "==> precompiling in dependency order -> $OUT" >&2
 # Leaves first (no inter-lib deps), then ones that depend on them, then vault.
 #   zlib, csv, lancedb, json : leaves
 #   flare                    : imports `from json import …`
 #   pdf, docx                : import `from zlib import inflate`
 #   vault                    : imports all of the above + the std lib
-"$MOJO" precompile "$ASM/zlib"        -o "$OUT/zlib.mojoc"
-"$MOJO" precompile "$ASM/csv"         -o "$OUT/csv.mojoc"
-"$MOJO" precompile "$ASM/lancedb"     -o "$OUT/lancedb.mojoc"
 "$MOJO" precompile "$JSON/json"        -o "$OUT/json.mojoc"
 "$MOJO" precompile "$FLARE/flare" -I "$OUT" -o "$OUT/flare.mojoc"
-"$MOJO" precompile "$ASM/pdf"  -I "$OUT" -o "$OUT/pdf.mojoc"
-"$MOJO" precompile "$ASM/docx" -I "$OUT" -o "$OUT/docx.mojoc"
 "$MOJO" precompile "$ROOT/src/vault" -I "$OUT" -o "$OUT/vault.mojoc"
 
 echo "==> precompiled package set:" >&2

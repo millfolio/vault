@@ -2,6 +2,7 @@
 name = "vault"
 version = "0.1.0"
 description = "millfolio personal data vault — local Q&A over your own documents. One build for the two Mojo binaries (core=vault, sandbox=privacy harness); the Swift cli builds separately."
+preview = ["pixi-build"]
 channels = [
     "https://conda.modular.com/max-nightly",
     "conda-forge",
@@ -22,23 +23,30 @@ zlib             = ">=1.3.1,<2"
 libbrotlicommon  = ">=1,<2"
 libbrotlidec     = ">=1,<2"
 libbrotlienc     = ">=1,<2"
+csv = { git = "https://github.com/millfolio/csv.mojo.git", rev = "5f174984e78fda46b84f2c261aa80dc6956578f7" }
+pdftotext = { git = "https://github.com/millfolio/pdftotext.mojo.git", rev = "9049de8ea1550edd273923e2eb73744fd32332ab" }
+zlib-mojo = { git = "https://github.com/millfolio/zlib.mojo.git", rev = "dcf51ee02f8febe3f47c36e61dd0f55459e8181c" }
+docx = { git = "https://github.com/millfolio/docx.mojo.git", rev = "87c6e6114347fa54fceed1404caf440d8537e361" }
+lancedb-mojo = { git = "https://github.com/millfolio/lancedb.mojo.git", rev = "509f9d80395d3278492e43092a3916719867d17a" }
+logging = { git = "https://github.com/millfolio/logging.mojo.git", rev = "f12881f9bcabdb4a3b16242a34d6328af442b563" }
 
 # Libraries are sibling repos under the millfolio org, consumed via `-I` (no path
-# deps): ../flare ../json ../lancedb.mojo ../pdftotext.mojo ../zlib.mojo ../csv.mojo
-# ../docx.mojo ../jinja2.mojo. The engine (../engine) is NOT a build dep — it's a runtime
+# deps): ../flare ../json, plus the mojoshelf tins (csv, docx, pdftotext, zlib-mojo,
+# lancedb-mojo, logging) as pixi source dependencies — built into the env, no -I flags.
+# The engine (../engine) is NOT a build dep — it's a runtime
 # embedding server, vendored as a binary at install.
 
 [tasks]
 # Build every FFI shim both binaries need into this env's $CONDA_PREFIX/lib:
 #   libzlibmojo (PDF FlateDecode), libflare_tls/http (HTTP client),
 #   liblancedbmojo (the Rust cdylib vector store — slow on first build).
-ffi = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh; bash ../lancedb.mojo/ffi/build.sh'"
+ffi = "bash -c 'source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh'"
 
 # core = the vault binary (indexer, embeddings, tool surface, ask loop).
-vault = { cmd = "mkdir -p build && mojo build core/src/millfolio.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/vault", depends-on = ["ffi"] }
+vault = { cmd = "mkdir -p build && mojo build core/src/millfolio.mojo -I core/src -I ../flare -I ../json -o build/vault", depends-on = ["ffi"] }
 
 # enclave = the privacy harness (frontier/local broker, codegen, egress guard).
-enclave = { cmd = "mkdir -p build && mojo build enclave/src/enclave.mojo -I core/src -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/enclave", depends-on = ["ffi"] }
+enclave = { cmd = "mkdir -p build && mojo build enclave/src/enclave.mojo -I core/src -I ../flare -I ../json -o build/enclave", depends-on = ["ffi"] }
 
 # the "one mojo" — both Mojo binaries.
 build = { depends-on = ["vault", "enclave"] }
@@ -73,11 +81,11 @@ test-relevance = { cmd = "mkdir -p build && mojo build core/test/index/relevance
 # money invariant ({type,raw,text}, never a bare float), typed count/date, and the
 # kpi/table/series blocks + optional hint. Builds like a generated program (the
 # vault include set); pure at runtime (no FFI). Guards COMPUTE_VS_RENDER Phase 1.
-test-result = { cmd = "mkdir -p build && mojo build core/test/result_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/result-test && ./build/result-test" }
+test-result = { cmd = "mkdir -p build && mojo build core/test/result_test.mojo -I core/src -I ../flare -I ../json -o build/result-test && ./build/result-test" }
 # Gate: `_strip_progress` drops the RESULT-SPEC line (and every other sentinel line)
 # from the captured answer, leaving only the real reply text. Guards the seam that
 # keeps the serialized spec out of the message TEXT (it rides the message.result field).
-test-strip = { cmd = "mkdir -p build && mojo build enclave/test/strip_test.mojo -I enclave/src -I core/src -I ../flare -I ../json -I ../jinja2.mojo/src -I ../logging.mojo/src -o build/strip-test && ./build/strip-test" }
+test-strip = { cmd = "mkdir -p build && mojo build enclave/test/strip_test.mojo -I enclave/src -I core/src -I ../flare -I ../json -o build/strip-test && ./build/strip-test" }
 # Gate: the deterministic tag matcher (vault.derive.categorize) — seed taxonomy
 # tags phone/travel/restaurant/groceries/health, multi-valued, and a credit-card/
 # transfer line with a digit run gets NO tag (guards the on-device classifier's
@@ -96,7 +104,7 @@ test-classify = { cmd = "mkdir -p build && mojo build core/test/derive/classify_
 # wrong-direction rows (exercised on a no-eligible-rows path, so no network). That
 # ml_backfill_rows call traverses store→classify→flare, so this links the full
 # sibling set like test-result (json/lancedb/pdftotext/zlib/csv/docx).
-test-store = { cmd = "mkdir -p build && mojo build core/test/derive/store_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/store-test && ./build/store-test" }
+test-store = { cmd = "mkdir -p build && mojo build core/test/derive/store_test.mojo -I core/src -I ../flare -I ../json -o build/store-test && ./build/store-test" }
 # Gate: the DOC storage seam (vault.storage — DocStore/FileDocStore, Phase 2 slice B2).
 # The whole-document rewrites (categories.txt / manifest.tsv / indexed-paths.json) route
 # their read/write through one dir+key store: load-missing raises, save→load roundtrip,
@@ -123,7 +131,7 @@ test-missing-defaults = { cmd = "mkdir -p build && rm -rf build/missing-defaults
 # decision at the unit level (a full e2e build needs a live embed endpoint). Pinned
 # MILLFOLIO_DATA_DIR (hermetic). Pulls the sibling libs like test-result (index.mojo
 # links lancedb/flare/…).
-test-procversion = { cmd = "mkdir -p build && rm -rf build/procversion-data && MILLFOLIO_DATA_DIR=\"$PWD/build/procversion-data\" bash -c 'mojo build core/test/index/procversion_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/procversion-test && MILLFOLIO_DATA_DIR=\"$PWD/build/procversion-data\" ./build/procversion-test'" }
+test-procversion = { cmd = "mkdir -p build && rm -rf build/procversion-data && MILLFOLIO_DATA_DIR=\"$PWD/build/procversion-data\" bash -c 'mojo build core/test/index/procversion_test.mojo -I core/src -I ../flare -I ../json -o build/procversion-test && MILLFOLIO_DATA_DIR=\"$PWD/build/procversion-data\" ./build/procversion-test'" }
 # Gate: the GOLDEN-OUTPUT snapshot — the human-step guard for INDEX_PROCESSING_VERSION.
 # Pins the EXACT on-disk output of the pure pipeline parts that fill the index fields
 # (csv_transactions + parse_location, extract_transactions + statement_year, and the
@@ -132,7 +140,7 @@ test-procversion = { cmd = "mkdir -p build && rm -rf build/procversion-data && M
 # indexed output changes → the failure message tells you to bump INDEX_PROCESSING_VERSION
 # and refresh the golden. Links the sibling libs like test-procversion (imports index.mojo);
 # runs from vault root so the fingerprint net can read the source files.
-test-golden = { cmd = "mkdir -p build && mojo build core/test/index/golden_output_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/golden-test && ./build/golden-test" }
+test-golden = { cmd = "mkdir -p build && mojo build core/test/index/golden_output_test.mojo -I core/src -I ../flare -I ../json -o build/golden-test && ./build/golden-test" }
 # Gate: the PER-FILE / finalize refactor — build_index factored into index_one_file
 # (one file, committed) + finalize_index (prune + reconcile + retag) so the app-server
 # scheduler can pause between files. Drives the FULL index end-to-end (needs the
@@ -141,14 +149,14 @@ test-golden = { cmd = "mkdir -p build && mojo build core/test/index/golden_outpu
 # BYTE (manifest/transactions/chunks), a single step leaves a consistent partial index,
 # and finalize prunes a removed file. Pinned MILLFOLIO_DATA_DIR (hermetic); links the
 # sibling libs like test-store (index.mojo pulls lancedb/flare/…).
-test-index-steps = { cmd = "mkdir -p build && rm -rf build/index-steps-data && MILLFOLIO_DATA_DIR=\"$PWD/build/index-steps-data\" MILLFOLIO_FAKE_EMBED=1 bash -c 'mojo build core/test/index/index_steps_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/index-steps-test && MILLFOLIO_DATA_DIR=\"$PWD/build/index-steps-data\" MILLFOLIO_FAKE_EMBED=1 ./build/index-steps-test'" }
+test-index-steps = { cmd = "mkdir -p build && rm -rf build/index-steps-data && MILLFOLIO_DATA_DIR=\"$PWD/build/index-steps-data\" MILLFOLIO_FAKE_EMBED=1 bash -c 'mojo build core/test/index/index_steps_test.mojo -I core/src -I ../flare -I ../json -o build/index-steps-test && MILLFOLIO_DATA_DIR=\"$PWD/build/index-steps-data\" MILLFOLIO_FAKE_EMBED=1 ./build/index-steps-test'" }
 # Gate: the VAULT run sandbox grants read to the dir the index was built from
 # (and falls back to the served vault dir when unindexed — never "" or "/").
 # Regression guard for the vault-dir mismatch fix.
-test-sandbox = { cmd = "mkdir -p build && mojo build enclave/test/sandbox_test.mojo -I enclave/src -I ../logging.mojo/src -o build/sandbox-test && ENCLAVE_HOME=\"$PWD/enclave\" ./build/sandbox-test" }
+test-sandbox = { cmd = "mkdir -p build && mojo build enclave/test/sandbox_test.mojo -I enclave/src -o build/sandbox-test && ENCLAVE_HOME=\"$PWD/enclave\" ./build/sandbox-test" }
 # Gate: run_poll preserves raw multi-byte UTF-8 (em-dash) in the streamed line —
 # no byte-by-byte Latin-1 re-encode. Regression guard for the mojibake title bug.
-test-emdash = { cmd = "mkdir -p build && mojo build enclave/test/emdash_utf8_test.mojo -I enclave/src -I ../logging.mojo/src -o build/emdash-utf8-test && ./build/emdash-utf8-test" }
+test-emdash = { cmd = "mkdir -p build && mojo build enclave/test/emdash_utf8_test.mojo -I enclave/src -o build/emdash-utf8-test && ./build/emdash-utf8-test" }
 # Gate: M/D statement dates fold with the statement's year into sortable ISO.
 test-dates = { cmd = "mkdir -p build && mojo build core/test/extract/dates_test.mojo -I core/src -o build/dates-test && ./build/dates-test" }
 # Gate: the relative-date wall-clock API (wall_clock/days_ago/months_ago/years_ago)
@@ -166,7 +174,7 @@ test-julian = { cmd = "mkdir -p build && mojo build core/test/extract/julian_tes
 # per-file transactions(); spending() keeps ordinary debits, excludes credits, and
 # excludes a (synthetically injected) debit tagged `transfers`. Links the sibling
 # libs like test-index-steps (tools/index pull lancedb/flare/…).
-test-spending = { cmd = "mkdir -p build && rm -rf build/spending-data && MILLFOLIO_DATA_DIR=\"$PWD/build/spending-data\" MILLFOLIO_FAKE_EMBED=1 MILLFOLIO_VAULT=\"$PWD/build/spending-data/vault\" bash -c 'mojo build core/test/tools/spending_test.mojo -I core/src -I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src -I ../zlib.mojo/src -I ../csv.mojo/src -I ../docx.mojo/src -o build/spending-test && MILLFOLIO_DATA_DIR=\"$PWD/build/spending-data\" MILLFOLIO_FAKE_EMBED=1 MILLFOLIO_VAULT=\"$PWD/build/spending-data/vault\" ./build/spending-test'" }
+test-spending = { cmd = "mkdir -p build && rm -rf build/spending-data && MILLFOLIO_DATA_DIR=\"$PWD/build/spending-data\" MILLFOLIO_FAKE_EMBED=1 MILLFOLIO_VAULT=\"$PWD/build/spending-data/vault\" bash -c 'mojo build core/test/tools/spending_test.mojo -I core/src -I ../flare -I ../json -o build/spending-test && MILLFOLIO_DATA_DIR=\"$PWD/build/spending-data\" MILLFOLIO_FAKE_EMBED=1 MILLFOLIO_VAULT=\"$PWD/build/spending-data/vault\" ./build/spending-test'" }
 # Gate: $/comma/paren money strings parse to Float64 (the "total spent" crash).
 test-amounts = { cmd = "mkdir -p build && mojo build core/test/extract/amounts_test.mojo -I core/src -o build/amounts-test && ./build/amounts-test" }
 # Gate: the invariant-aware transaction extractor reconciles SYNTHETIC statements

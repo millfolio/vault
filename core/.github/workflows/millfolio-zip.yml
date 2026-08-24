@@ -24,8 +24,9 @@ jobs:
     runs-on: macos-14
     steps:
       # Lay the repos out as siblings, matching the dev layout the package script
-      # and the `-I ../flare -I ../json -I ../lancedb.mojo/src -I ../pdftotext.mojo/src
-      # -I ../zlib.mojo/src` build assume.
+      # and the `-I ../flare -I ../json` build assume. The tin libs (lancedb,
+      # pdftotext, zlib, csv, docx) are pixi source dependencies — pixi install
+      # fetches and builds them; no sibling checkouts needed.
       - uses: actions/checkout@v6
         with:
           path: millfolio
@@ -37,26 +38,6 @@ jobs:
         with:
           repository: millfolio/json
           path: json
-      - uses: actions/checkout@v6
-        with:
-          repository: millfolio/lancedb.mojo
-          path: lancedb.mojo
-      - uses: actions/checkout@v6
-        with:
-          repository: millfolio/pdftotext.mojo
-          path: pdftotext.mojo
-      - uses: actions/checkout@v6
-        with:
-          repository: millfolio/zlib.mojo
-          path: zlib.mojo
-      - uses: actions/checkout@v6
-        with:
-          repository: millfolio/csv.mojo
-          path: csv.mojo
-      - uses: actions/checkout@v6
-        with:
-          repository: millfolio/docx.mojo
-          path: docx.mojo
 
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
