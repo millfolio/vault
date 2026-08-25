@@ -1,8 +1,9 @@
 $schema: 'https://moonrepo.dev/schemas/project.json'
 layer: 'application'
 tags: ['mojo', 'swift']
-# Mojo build-dep siblings (-I ../x). Affected-detection: rebuild vault when a dep's sources change.
-dependsOn: ['flare', 'json', 'lancedb', 'pdftotext', 'zlib', 'csv', 'jinja2']
+# Mojo build-dep siblings (-I ../x). The tin libs are pixi source deps now
+# (version bumps arrive via pixi.lock, which is in the task inputs).
+dependsOn: ['flare', 'json']
 
 tasks:
   # ── build / check ──────────────────────────────────────────────
@@ -11,10 +12,6 @@ tasks:
     toolchain: 'system'
     inputs: ['core/**/*.mojo', 'enclave/**/*', 'pixi.toml', 'pixi.lock']
     outputs: ['build/**/*']
-    # Serialize with lancedb:check — both build the same liblancedbmojo.dylib via
-    # lancedb's ffi/build.sh; concurrent builds corrupt it. See lancedb/moon.yml.
-    options:
-      mutex: 'lancedb-shim'
   test: # unit suite: sha256 + date/amount/transaction extractors + enclave sandbox/egress/budget
     command: 'pixi run test'
     toolchain: 'system'
