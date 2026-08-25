@@ -31,8 +31,14 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 # now: the env already holds their compiled packages under
 # $CONDA_PREFIX/lib/mojo, built from the registry-pinned git revs. Ship those
 # — no source assembly, and the set matches what the workspace builds against.
-echo "==> copying tin packages from the pixi env" >&2
-ENV_PKGS="${CONDA_PREFIX:?run via pixi}/lib/mojo"
+echo "==> copying tin packages from the vault workspace env" >&2
+# The vault ROOT workspace declares every tin dependency; the invoking env
+# (e.g. app/server) may not. TIN_PKGS_DIR overrides for special layouts.
+ENV_PKGS="${TIN_PKGS_DIR:-$ROOT/../.pixi/envs/default/lib/mojo}"
+if [[ ! -d "$ENV_PKGS" ]]; then
+    echo "==> $ENV_PKGS missing — pixi install for the vault workspace" >&2
+    ( cd "$ROOT/.." && pixi install )
+fi
 copy_tin() {  # <import-name>
     local name="$1"
     if [[ -f "$ENV_PKGS/$name.mojoc" ]]; then
