@@ -34,8 +34,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLARE="${FLARE:-$ROOT/../flare}"
 JSON="${JSON:-$ROOT/../json}"
-JINJA2="${JINJA2:-$ROOT/../jinja2.mojo}"
-LOGGING="${LOGGING:-$ROOT/../logging.mojo}"   # `from logging import log` (harness/sandbox)
 OUT="${1:-$ROOT/enclave.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac   # zip runs from a temp dir — need absolute
 PREFIX="${CONDA_PREFIX:?run via pixi — need CONDA_PREFIX for the flare FFI shims + their deps}"
@@ -66,9 +64,9 @@ cp "$ROOT/../pixi.toml" "$H/pixi.toml"
 
 echo "==> building prebuilt enclave binary" >&2
 # The SAME invocation the on-device installer used (Bootstrapper.installEnclaveEngine):
-# flare/json/jinja2/logging SOURCE + the vault pkgs (in-process tag reads).
+# flare/json SOURCE + the vault pkgs; jinja2/logging come from the pixi env.
 "$MOJO" build "$ROOT/src/enclave.mojo" \
-    -I "$FLARE" -I "$JSON" -I "$JINJA2/src" -I "$LOGGING/src" -I "$PKGS" \
+    -I "$FLARE" -I "$JSON" -I "$PKGS" \
     -o "$H/build/enclave"
 
 # Relocate the rpath: drop the CI $CONDA_PREFIX/lib (absent on the user's box), add

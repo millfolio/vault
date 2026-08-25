@@ -21,7 +21,7 @@ LIB="$ENGINE_SRC/.pixi/envs/default/lib"
 
 echo "==> building inference server (pixi: flare-tls + server)"
 ( cd "$ENGINE_SRC" && pixi run flare-tls >/dev/null && \
-  pixi run -- mojo build src/server.mojo -I ../jinja2.mojo/src -I ../flare -o build/millfolio-inference ) \
+  pixi run -- mojo build src/server.mojo -I ../flare -o build/millfolio-inference ) \
   || { echo "error: build failed"; exit 1; }
 
 echo "==> staging standalone → $DEST"

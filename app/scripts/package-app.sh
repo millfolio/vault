@@ -29,8 +29,6 @@ UMBRELLA="${UMBRELLA:-$(cd "$ROOT/.." && pwd)}"               # the vault repo r
 ENCLAVE="${ENCLAVE:-$UMBRELLA/enclave}"
 FLARE="${FLARE:-$UMBRELLA/../flare}"
 JSON="${JSON:-$UMBRELLA/../json}"
-JINJA2="${JINJA2:-$UMBRELLA/../jinja2.mojo}"
-LOGGING="${LOGGING:-$UMBRELLA/../logging.mojo}"
 OUT="${1:-$ROOT/millfolio-app.zip}"
 case "$OUT" in /*) ;; *) OUT="$(pwd)/$OUT" ;; esac       # zip runs from a temp dir — need absolute
 MOJO="${MOJO:-mojo}"
@@ -57,7 +55,7 @@ echo "==> building prebuilt millfolio-server" >&2
 "$MOJO" build "$ROOT/server/src/server.mojo" \
     -I "$ROOT/server/src" \
     -I "$ENCLAVE/src" \
-    -I "$FLARE" -I "$JSON" -I "$JINJA2/src" -I "$LOGGING/src" \
+    -I "$FLARE" -I "$JSON" \
     -I "$PKGS" \
     -o "$STAGE/build/millfolio-server"
 
