@@ -34,6 +34,7 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
+          pixi-version: v0.71.1
           manifest-path: enclave/pixi.toml
 
       # Node for the web UI build (package_enclave.sh runs `npm ci && npm run build`).

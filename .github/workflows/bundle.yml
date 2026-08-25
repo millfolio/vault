@@ -115,6 +115,7 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
+          pixi-version: v0.71.1
           manifest-path: vault/pixi.toml
           # conda packages are cached above via ~/Library/Caches/rattler (covers all
           # pixi envs, not just vault's); setup-pixi's own cache is redundant + its

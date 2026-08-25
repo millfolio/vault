@@ -57,6 +57,7 @@ jobs:
           restore-keys: mojo-cache-${{ runner.os }}-${{ hashFiles('vault/pixi.lock') }}-
       - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
+          pixi-version: v0.71.1
           manifest-path: vault/pixi.toml
       - name: Run the pure-Mojo test suite
         working-directory: vault
