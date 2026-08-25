@@ -27,8 +27,8 @@ csv = { git = "https://github.com/millfolio/csv.mojo.git", rev = "5f174984e78fda
 pdftotext = { git = "https://github.com/millfolio/pdftotext.mojo.git", rev = "9049de8ea1550edd273923e2eb73744fd32332ab" }
 zlib-mojo = { git = "https://github.com/millfolio/zlib.mojo.git", rev = "dcf51ee02f8febe3f47c36e61dd0f55459e8181c" }
 docx = { git = "https://github.com/millfolio/docx.mojo.git", rev = "87c6e6114347fa54fceed1404caf440d8537e361" }
-lancedb-mojo = { git = "https://github.com/millfolio/lancedb.mojo.git", rev = "509f9d80395d3278492e43092a3916719867d17a" }
 logging = { git = "https://github.com/millfolio/logging.mojo.git", rev = "f12881f9bcabdb4a3b16242a34d6328af442b563" }
+lancedb-mojo = { git = "https://github.com/millfolio/lancedb.mojo.git", rev = "d7959883bca864d3abf36aad30f4338c4fa51d76" }
 
 # Libraries are sibling repos under the millfolio org, consumed via `-I` (no path
 # deps): ../flare ../json, plus the mojoshelf tins (csv, docx, pdftotext, zlib-mojo,
